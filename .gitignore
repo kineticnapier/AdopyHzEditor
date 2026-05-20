@@ -35,6 +35,7 @@ htmlcov/
 *.user
 *.userosscache
 *.sln.docstates
+AGENTS.md
 
 # OS
 .DS_Store
