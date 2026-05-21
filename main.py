@@ -25,18 +25,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(self.editor)
         self.editor.status_changed.connect(self.statusBar().showMessage)
         self.editor.playhead_moved.connect(self.on_playhead_dragged)
-        self.editor.notes_changed.connect(self.sync_notes_to_player)
+        self.editor.notes_changed.connect(self.on_notes_changed)
         self.editor.plot.wheel_navigate.connect(self.on_plot_wheel)
 
         self.player = AudioPlayer()
         self.current_audio: str | None = None
+        self.current_project: Path | None = None
         self._ignore_scroll_signal = False
+        self._suppress_dirty = False
+        self._dirty = False
         self.note_clipboard: list[Note] = []
 
         self._make_menus()
         self._make_toolbar()
         self._make_bottom_controls()
         self._make_shortcuts()
+        self._connect_dirty_signals()
+        self.update_window_title()
 
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(33)
@@ -47,6 +52,86 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"Playback disabled: {self.player.error}")
         else:
             self.statusBar().showMessage("Open an audio file")
+
+    def update_window_title(self) -> None:
+        mark = "*" if self._dirty else ""
+        project = f" - {self.current_project.name}" if self.current_project else ""
+        self.setWindowTitle(f"AdopyHzEditor{mark}{project}")
+
+    def set_dirty(self, dirty: bool = True) -> None:
+        if self._suppress_dirty and dirty:
+            return
+        if self._dirty != bool(dirty):
+            self._dirty = bool(dirty)
+            self.update_window_title()
+
+    def mark_dirty(self) -> None:
+        self.set_dirty(True)
+
+    def on_notes_changed(self) -> None:
+        self.sync_notes_to_player()
+        self.mark_dirty()
+
+    def _connect_dirty_signals(self) -> None:
+        """
+        Mark project dirty when project-affecting controls change.
+        View-only controls such as contrast/gamma are intentionally excluded.
+        """
+        widgets = [
+            getattr(self, "grid_bpm", None),
+            getattr(self, "grid_offset_ms", None),
+            getattr(self, "grid_enabled", None),
+            getattr(self, "metro_enabled", None),
+            getattr(self, "metro_vol", None),
+            getattr(self, "snap_enabled", None),
+            getattr(self, "snap_div", None),
+            getattr(self, "note_octave", None),
+            getattr(self, "note_vol", None),
+            getattr(self, "note_sound_enabled", None),
+            getattr(self, "volume", None),
+            getattr(self, "playback_speed", None),
+            getattr(self, "analysis_profile", None),
+        ]
+
+        for w in widgets:
+            if w is None:
+                continue
+            if hasattr(w, "valueChanged"):
+                w.valueChanged.connect(lambda *args: self.mark_dirty())
+            if hasattr(w, "stateChanged"):
+                w.stateChanged.connect(lambda *args: self.mark_dirty())
+            if hasattr(w, "currentTextChanged"):
+                w.currentTextChanged.connect(lambda *args: self.mark_dirty())
+
+    def confirm_discard_unsaved(self, title: str = "Unsaved changes") -> bool:
+        if not self._dirty:
+            return True
+
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        box.setWindowTitle(title)
+        box.setText("保存していない変更があります。")
+        box.setInformativeText("続行する前に保存しますか？")
+        save_btn = box.addButton("保存", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        discard_btn = box.addButton("保存せず続行", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = box.addButton("キャンセル", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(save_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == save_btn:
+            return self.save_project_as()
+        if clicked == discard_btn:
+            return True
+        if clicked == cancel_btn:
+            return False
+        return False
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        if self.confirm_discard_unsaved("Close AdopyHzEditor"):
+            event.accept()
+        else:
+            event.ignore()
 
     def _make_menus(self) -> None:
         menubar = self.menuBar()
@@ -512,6 +597,9 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def open_audio(self) -> None:
+        if not self.confirm_discard_unsaved("Open new audio"):
+            return
+
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Open Audio",
@@ -520,13 +608,13 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not path:
             return
-        self.load_audio(path)
+        self.load_audio(path, reset_notes=True)
 
     def analysis_options(self) -> dict:
         profile = self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal"
         return analysis_profile_options(profile)
 
-    def load_audio(self, path: str) -> None:
+    def load_audio(self, path: str, *, reset_notes: bool = True) -> None:
         opts = self.analysis_options()
         profile = self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal"
 
@@ -537,7 +625,17 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             spec = analyze_cqt(path, use_cache=True, **opts)
             self.current_audio = str(Path(path))
+            self.current_project = None
             self.editor.set_spectrogram(spec)
+
+            if reset_notes:
+                self._suppress_dirty = True
+                try:
+                    self.editor.set_notes([])
+                finally:
+                    self._suppress_dirty = False
+                self.note_clipboard.clear()
+                self.sync_notes_to_player()
 
             self._ignore_scroll_signal = True
             self.time_slider.setValue(0)
@@ -558,6 +656,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.player.available:
                 QtCore.QTimer.singleShot(1, lambda p=str(path): self.load_audio_for_playback(p))
 
+            self.set_dirty(False if reset_notes else self._dirty)
             self.statusBar().showMessage(
                 f"Loaded spectrogram: {Path(path).name} / {profile} / playback loading..."
             )
@@ -832,24 +931,31 @@ class MainWindow(QtWidgets.QMainWindow):
             self.player.set_volume(self.volume.value() / 100.0)
         self.statusBar().showMessage("Project settings applied")
 
-    def save_project_as(self) -> None:
+    def save_project_as(self) -> bool:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save Project",
-            "",
+            str(self.current_project) if self.current_project else "",
             "AdopyHzEditor Project (*.adopyhz);;Old Project (*.ahe.json *.json);;All Files (*)",
         )
         if not path:
-            return
+            return False
         if Path(path).suffix == "":
             path += ".adopyhz"
         try:
             save_project(path, audio_path=self.current_audio, notes=self.editor.notes, settings=self.get_project_settings())
+            self.current_project = Path(path)
+            self.set_dirty(False)
             self.statusBar().showMessage(f"Saved: {Path(path).name}")
+            return True
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Save failed", str(e))
+            return False
 
     def load_project_from_file(self) -> None:
+        if not self.confirm_discard_unsaved("Load project"):
+            return
+
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Load Project",
@@ -860,10 +966,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             audio, notes, settings = load_project(path)
-            if audio and Path(audio).exists():
-                self.load_audio(audio)
-            self.editor.set_notes(notes)
-            self.apply_project_settings(settings)
+            self._suppress_dirty = True
+            try:
+                if audio and Path(audio).exists():
+                    self.load_audio(audio, reset_notes=False)
+                self.editor.set_notes(notes)
+                self.apply_project_settings(settings)
+            finally:
+                self._suppress_dirty = False
+
+            self.current_project = Path(path)
+            self.set_dirty(False)
+            self.sync_notes_to_player()
             self.statusBar().showMessage(f"Loaded project: {Path(path).name}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Load failed", str(e))
