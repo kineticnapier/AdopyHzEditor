@@ -22,6 +22,27 @@ def midi_to_hz(note: float) -> float:
     return 440.0 * (2.0 ** ((note - 69.0) / 12.0))
 
 
+def hz_to_midi(freq: float) -> float:
+    import math
+    return 69.0 + 12.0 * math.log2(freq / 440.0)
+
+
+def clamp_midi_range_for_sr(midi_min: int, midi_max: int, sr: int) -> tuple[int, int]:
+    """
+    Avoid asking CQT for frequencies above Nyquist.
+    This also prevents slow/warning-heavy analysis with impossible high bins.
+    """
+    import math
+
+    nyquist_safe = max(20.0, sr * 0.49)
+    max_supported = int(math.floor(hz_to_midi(nyquist_safe)))
+    midi_max = min(int(midi_max), max_supported)
+    midi_min = int(midi_min)
+    if midi_max < midi_min + 12:
+        midi_max = midi_min + 12
+    return midi_min, midi_max
+
+
 def cache_key(path: Path, **kwargs) -> str:
     stat = path.stat()
     data = {
@@ -34,22 +55,72 @@ def cache_key(path: Path, **kwargs) -> str:
     return hashlib.sha1(raw).hexdigest()
 
 
+def analysis_profile_options(profile: str) -> dict:
+    """
+    Profiles trade pitch range / time resolution for load speed.
+
+    Fast:
+        noticeably faster, enough for most melody tracing.
+    Normal:
+        balanced default.
+    Full:
+        full C0-C10 range, slower.
+    """
+    p = (profile or "Normal").lower()
+    if p.startswith("fast"):
+        return {
+            "sr": 22050,
+            "midi_min": 24,   # C1
+            "midi_max": 96,   # C7
+            "hop_length": 2048,
+            "engine": "hybrid",
+        }
+    if p.startswith("full"):
+        return {
+            "sr": 44100,
+            "midi_min": 12,   # C0
+            "midi_max": 120,  # C10
+            "hop_length": 1024,
+            "engine": "hybrid",
+        }
+    return {
+        "sr": 22050,
+        "midi_min": 12,      # C0
+        "midi_max": 108,     # C8-ish; clamped safely by sr
+        "hop_length": 1536,
+        "engine": "hybrid",
+    }
+
+
 def analyze_cqt(
     audio_path: str | Path,
     *,
     sr: int = 22050,
     midi_min: int = 12,
-    midi_max: int = 120,
-    hop_length: int = 1024,
+    midi_max: int = 108,
+    hop_length: int = 1536,
     use_cache: bool = True,
+    engine: str = "hybrid",
 ) -> Spectrogram:
     import librosa
 
     path = Path(audio_path)
-    cache_dir = Path.home() / ".audiohzeditor_cache_stable"
+    midi_min, midi_max = clamp_midi_range_for_sr(midi_min, midi_max, sr)
+
+    cache_dir = Path.home() / ".adopyhzeditor_cache"
     cache_dir.mkdir(exist_ok=True)
 
-    key = cache_key(path, sr=sr, midi_min=midi_min, midi_max=midi_max, hop_length=hop_length)
+    # v3: uncompressed npz, hybrid CQT, safe MIDI range clamping
+    key = cache_key(
+        path,
+        cache_version=3,
+        sr=sr,
+        midi_min=midi_min,
+        midi_max=midi_max,
+        hop_length=hop_length,
+        bins_per_octave=12,
+        engine=engine,
+    )
     cache_path = cache_dir / f"{key}.npz"
 
     if use_cache and cache_path.exists():
@@ -67,20 +138,36 @@ def analyze_cqt(
     y, actual_sr = librosa.load(str(path), sr=sr, mono=True)
     duration = float(librosa.get_duration(y=y, sr=actual_sr))
 
-    n_bins = midi_max - midi_min + 1
-    cqt = librosa.cqt(
-        y,
-        sr=actual_sr,
-        hop_length=hop_length,
-        fmin=midi_to_hz(midi_min),
-        n_bins=n_bins,
-        bins_per_octave=12,
-    )
+    n_bins = int(midi_max - midi_min + 1)
+
+    # hybrid_cqt is usually faster than full cqt for broad ranges.
+    cqt_func = librosa.hybrid_cqt if engine == "hybrid" and hasattr(librosa, "hybrid_cqt") else librosa.cqt
+    try:
+        cqt = cqt_func(
+            y,
+            sr=actual_sr,
+            hop_length=hop_length,
+            fmin=midi_to_hz(midi_min),
+            n_bins=n_bins,
+            bins_per_octave=12,
+        )
+    except Exception:
+        # Fallback for environments where hybrid_cqt is unavailable/unstable.
+        cqt = librosa.cqt(
+            y,
+            sr=actual_sr,
+            hop_length=hop_length,
+            fmin=midi_to_hz(midi_min),
+            n_bins=n_bins,
+            bins_per_octave=12,
+        )
+
     db = librosa.amplitude_to_db(np.abs(cqt), ref=np.max).astype(np.float32)
     times = librosa.frames_to_time(np.arange(db.shape[1]), sr=actual_sr, hop_length=hop_length)
 
     if use_cache:
-        np.savez_compressed(
+        # Intentionally uncompressed: bigger cache, much faster second load.
+        np.savez(
             cache_path,
             db=db,
             duration=np.array(duration),

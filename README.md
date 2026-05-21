@@ -254,3 +254,67 @@ AdopyHzEditor/
 - Harmonic suppression is a display aid, not real source separation.
 - Playback speed uses simple resampling and may change pitch.
 - Extremely large note counts or huge ADOFAI exports can become slow.
+
+
+## Stable17 修正
+
+- タンギング処理を廃止しました。
+- ADOFAI出力ダイアログから `Tongue seconds` / `Tongue ratio` を削除しました。
+- 出力時にノート末尾を自動で短くする処理は行いません。
+- ノート長は、エディタ上で書いた長さをそのまま使います。
+
+音を切りたい場合は、エディタ上でノート自体を短くしてください。
+
+
+## Stable18 修正
+
+- ADOFAI出力ダイアログで `Angle Compression` を最初の選択肢にしました。
+- ADOFAI出力時の `Base BPM` 初期値は、プロジェクト側の `BPM` を使うようにしました。
+- プロジェクト保存時にBPM/Offsetなどの設定を保存するようにしました。
+  - `BPM`
+  - `Offset`
+  - `Grid`
+  - `Metronome`
+  - `Snap`
+  - `Snap div`
+  - `Oct`
+  - 音量系
+  - 再生速度
+- プロジェクト読み込み時にこれらの設定を復元するようにしました。
+- `Oct` がMIDI出力/ADOFAI出力にも効くように修正しました。
+- 速度変化は、Hzセクション開始floorに置く方針を維持しています。
+  - floor 0には置きません。
+  - Base BPMのSetSpeedは重ねません。
+
+
+## Stable19 修正
+
+- ADOFAI出力の `SetSpeed` 配置を1タイル後ろへずらしました。
+  - これにより、角・遷移タイルではなく、その次のHzセクション開始タイル側に速度変化が置かれます。
+  - floor 0には引き続き `SetSpeed` を置きません。
+- `Oct` がMIDI/ADOFAI出力へ確実に反映されるよう、出力用ノート生成処理を再確認・補強しました。
+- 出力方式の最初の選択肢は `Angle Compression` のままです。
+
+
+## Stable20 読み込み高速化
+
+音声読み込みまわりを軽くしました。
+
+- CQT解析に `librosa.hybrid_cqt` を優先使用するようにしました。
+- CQTキャッシュを非圧縮 `.npz` に変更しました。
+  - キャッシュ容量は増えますが、2回目以降の読み込みが速くなります。
+- 再生用音声の読み込みを、スペクトログラム表示後に遅延実行するようにしました。
+  - 先に編集画面が表示されます。
+  - 再生は `Playback ready` 表示後に安定します。
+- `Analysis` プロファイルを追加しました。
+
+Analysis:
+
+| Profile | 内容 |
+|---|---|
+| Fast | C1-C7、粗め、最速寄り |
+| Normal | バランス設定 |
+| Full C0-C10 | 広い音域、重い |
+
+一度解析した音声は `~/.adopyhzeditor_cache` にキャッシュされます。
+キャッシュ削除は安全ですが、次回読み込みは再解析になります。

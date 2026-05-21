@@ -50,9 +50,20 @@ def add_relative(angle_data: list[Any], rel: float) -> None:
     angle_data.append(clean_angle(cur))
 
 
+def speed_event_floor(floor: int) -> int:
+    """
+    ADOFAI editor visually shows the speed event on the corner/transition tile
+    when placed at the generation floor.
+
+    The requested placement is the next Hz section tile, so speed events are
+    written one floor later. floor 0 still stays clean.
+    """
+    return max(1, int(floor) + 1)
+
+
 def set_bpm(floor: int, bpm: float) -> dict[str, Any]:
     return {
-        "floor": int(floor),
+        "floor": speed_event_floor(floor),
         "eventType": "SetSpeed",
         "speedType": "Bpm",
         "beatsPerMinute": round(float(bpm), 6),
@@ -90,15 +101,6 @@ def choose_change_x(keycount: float, mode: str, fixed: float) -> float:
     return max(1.0, float(x_floor))
 
 
-def apply_tongue(duration: float, tongue_sec: float, tongue_ratio: float) -> tuple[float, float]:
-    if duration <= 0:
-        return 0.0, 0.0
-    cut = 0.0
-    if tongue_sec > 0:
-        cut = min(float(tongue_sec), duration * max(0.0, float(tongue_ratio)))
-    audible = max(0.005, duration - cut)
-    audible = min(audible, duration)
-    return audible, max(0.0, duration - audible)
 
 
 def emit_direct(angle_data, actions, floor, freq, dur, max_tiles_per_note) -> tuple[int, int, float | None]:
@@ -199,12 +201,10 @@ def export_adofai(
     notes: list[Note],
     path: str | Path,
     *,
-    method: str = "direct_180",
+    method: str = "rabbit_zip",
     base_bpm: float = 175.0,
     rabbit_x_mode: str = "floor",
     rabbit_fixed_x: float = 8.0,
-    tongue_sec: float = 0.018,
-    tongue_ratio: float = 0.18,
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
     pretty: bool = False,
@@ -233,7 +233,8 @@ def export_adofai(
         elif n.start < now - 1e-6:
             overlaps += 1
 
-        audible, rest = apply_tongue(n.duration, tongue_sec, tongue_ratio)
+        audible = n.duration
+        rest = 0.0
 
         limit = max_tiles_per_note
         if max_tiles > 0:
@@ -260,9 +261,6 @@ def export_adofai(
 
         tiles += t
         used += 1
-
-        if rest > 1e-6:
-            pause_seconds(actions, floor, rest, current_bpm)
 
         now = max(now, n.end)
 

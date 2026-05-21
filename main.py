@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from audio_analysis import analyze_cqt
+from audio_analysis import analyze_cqt, analysis_profile_options
 from audio_player import AudioPlayer
 from editor_view import EditorView
 from export_midi import export_midi
@@ -234,6 +234,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cmap.addItems(["viridis", "magma", "inferno", "plasma", "gray"])
         self.cmap.currentTextChanged.connect(self.apply_visual)
         tb.addWidget(self.cmap)
+
+        tb.addWidget(QtWidgets.QLabel(" Analysis "))
+        self.analysis_profile = QtWidgets.QComboBox()
+        self.analysis_profile.addItems(["Fast", "Normal", "Full C0-C10"])
+        self.analysis_profile.setCurrentText("Normal")
+        self.analysis_profile.setToolTip(
+            "Fast: C1-C7 / rougher time resolution\n"
+            "Normal: balanced\n"
+            "Full C0-C10: widest range, slower"
+        )
+        tb.addWidget(self.analysis_profile)
 
     def _make_bottom_controls(self) -> None:
         bar = QtWidgets.QWidget()
@@ -511,11 +522,20 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.load_audio(path)
 
+    def analysis_options(self) -> dict:
+        profile = self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal"
+        return analysis_profile_options(profile)
+
     def load_audio(self, path: str) -> None:
-        self.statusBar().showMessage("Analyzing CQT...")
+        opts = self.analysis_options()
+        profile = self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal"
+
+        self.statusBar().showMessage(
+            f"Analyzing CQT ({profile}, sr={opts['sr']}, hop={opts['hop_length']})..."
+        )
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         try:
-            spec = analyze_cqt(path, midi_min=12, midi_max=120, hop_length=1024, use_cache=True)
+            spec = analyze_cqt(path, use_cache=True, **opts)
             self.current_audio = str(Path(path))
             self.editor.set_spectrogram(spec)
 
@@ -528,27 +548,42 @@ class MainWindow(QtWidgets.QMainWindow):
             self.visible_notes.setValue(min(60, spec.midi_max - spec.midi_min + 1))
             self._ignore_scroll_signal = False
 
-            if self.player.available:
-                self.statusBar().showMessage("Loading audio for playback...")
-                try:
-                    self.player.load(path)
-                    if hasattr(self.player, "set_volume"):
-                        self.player.set_volume(self.volume.value() / 100.0)
-                    self.sync_notes_to_player()
-                    self.apply_playback_speed()
-                except Exception as e:
-                    self.statusBar().showMessage(f"Playback load failed, editor still usable: {e!r}")
-                self.apply_timing_helpers()
             self.editor.set_playhead(0.0)
             self.update_time_labels()
             self.update_view_from_controls()
             self.apply_timing_helpers()
-            self.statusBar().showMessage(f"Loaded: {Path(path).name} / Space: play-pause")
+
+            # Perceived-speed improvement:
+            # Display the spectrogram first, then decode playback audio after returning to the event loop.
+            if self.player.available:
+                QtCore.QTimer.singleShot(1, lambda p=str(path): self.load_audio_for_playback(p))
+
+            self.statusBar().showMessage(
+                f"Loaded spectrogram: {Path(path).name} / {profile} / playback loading..."
+            )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Load failed", str(e))
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
             self._ignore_scroll_signal = False
+
+    def load_audio_for_playback(self, path: str) -> None:
+        if not self.player.available:
+            return
+        if self.current_audio is None or str(Path(path)) != self.current_audio:
+            return
+
+        try:
+            self.statusBar().showMessage("Loading audio for playback...")
+            self.player.load(path)
+            if hasattr(self.player, "set_volume"):
+                self.player.set_volume(self.volume.value() / 100.0)
+            self.sync_notes_to_player()
+            self.apply_playback_speed()
+            self.apply_timing_helpers()
+            self.statusBar().showMessage(f"Playback ready: {Path(path).name} / Space: play-pause")
+        except Exception as e:
+            self.statusBar().showMessage(f"Playback load failed, editor still usable: {e!r}")
 
     def slider_to_start(self) -> float:
         spec = self.editor.spectrogram
@@ -679,6 +714,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.player.available:
             self.statusBar().showMessage(f"Playback unavailable: {self.player.error}")
             return
+        if getattr(self.player, "audio", None) is None:
+            if self.current_audio:
+                self.statusBar().showMessage("Playback audio is still loading. Try again in a moment.")
+                QtCore.QTimer.singleShot(1, lambda p=self.current_audio: self.load_audio_for_playback(p))
+            else:
+                self.statusBar().showMessage("Open an audio file first")
+            return
 
         if not self.player.playing:
             self.sync_notes_to_player()
@@ -718,6 +760,78 @@ class MainWindow(QtWidgets.QMainWindow):
         self.seek_to(seconds)
         self.update_time_labels()
 
+    def get_project_settings(self) -> dict:
+        return {
+            "grid_bpm": float(self.grid_bpm.value()) if hasattr(self, "grid_bpm") else 175.0,
+            "grid_offset_ms": float(self.grid_offset_ms.value()) if hasattr(self, "grid_offset_ms") else 0.0,
+            "grid_enabled": bool(self.grid_enabled.isChecked()) if hasattr(self, "grid_enabled") else False,
+            "metronome_enabled": bool(self.metro_enabled.isChecked()) if hasattr(self, "metro_enabled") else False,
+            "metronome_volume": int(self.metro_vol.value()) if hasattr(self, "metro_vol") else 35,
+            "snap_enabled": bool(self.snap_enabled.isChecked()) if hasattr(self, "snap_enabled") else False,
+            "snap_div": int(self.snap_div.value()) if hasattr(self, "snap_div") else 1,
+            "note_octave": int(self.note_octave.value()) if hasattr(self, "note_octave") else 0,
+            "note_volume": int(self.note_vol.value()) if hasattr(self, "note_vol") else 20,
+            "note_sound_enabled": bool(self.note_sound_enabled.isChecked()) if hasattr(self, "note_sound_enabled") else True,
+            "song_volume": int(self.volume.value()) if hasattr(self, "volume") else 85,
+            "playback_speed": float(self.playback_speed.value()) if hasattr(self, "playback_speed") else 1.0,
+            "analysis_profile": self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal",
+        }
+
+    def apply_project_settings(self, settings: dict) -> None:
+        if not settings:
+            return
+
+        blockers = []
+        for name in (
+            "grid_bpm", "grid_offset_ms", "grid_enabled", "metro_enabled", "metro_vol",
+            "snap_enabled", "snap_div", "note_octave", "note_vol", "note_sound_enabled",
+            "volume", "playback_speed", "analysis_profile",
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None and hasattr(widget, "blockSignals"):
+                blockers.append(widget)
+                widget.blockSignals(True)
+
+        try:
+            if hasattr(self, "grid_bpm") and "grid_bpm" in settings:
+                self.grid_bpm.setValue(float(settings["grid_bpm"]))
+            if hasattr(self, "grid_offset_ms") and "grid_offset_ms" in settings:
+                self.grid_offset_ms.setValue(float(settings["grid_offset_ms"]))
+            if hasattr(self, "grid_enabled") and "grid_enabled" in settings:
+                self.grid_enabled.setChecked(bool(settings["grid_enabled"]))
+            if hasattr(self, "metro_enabled") and "metronome_enabled" in settings:
+                self.metro_enabled.setChecked(bool(settings["metronome_enabled"]))
+            if hasattr(self, "metro_vol") and "metronome_volume" in settings:
+                self.metro_vol.setValue(int(settings["metronome_volume"]))
+            if hasattr(self, "snap_enabled") and "snap_enabled" in settings:
+                self.snap_enabled.setChecked(bool(settings["snap_enabled"]))
+            if hasattr(self, "snap_div") and "snap_div" in settings:
+                self.snap_div.setValue(int(settings["snap_div"]))
+            if hasattr(self, "note_octave") and "note_octave" in settings:
+                self.note_octave.setValue(int(settings["note_octave"]))
+            if hasattr(self, "note_vol") and "note_volume" in settings:
+                self.note_vol.setValue(int(settings["note_volume"]))
+            if hasattr(self, "note_sound_enabled") and "note_sound_enabled" in settings:
+                self.note_sound_enabled.setChecked(bool(settings["note_sound_enabled"]))
+            if hasattr(self, "volume") and "song_volume" in settings:
+                self.volume.setValue(int(settings["song_volume"]))
+            if hasattr(self, "playback_speed") and "playback_speed" in settings:
+                self.playback_speed.setValue(float(settings["playback_speed"]))
+            if hasattr(self, "analysis_profile") and "analysis_profile" in settings:
+                idx = self.analysis_profile.findText(str(settings["analysis_profile"]))
+                if idx >= 0:
+                    self.analysis_profile.setCurrentIndex(idx)
+        finally:
+            for widget in blockers:
+                widget.blockSignals(False)
+
+        self.apply_timing_helpers()
+        self.apply_note_sound_settings()
+        self.apply_playback_speed()
+        if hasattr(self.player, "set_volume") and hasattr(self, "volume"):
+            self.player.set_volume(self.volume.value() / 100.0)
+        self.statusBar().showMessage("Project settings applied")
+
     def save_project_as(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
@@ -730,7 +844,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if Path(path).suffix == "":
             path += ".adopyhz"
         try:
-            save_project(path, audio_path=self.current_audio, notes=self.editor.notes)
+            save_project(path, audio_path=self.current_audio, notes=self.editor.notes, settings=self.get_project_settings())
             self.statusBar().showMessage(f"Saved: {Path(path).name}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Save failed", str(e))
@@ -745,13 +859,30 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path:
             return
         try:
-            audio, notes = load_project(path)
+            audio, notes, settings = load_project(path)
             if audio and Path(audio).exists():
                 self.load_audio(audio)
             self.editor.set_notes(notes)
+            self.apply_project_settings(settings)
             self.statusBar().showMessage(f"Loaded project: {Path(path).name}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Load failed", str(e))
+
+    def current_octave_shift(self) -> int:
+        return int(self.note_octave.value()) if hasattr(self, "note_octave") else 0
+
+    def notes_with_output_octave(self) -> list[Note]:
+        """
+        Apply Oct to preview/export pitch without moving notes on screen.
+        This is used by both MIDI and ADOFAI export.
+        """
+        shift = self.current_octave_shift() * 12
+        result: list[Note] = []
+        for n in self.editor.notes:
+            nn = n.normalized()
+            midi = max(0, min(127, int(nn.midi) + shift))
+            result.append(Note(nn.start, nn.end, midi, nn.velocity))
+        return result
 
     def export_midi_file(self) -> None:
         if not self.editor.notes:
@@ -763,8 +894,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path.lower().endswith((".mid", ".midi")):
             path += ".mid"
         try:
-            export_midi(self.editor.notes, path)
-            self.statusBar().showMessage(f"Exported MIDI: {Path(path).name}")
+            export_midi(self.notes_with_output_octave(), path)
+            self.statusBar().showMessage(f"Exported MIDI: {Path(path).name} / Oct {self.current_octave_shift():+d}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "MIDI export failed", str(e))
 
@@ -782,9 +913,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         try:
-            stats = export_adofai(self.editor.notes, path, **dialog.options())
+            stats = export_adofai(self.notes_with_output_octave(), path, **dialog.options())
             QtWidgets.QMessageBox.information(self, "Export complete", "\n".join(f"{k}: {v}" for k, v in stats.items()))
-            self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name}")
+            self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name} / Oct {self.current_octave_shift():+d}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "ADOFAI export failed", str(e))
 
@@ -796,12 +927,15 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout = QtWidgets.QFormLayout(self)
 
         self.method = QtWidgets.QComboBox()
-        self.method.addItems(["Direct 180°: BPM = Hz × 60", "Angle Compression: corrected Keycount formula"])
+        self.method.addItems(["Angle Compression: corrected Keycount formula", "Direct 180°: BPM = Hz × 60"])
 
         self.base_bpm = QtWidgets.QDoubleSpinBox()
         self.base_bpm.setRange(1.0, 999999.0)
         self.base_bpm.setDecimals(6)
-        self.base_bpm.setValue(175.0)
+        default_bpm = 175.0
+        if parent is not None and hasattr(parent, "grid_bpm"):
+            default_bpm = float(parent.grid_bpm.value())
+        self.base_bpm.setValue(default_bpm)
 
         self.x_mode = QtWidgets.QComboBox()
         self.x_mode.addItems(["floor", "round", "ceil", "fixed"])
@@ -813,15 +947,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.fixed_x.setValue(8.0)
         self.fixed_x.setToolTip("Change x mode が fixed のときに使う変更用x")
 
-        self.tongue_sec = QtWidgets.QDoubleSpinBox()
-        self.tongue_sec.setRange(0.0, 1.0)
-        self.tongue_sec.setDecimals(4)
-        self.tongue_sec.setValue(0.018)
 
-        self.tongue_ratio = QtWidgets.QDoubleSpinBox()
-        self.tongue_ratio.setRange(0.0, 0.9)
-        self.tongue_ratio.setDecimals(3)
-        self.tongue_ratio.setValue(0.18)
 
         self.max_tiles = QtWidgets.QSpinBox()
         self.max_tiles.setRange(0, 10000000)
@@ -839,8 +965,6 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow("Base BPM", self.base_bpm)
         layout.addRow("Change x mode", self.x_mode)
         layout.addRow("Fixed change x", self.fixed_x)
-        layout.addRow("Tongue seconds", self.tongue_sec)
-        layout.addRow("Tongue ratio", self.tongue_ratio)
         layout.addRow("Max total tiles", self.max_tiles)
         layout.addRow("Max tiles per note", self.max_tiles_per_note)
 
@@ -851,12 +975,10 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
 
     def options(self) -> dict:
         return {
-            "method": "rabbit_zip" if self.method.currentIndex() == 1 else "direct_180",
+            "method": "direct_180" if self.method.currentIndex() == 1 else "rabbit_zip",
             "base_bpm": float(self.base_bpm.value()),
             "rabbit_x_mode": self.x_mode.currentText(),
             "rabbit_fixed_x": float(self.fixed_x.value()),
-            "tongue_sec": float(self.tongue_sec.value()),
-            "tongue_ratio": float(self.tongue_ratio.value()),
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
             "pretty": False,
