@@ -1052,14 +1052,19 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.base_bpm.setValue(default_bpm)
 
         self.x_mode = QtWidgets.QComboBox()
-        self.x_mode.addItems(["floor", "round", "ceil", "fixed"])
-        self.x_mode.setToolTip("変更用xの選び方。floor = floor(Keycount)、fixed = 下の値を使う")
+        self.x_mode.addItems(["floor", "lowest_floor", "round", "ceil", "fixed"])
+        self.x_mode.setToolTip(
+            "変更用xの選び方\n"
+            "floor = 各ノートの floor(Keycount)\n"
+            "lowest_floor = 全ノート中の一番低い floor(Keycount) に固定\n"
+            "fixed = 下の Fixed change x を使う"
+        )
 
         self.fixed_x = QtWidgets.QDoubleSpinBox()
         self.fixed_x.setRange(0.000001, 100000.0)
         self.fixed_x.setDecimals(6)
         self.fixed_x.setValue(8.0)
-        self.fixed_x.setToolTip("Change x mode が fixed のときに使う変更用x")
+        self.fixed_x.setToolTip("Change x mode が fixed のときに使う変更用x。lowest_floorでは無視されます。")
 
 
 

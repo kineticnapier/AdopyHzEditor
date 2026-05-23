@@ -88,17 +88,35 @@ def pause_seconds(actions: list[dict[str, Any]], floor: int, seconds: float, cur
     actions.append(pause_beats(floor, seconds * bpm / 60.0))
 
 
+def keycount_floor_x(keycount: float) -> int:
+    return max(1, int(math.floor(max(0.0, keycount) + EPS)))
+
+
 def choose_change_x(keycount: float, mode: str, fixed: float) -> float:
-    x_floor = math.floor(max(0.0, keycount))
+    x_floor = keycount_floor_x(keycount)
+    mode = (mode or "floor").lower().replace(" ", "_").replace("-", "_")
 
     if mode == "fixed":
         return max(0.000001, float(fixed))
+    if mode in ("lowest_floor", "lowest", "min_floor", "minimum_floor"):
+        return max(1.0, float(fixed))
     if mode == "round":
         return max(1.0, float(round(keycount)))
     if mode == "ceil":
         return max(1.0, float(math.ceil(keycount)))
 
     return max(1.0, float(x_floor))
+
+
+def compute_lowest_floor_x(notes: list[Note]) -> int:
+    values: list[int] = []
+    for n in notes:
+        nn = n.normalized()
+        if nn.duration <= 0:
+            continue
+        keycount = nn.freq * nn.duration
+        values.append(keycount_floor_x(keycount))
+    return min(values) if values else 1
 
 
 
@@ -215,6 +233,11 @@ def export_adofai(
 
     sorted_notes, first_note_offset = normalize_notes_to_first(notes)
 
+    global_lowest_floor_x = compute_lowest_floor_x(sorted_notes)
+    effective_fixed_x = global_lowest_floor_x if (rabbit_x_mode or "").lower().replace(" ", "_").replace("-", "_") in (
+        "lowest_floor", "lowest", "min_floor", "minimum_floor"
+    ) else rabbit_fixed_x
+
     floor = 1
     now = 0.0
     tiles = 0
@@ -252,7 +275,7 @@ def export_adofai(
                 audible,
                 play_bpm,
                 rabbit_x_mode,
-                rabbit_fixed_x,
+                effective_fixed_x,
                 limit,
             )
 
@@ -270,6 +293,8 @@ def export_adofai(
     return {
         "method": method,
         "base_bpm": play_bpm,
+        "lowest_floor_x": global_lowest_floor_x,
+        "effective_fixed_x": round(float(effective_fixed_x), 6),
         "first_note_offset_seconds": round(first_note_offset, 6),
         "start_floor": 1,
         "notes_total": len(sorted_notes),

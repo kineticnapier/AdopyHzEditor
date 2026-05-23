@@ -558,17 +558,24 @@ class EditorView(QtWidgets.QWidget):
         self.status_changed.emit(f"Added{snap} {note_name(midi)} {start:.3f}-{end:.3f}s")
 
     def nearest_note_index(self, x: float, midi: int) -> int | None:
-        best_i = None
-        best_score = 1e100
+        """
+        Hit-test only when the cursor directly touches the note rectangle.
+
+        Previous versions used a wide nearest-note tolerance, which made empty
+        clicks unexpectedly select/move nearby notes. Now:
+          - time must be inside note start/end
+          - pitch row must match exactly
+        """
+        eps = 1e-9
+        candidates: list[tuple[float, int]] = []
         for i, n in enumerate(self.notes):
-            dx = 0.0 if n.start <= x <= n.end else min(abs(x - n.start), abs(x - n.end), abs(x - (n.start + n.end) / 2))
-            dy = abs(midi - n.midi)
-            if dx <= 0.20 and dy <= 2:
-                score = dx + dy * 0.08
-                if score < best_score:
-                    best_i = i
-                    best_score = score
-        return best_i
+            if n.start - eps <= x <= n.end + eps and int(round(midi)) == int(round(n.midi)):
+                # If overlapping notes exist on the same pitch, prefer the shorter one.
+                candidates.append((n.duration, i))
+        if not candidates:
+            return None
+        candidates.sort()
+        return candidates[0][1]
 
     def select_nearest(self, x: float, midi: int, mods_value: int = 0) -> None:
         idx = self.nearest_note_index(x, midi)
@@ -609,6 +616,10 @@ class EditorView(QtWidgets.QWidget):
     def delete_nearest(self, x: float, midi: int) -> None:
         idx = self.nearest_note_index(x, midi)
         if idx is not None:
+            if idx in self.selected_indices and len(self.selected_indices) > 1:
+                self.delete_selected()
+                return
+
             self.push_undo()
             n = self.notes.pop(idx)
             self.selected_index = None
@@ -620,6 +631,9 @@ class EditorView(QtWidgets.QWidget):
     def delete_selected(self) -> None:
         if not self.selected_indices and self.selected_index is not None:
             self.selected_indices = {self.selected_index}
+
+        if self.selected_index is not None:
+            self.selected_indices.add(self.selected_index)
 
         valid = sorted((i for i in self.selected_indices if 0 <= i < len(self.notes)), reverse=True)
         if not valid:
