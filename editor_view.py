@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Optional
 from PySide6 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
+import numpy as np
 
 from audio_analysis import Spectrogram, enhance_spectrogram
-from note_model import Note, note_name
+from note_model import Note, note_name, midi_to_hz
 
 
 class EditorPlot(pg.PlotWidget):
@@ -14,6 +15,7 @@ class EditorPlot(pg.PlotWidget):
     note_select_requested = QtCore.Signal(float, int, int)
     note_move_preview = QtCore.Signal(float, int)
     note_move_finished = QtCore.Signal(float, int)
+    cursor_moved = QtCore.Signal(float, int)
     wheel_navigate = QtCore.Signal(int, int)  # delta, modifiers int
 
     def __init__(self) -> None:
@@ -72,8 +74,10 @@ class EditorPlot(pg.PlotWidget):
         ev.accept()
 
     def mouseMoveEvent(self, ev: QtGui.QMouseEvent) -> None:
+        view = self.view_pos(ev)
+
         if self._drag_start is not None:
-            self._drag_now = self.view_pos(ev)
+            self._drag_now = view
 
             if self._move_mode:
                 dx = float(self._drag_now.x() - self._drag_start.x())
@@ -81,6 +85,9 @@ class EditorPlot(pg.PlotWidget):
                 self.note_move_preview.emit(dx, dy)
             else:
                 self._update_rubber()
+        else:
+            self.cursor_moved.emit(float(view.x()), int(round(float(view.y()))))
+
         ev.accept()
 
     def mouseReleaseEvent(self, ev: QtGui.QMouseEvent) -> None:
@@ -162,6 +169,18 @@ class EditorView(QtWidgets.QWidget):
         self.plot.plotItem.addItem(self.playhead)
         self.playhead.sigPositionChanged.connect(self._on_playhead_moved)
 
+        self.cursor_x = pg.InfiniteLine(pos=0.0, angle=90, movable=False)
+        self.cursor_x.setZValue(45)
+        self.cursor_x.setPen(pg.mkPen((255, 255, 255, 80), width=1))
+        self.cursor_x.setVisible(False)
+        self.plot.plotItem.addItem(self.cursor_x)
+
+        self.cursor_y = pg.InfiniteLine(pos=0.0, angle=0, movable=False)
+        self.cursor_y.setZValue(45)
+        self.cursor_y.setPen(pg.mkPen((255, 255, 255, 80), width=1))
+        self.cursor_y.setVisible(False)
+        self.plot.plotItem.addItem(self.cursor_y)
+
         self.spectrogram: Spectrogram | None = None
         self.notes: list[Note] = []
         self.selected_index: int | None = None
@@ -188,6 +207,9 @@ class EditorView(QtWidgets.QWidget):
         self.snap_offset_sec = 0.0
         self.snap_division = 1
 
+        # Cursor peak display search range. This is not auto-correction.
+        self.cursor_peak_range = 5
+
         self.undo_stack: list[list[dict]] = []
         self.redo_stack: list[list[dict]] = []
         self._move_original_state: list[dict] | None = None
@@ -206,6 +228,7 @@ class EditorView(QtWidgets.QWidget):
         self.plot.note_select_requested.connect(self.select_nearest)
         self.plot.note_move_preview.connect(self.preview_move_selected)
         self.plot.note_move_finished.connect(self.finish_move_selected)
+        self.plot.cursor_moved.connect(self.on_cursor_moved)
 
     def snapshot_state(self) -> list[dict]:
         return [n.normalized().to_dict() for n in self.notes]
@@ -571,6 +594,94 @@ class EditorView(QtWidgets.QWidget):
         self.redraw_notes()
         self.notes_changed.emit()
 
+
+    def frame_indices_for_time_range(self, start: float, end: float) -> tuple[int, int]:
+        if self.spectrogram is None or len(self.spectrogram.frame_times) == 0:
+            return 0, 0
+
+        a, b = sorted((float(start), float(end)))
+        times = self.spectrogram.frame_times
+        i0 = int(np.searchsorted(times, a, side="left"))
+        i1 = int(np.searchsorted(times, b, side="right"))
+
+        i0 = max(0, min(i0, len(times) - 1))
+        i1 = max(i0 + 1, min(i1, len(times)))
+        return i0, i1
+
+    def strongest_midi_near(self, start: float, end: float, midi: int, search_range: int | None = None) -> int:
+        """
+        Find the strongest CQT row near a rough MIDI row.
+
+        This is display/editor assistance only. It does not auto-transcribe the song;
+        it just helps when the user has already dragged near the intended note.
+        """
+        if self.spectrogram is None:
+            return int(midi)
+
+        rng = self.cursor_peak_range if search_range is None else int(search_range)
+        lo = max(self.spectrogram.midi_min, int(midi) - rng)
+        hi = min(self.spectrogram.midi_max, int(midi) + rng)
+        if hi < lo:
+            return int(midi)
+
+        f0, f1 = self.frame_indices_for_time_range(start, end)
+        rows = np.arange(lo, hi + 1) - self.spectrogram.midi_min
+        rows = rows[(rows >= 0) & (rows < self.spectrogram.db.shape[0])]
+        if len(rows) == 0:
+            return int(midi)
+
+        block = self.spectrogram.db[rows, f0:f1]
+        if block.size == 0:
+            return int(midi)
+
+        # dB is negative. Larger is stronger. Percentile is more stable than mean.
+        scores = np.percentile(block, 90.0, axis=1)
+        best_row = int(rows[int(np.argmax(scores))])
+        return int(self.spectrogram.midi_min + best_row)
+
+    def peak_info_at(self, x: float, midi: int, search_range: int = 5) -> tuple[int, float] | None:
+        if self.spectrogram is None or len(self.spectrogram.frame_times) == 0:
+            return None
+
+        t = max(0.0, min(float(x), self.spectrogram.duration))
+        idx = int(np.searchsorted(self.spectrogram.frame_times, t, side="left"))
+        idx = max(0, min(idx, self.spectrogram.db.shape[1] - 1))
+
+        lo = max(self.spectrogram.midi_min, int(midi) - int(search_range))
+        hi = min(self.spectrogram.midi_max, int(midi) + int(search_range))
+        rows = np.arange(lo, hi + 1) - self.spectrogram.midi_min
+        rows = rows[(rows >= 0) & (rows < self.spectrogram.db.shape[0])]
+        if len(rows) == 0:
+            return None
+
+        values = self.spectrogram.db[rows, idx]
+        best_row = int(rows[int(np.argmax(values))])
+        best_midi = int(self.spectrogram.midi_min + best_row)
+        best_db = float(values[int(np.argmax(values))])
+        return best_midi, best_db
+
+    def on_cursor_moved(self, x: float, midi: int) -> None:
+        if self.spectrogram is None:
+            return
+
+        x = max(0.0, min(float(x), self.spectrogram.duration))
+        midi = max(self.spectrogram.midi_min, min(self.spectrogram.midi_max, int(midi)))
+
+        self.cursor_x.setValue(x)
+        self.cursor_y.setValue(midi)
+        self.cursor_x.setVisible(True)
+        self.cursor_y.setVisible(True)
+
+        freq = midi_to_hz(midi)
+        info = self.peak_info_at(x, midi, search_range=max(2, self.cursor_peak_range))
+        if info is not None:
+            peak_midi, peak_db = info
+            self.status_changed.emit(
+                f"Cursor {x:.3f}s / {note_name(midi)} {freq:.2f}Hz | nearby peak: {note_name(peak_midi)} {midi_to_hz(peak_midi):.2f}Hz ({peak_db:.1f} dB)"
+            )
+        else:
+            self.status_changed.emit(f"Cursor {x:.3f}s / {note_name(midi)} {freq:.2f}Hz")
+
     def set_snap_grid(self, *, enabled: bool, bpm: float, offset_sec: float, division: int = 1) -> None:
         self.snap_enabled = bool(enabled)
         self.snap_bpm = max(1e-6, float(bpm))
@@ -617,8 +728,11 @@ class EditorView(QtWidgets.QWidget):
         self.selected_indices = {self.selected_index}
         self.redraw_notes()
         self.notes_changed.emit()
-        snap = " snapped" if self.snap_enabled else ""
-        self.status_changed.emit(f"Added{snap} {note_name(midi)} {start:.3f}-{end:.3f}s")
+        flags = []
+        if self.snap_enabled:
+            flags.append("snapped")
+        suffix = (" " + ", ".join(flags)) if flags else ""
+        self.status_changed.emit(f"Added{suffix} {note_name(midi)} {midi_to_hz(midi):.2f}Hz {start:.3f}-{end:.3f}s")
 
     def nearest_note_index(self, x: float, midi: int) -> int | None:
         """

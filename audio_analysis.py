@@ -43,6 +43,27 @@ def clamp_midi_range_for_sr(midi_min: int, midi_max: int, sr: int) -> tuple[int,
     return midi_min, midi_max
 
 
+
+def reduce_oversampled_cqt_to_midi(mag: np.ndarray, bins_per_semitone: int) -> np.ndarray:
+    """
+    1半音あたり複数CQT binで解析し、表示用には半音1行へ畳み込む。
+
+    detune / vibrato / bin境界で薄くなる音を拾いやすくするため、
+    sub-binのmaxを中心に使う。
+    """
+    bps = max(1, int(bins_per_semitone))
+    if bps <= 1:
+        return mag
+
+    rows = mag.shape[0] // bps
+    if rows <= 0:
+        return mag
+
+    trimmed = mag[: rows * bps, :]
+    folded = trimmed.reshape(rows, bps, mag.shape[1])
+    return np.maximum(np.max(folded, axis=1), np.mean(folded, axis=1) * 1.35).astype(np.float32, copy=False)
+
+
 def cache_key(path: Path, **kwargs) -> str:
     stat = path.stat()
     data = {
@@ -57,40 +78,53 @@ def cache_key(path: Path, **kwargs) -> str:
 
 def analysis_profile_options(profile: str) -> dict:
     """
-    Profiles trade pitch range / time resolution for load speed.
+    Profiles trade speed for how reliably visible notes appear in the spectrogram.
 
-    Fast:
-        noticeably faster, enough for most melody tracing.
-    Normal:
-        balanced default.
-    Full:
-        full C0-C10 range, slower.
+    Precise:
+      - 3 CQT bins per semitone
+      - fold sub-bins back to one semitone row
+      - better for detuned / vibrato / hard-to-see notes
     """
     p = (profile or "Normal").lower()
+
     if p.startswith("fast"):
         return {
             "sr": 22050,
-            "midi_min": 24,   # C1
-            "midi_max": 96,   # C7
+            "midi_min": 24,
+            "midi_max": 96,
             "hop_length": 2048,
             "engine": "hybrid",
+            "bins_per_semitone": 1,
         }
+
+    if p.startswith("precise"):
+        return {
+            "sr": 44100,
+            "midi_min": 24,
+            "midi_max": 108,
+            "hop_length": 512,
+            "engine": "cqt",
+            "bins_per_semitone": 3,
+        }
+
     if p.startswith("full"):
         return {
             "sr": 44100,
-            "midi_min": 12,   # C0
-            "midi_max": 120,  # C10
+            "midi_min": 12,
+            "midi_max": 120,
             "hop_length": 1024,
             "engine": "hybrid",
+            "bins_per_semitone": 1,
         }
+
     return {
         "sr": 22050,
-        "midi_min": 12,      # C0
-        "midi_max": 108,     # C8-ish; clamped safely by sr
+        "midi_min": 12,
+        "midi_max": 108,
         "hop_length": 1536,
         "engine": "hybrid",
+        "bins_per_semitone": 1,
     }
-
 
 def analyze_cqt(
     audio_path: str | Path,
@@ -101,11 +135,15 @@ def analyze_cqt(
     hop_length: int = 1536,
     use_cache: bool = True,
     engine: str = "hybrid",
+    bins_per_semitone: int = 1,
 ) -> Spectrogram:
     import librosa
 
     path = Path(audio_path)
     midi_min, midi_max = clamp_midi_range_for_sr(midi_min, midi_max, sr)
+
+    bins_per_semitone = max(1, int(bins_per_semitone))
+    bins_per_octave = 12 * bins_per_semitone
 
     cache_dir = Path.home() / ".adopyhzeditor_cache"
     cache_dir.mkdir(exist_ok=True)
@@ -118,8 +156,9 @@ def analyze_cqt(
         midi_min=midi_min,
         midi_max=midi_max,
         hop_length=hop_length,
-        bins_per_octave=12,
+        bins_per_octave=bins_per_octave,
         engine=engine,
+        bins_per_semitone=bins_per_semitone,
     )
     cache_path = cache_dir / f"{key}.npz"
 
@@ -138,7 +177,8 @@ def analyze_cqt(
     y, actual_sr = librosa.load(str(path), sr=sr, mono=True)
     duration = float(librosa.get_duration(y=y, sr=actual_sr))
 
-    n_bins = int(midi_max - midi_min + 1)
+    n_midi_bins = int(midi_max - midi_min + 1)
+    n_bins = n_midi_bins * bins_per_semitone
 
     # hybrid_cqt is usually faster than full cqt for broad ranges.
     cqt_func = librosa.hybrid_cqt if engine == "hybrid" and hasattr(librosa, "hybrid_cqt") else librosa.cqt
@@ -149,7 +189,7 @@ def analyze_cqt(
             hop_length=hop_length,
             fmin=midi_to_hz(midi_min),
             n_bins=n_bins,
-            bins_per_octave=12,
+            bins_per_octave=bins_per_octave,
         )
     except Exception:
         # Fallback for environments where hybrid_cqt is unavailable/unstable.
@@ -159,10 +199,12 @@ def analyze_cqt(
             hop_length=hop_length,
             fmin=midi_to_hz(midi_min),
             n_bins=n_bins,
-            bins_per_octave=12,
+            bins_per_octave=bins_per_octave,
         )
 
-    db = librosa.amplitude_to_db(np.abs(cqt), ref=np.max).astype(np.float32)
+    mag = np.abs(cqt).astype(np.float32)
+    mag = reduce_oversampled_cqt_to_midi(mag, bins_per_semitone)
+    db = librosa.amplitude_to_db(mag, ref=np.max).astype(np.float32)
     times = librosa.frames_to_time(np.arange(db.shape[1]), sr=actual_sr, hop_length=hop_length)
 
     if use_cache:

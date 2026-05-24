@@ -321,6 +321,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.display_mode.currentTextChanged.connect(self.apply_visual)
         tb.addWidget(self.display_mode)
 
+
         tb.addWidget(QtWidgets.QLabel(" Harmonics "))
         self.harmonics = QtWidgets.QComboBox()
         self.harmonics.addItems(["off", "soft", "strong"])
@@ -335,11 +336,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         tb.addWidget(QtWidgets.QLabel(" Analysis "))
         self.analysis_profile = QtWidgets.QComboBox()
-        self.analysis_profile.addItems(["Fast", "Normal", "Full C0-C10"])
+        self.analysis_profile.addItems(["Fast", "Normal", "Precise", "Full C0-C10"])
         self.analysis_profile.setCurrentText("Normal")
         self.analysis_profile.setToolTip(
             "Fast: C1-C7 / rougher time resolution\n"
             "Normal: balanced\n"
+            "Precise: 3 bins/semitone, better note visibility, slower\n"
             "Full C0-C10: widest range, slower"
         )
         tb.addWidget(self.analysis_profile)
@@ -599,6 +601,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 offset_sec=offset_sec,
                 division=int(self.snap_div.value()) if hasattr(self, "snap_div") else 1,
             )
+
 
     def apply_visual(self) -> None:
         self.editor.set_visual_options(
@@ -1104,12 +1107,21 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.max_tiles_per_note.setSingleStep(500)
         self.max_tiles_per_note.setSpecialValueText("Unlimited")
 
+        self.track_visual = QtWidgets.QComboBox()
+        self.track_visual.addItems(["normal", "faint", "very faint", "hidden"])
+        self.track_visual.setCurrentText("normal")
+        self.track_visual.setToolTip(
+            "Angle Compression は見た目がスパゲッティ状になりやすいです。\n"
+            "faint/hidden にするとトラック線を薄く/非表示にできます。"
+        )
+
         layout.addRow("Method", self.method)
         layout.addRow("Base BPM", self.base_bpm)
         layout.addRow("Change x mode", self.x_mode)
         layout.addRow("Fixed change x", self.fixed_x)
         layout.addRow("Max total tiles", self.max_tiles)
         layout.addRow("Max tiles per note", self.max_tiles_per_note)
+        layout.addRow("Track visual", self.track_visual)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -1124,6 +1136,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "rabbit_fixed_x": float(self.fixed_x.value()),
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
+            "track_visual": self.track_visual.currentText(),
             "pretty": False,
         }
 

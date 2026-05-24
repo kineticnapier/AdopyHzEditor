@@ -81,6 +81,61 @@ def pause_beats(floor: int, beats: float) -> dict[str, Any]:
     }
 
 
+def track_color_for_visual(track_visual: str) -> tuple[str, str]:
+    """
+    Return (trackColor, secondaryTrackColor).
+    Alpha is the last byte: RRGGBBAA.
+    """
+    mode = (track_visual or "normal").lower()
+
+    if mode == "hidden":
+        return "debb7b00", "ffffff00"
+    if mode == "very faint":
+        return "debb7b18", "ffffff10"
+    if mode == "faint":
+        return "debb7b40", "ffffff22"
+
+    return "debb7bff", "ffffffff"
+
+
+def color_track_event(floor: int, track_visual: str) -> dict[str, Any]:
+    track, secondary = track_color_for_visual(track_visual)
+    return {
+        "floor": int(floor),
+        "eventType": "ColorTrack",
+        "trackColorType": "Single",
+        "trackColor": track,
+        "secondaryTrackColor": secondary,
+        "trackColorAnimDuration": 0,
+        "trackColorPulse": "None",
+        "trackPulseLength": 10,
+        "trackStyle": "Standard",
+        "trackTexture": "",
+        "trackTextureScale": 1,
+        "trackAnimation": "None",
+        "beatsAhead": 3,
+        "trackDisappearanceAnimation": "None",
+        "beatsBehind": 4,
+    }
+
+
+def apply_track_visual(level: dict[str, Any], actions: list[dict[str, Any]], track_visual: str) -> None:
+    mode = (track_visual or "normal").lower()
+    track, secondary = track_color_for_visual(mode)
+
+    settings = level.setdefault("settings", {})
+    settings["trackColorType"] = "Single"
+    settings["trackColor"] = track
+    settings["secondaryTrackColor"] = secondary
+    settings["trackColorAnimDuration"] = 0
+    settings["trackColorPulse"] = "None"
+    settings["trackPulseLength"] = 10
+    settings["trackStyle"] = "Standard"
+
+    if mode != "normal":
+        actions.append(color_track_event(0, mode))
+
+
 def pause_seconds(actions: list[dict[str, Any]], floor: int, seconds: float, current_bpm: float | None) -> None:
     if seconds <= 1e-6:
         return
@@ -225,11 +280,13 @@ def export_adofai(
     rabbit_fixed_x: float = 8.0,
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
+    track_visual: str = "normal",
     pretty: bool = False,
 ) -> dict[str, int | float | str]:
     level = new_level()
     angle_data = level["angleData"]
     actions = level["actions"]
+    apply_track_visual(level, actions, track_visual)
 
     sorted_notes, first_note_offset = normalize_notes_to_first(notes)
 
@@ -292,6 +349,7 @@ def export_adofai(
 
     return {
         "method": method,
+        "track_visual": track_visual,
         "base_bpm": play_bpm,
         "lowest_floor_x": global_lowest_floor_x,
         "effective_fixed_x": round(float(effective_fixed_x), 6),

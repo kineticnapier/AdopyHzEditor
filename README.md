@@ -382,3 +382,107 @@ Harmonics = soft
 ```
 
 細かい倍音やノイズまで確認したい場合は `Display=smooth` に戻してください。
+
+
+## Stable24 判定補助
+
+「合っているか分からない」問題を減らすための補助機能を追加しました。
+
+- カーソル位置の音名/周波数/近くのピークをステータスバーに表示します。
+  - 例: `Cursor 12.345s / C5 523.25Hz | nearby peak: D5 587.33Hz`
+- 白いクロスヘアを追加しました。
+  - 今どの時間・どの音程を見ているか分かりやすくなります。
+- `Pitch Assist` を追加しました。
+  - ノートをドラッグ作成するとき、近くの一番強いCQTピークへ音程を補正します。
+  - 右の数値は探索範囲で、単位は半音です。
+  - 初期値は `4` です。
+- `Pitch Assist` の状態と探索範囲をプロジェクト設定に保存します。
+
+使い方の目安:
+
+```text
+Display      = wavetone
+Colormap     = wavetone
+Harmonics    = soft
+Pitch Assist = ON
+探索範囲      = 3～5
+```
+
+完全な自動採譜ではありません。  
+手でだいたいの位置にドラッグしたあと、近くの強い線へ吸着させるための補助です。
+
+
+## Stable25 ADOFAI出力の見た目対策
+
+Angle Compression は、相対角度が小さくなるとトラック形状が円や渦のようになりやすいです。  
+これは計算ミスというより、短い角度を大量に置いたときのADOFAI側の幾何的な見た目です。
+
+対策として、ADOFAI出力ダイアログに `Track visual` を追加しました。
+
+| Track visual | 内容 |
+|---|---|
+| normal | 通常表示 |
+| faint | トラックを薄く表示。初期値 |
+| very faint | さらに薄く表示 |
+| hidden | トラックをほぼ非表示 |
+
+音を優先するHz Chartでは `faint` または `hidden` 推奨です。  
+見た目も綺麗にしたい場合は `Direct 180°` の方が安定します。
+
+
+## Stable26 修正
+
+- ADOFAI出力ダイアログの `Track visual` 初期値を `normal` に戻しました。
+- `faint` / `very faint` / `hidden` は必要なときだけ手動で選ぶ形にしました。
+
+
+## Stable27 修正
+
+- `Pitch Assist` を廃止しました。
+  - ノート作成時に勝手に音程補正しません。
+  - 手で置いた音程をそのまま使います。
+- 代わりに、音源読み込み時の解析品質を上げる `Analysis = Precise` を追加しました。
+
+`Precise` の内容:
+
+```text
+sr = 44100
+hop_length = 512
+CQT = 3 bins / semitone
+表示は半音1行に畳み込み
+```
+
+これにより、次のような音を拾いやすくなります。
+
+```text
+・少しチューニングがズレた音
+・ビブラートしている音
+・CQTのbin境界に落ちて薄く見える音
+・Normalでは見えにくいが、実際にはちゃんと鳴っている音
+```
+
+おすすめ設定:
+
+```text
+Analysis = Precise
+Display = wavetone
+Harmonics = off または soft
+Contrast = 1.0～1.4
+Gamma = 0.7～1.0
+```
+
+`Precise` は重いので、ラフ確認は `Normal`、確定作業は `Precise` 推奨です。
+
+
+## Stable28 修正
+
+- `Pitch Assist` 廃止後にツールバー側のUIだけ残っていた問題を修正しました。
+- `MainWindow.apply_pitch_assist` が無いという起動時エラーを解消しました。
+
+
+## Stable29 修正
+
+- `editor_view.py` で `np` が未定義になり、カーソル移動時に `NameError: name 'np' is not defined` が大量に出る問題を修正しました。
+- `Pitch Assist` 廃止後に残っていた自動音程補正用の内部参照を削除しました。
+- カーソル位置の `nearby peak` 表示は残しています。
+  - これは自動補正ではなく、確認用の表示だけです。
