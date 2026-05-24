@@ -40,7 +40,7 @@ class AudioPlayer:
         self.note_sound_enabled = True
         self.note_volume = 0.20
         self.note_octave_shift = 0
-        self.preview_notes: list[tuple[int, int, int]] = []  # start_sample, end_sample, midi
+        self.preview_notes: list[tuple[int, int, float]] = []  # start_sample, end_sample, midi
 
         try:
             import sounddevice as sd  # noqa
@@ -97,21 +97,29 @@ class AudioPlayer:
     def set_preview_notes(self, notes) -> None:
         """
         notes: objects with start, end, midi or tuples (start, end, midi)
-        MIDI番号は保存し、プレビュー時に note_octave_shift をかける。
-        表示・保存・出力データは変えない。
+        Curve notes are sampled into short fixed-pitch preview notes.
         """
-        prepared: list[tuple[int, int, int]] = []
+        prepared: list[tuple[int, int, float]] = []
         sr = max(1, int(self.sr))
+
         for n in notes:
             try:
-                start = float(n.start)
-                end = float(n.end)
-                midi = int(n.midi)
+                segments = n.sample_fixed_segments(max_seconds=0.020, max_pitch_step=0.20)
             except AttributeError:
-                start, end, midi = float(n[0]), float(n[1]), int(n[2])
-            if end <= start:
-                continue
-            prepared.append((max(0, int(start * sr)), max(1, int(end * sr)), int(midi)))
+                segments = [n]
+
+            for seg in segments:
+                try:
+                    start = float(seg.start)
+                    end = float(seg.end)
+                    midi = float(seg.midi)
+                except AttributeError:
+                    start, end, midi = float(seg[0]), float(seg[1]), float(seg[2])
+
+                if end <= start:
+                    continue
+                prepared.append((max(0, int(start * sr)), max(1, int(end * sr)), float(midi)))
+
         prepared.sort(key=lambda x: x[0])
         with self.lock:
             self.preview_notes = prepared
@@ -194,7 +202,7 @@ class AudioPlayer:
             if out_e <= out_s:
                 continue
 
-            freq = midi_to_hz(int(midi) + octave_shift * 12)
+            freq = midi_to_hz(float(midi) + octave_shift * 12)
             sample_index = np.arange(block_start + out_s, block_start + out_e, dtype=np.float32)
             # 絶対サンプル時刻から生成するのでブロック境界で位相が飛びにくい
             wave = np.sin(2.0 * np.pi * freq * sample_index / sr).astype(np.float32)

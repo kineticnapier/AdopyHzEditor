@@ -257,6 +257,24 @@ def emit_angle_compression(
     return floor, emitted, bpm
 
 
+def flatten_curve_notes(
+    notes: list[Note],
+    *,
+    curve_step_sec: float = 0.025,
+    curve_pitch_step: float = 0.25,
+) -> list[Note]:
+    out: list[Note] = []
+    for n in notes:
+        out.extend(
+            n.sample_fixed_segments(
+                max_seconds=curve_step_sec,
+                max_pitch_step=curve_pitch_step,
+                max_segments=2000,
+            )
+        )
+    return out
+
+
 def normalize_notes_to_first(notes: list[Note]) -> tuple[list[Note], float]:
     sorted_notes = sorted((n.normalized() for n in notes if n.duration > 0), key=lambda n: (n.start, n.midi, n.end))
     if not sorted_notes:
@@ -281,6 +299,8 @@ def export_adofai(
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
     track_visual: str = "normal",
+    curve_step_sec: float = 0.025,
+    curve_pitch_step: float = 0.25,
     pretty: bool = False,
 ) -> dict[str, int | float | str]:
     level = new_level()
@@ -288,7 +308,8 @@ def export_adofai(
     actions = level["actions"]
     apply_track_visual(level, actions, track_visual)
 
-    sorted_notes, first_note_offset = normalize_notes_to_first(notes)
+    flattened_notes = flatten_curve_notes(notes, curve_step_sec=curve_step_sec, curve_pitch_step=curve_pitch_step)
+    sorted_notes, first_note_offset = normalize_notes_to_first(flattened_notes)
 
     global_lowest_floor_x = compute_lowest_floor_x(sorted_notes)
     effective_fixed_x = global_lowest_floor_x if (rabbit_x_mode or "").lower().replace(" ", "_").replace("-", "_") in (
@@ -350,6 +371,9 @@ def export_adofai(
     return {
         "method": method,
         "track_visual": track_visual,
+        "curve_step_sec": round(float(curve_step_sec), 6),
+        "curve_pitch_step": round(float(curve_pitch_step), 6),
+        "input_notes_total": len(notes),
         "base_bpm": play_bpm,
         "lowest_floor_x": global_lowest_floor_x,
         "effective_fixed_x": round(float(effective_fixed_x), 6),

@@ -11,6 +11,7 @@ from note_model import Note, note_name, midi_to_hz
 
 class EditorPlot(pg.PlotWidget):
     note_created = QtCore.Signal(float, float, int)
+    curve_created = QtCore.Signal(float, float, float, float)
     note_delete_requested = QtCore.Signal(float, int)
     note_select_requested = QtCore.Signal(float, int, int)
     note_move_preview = QtCore.Signal(float, int)
@@ -107,14 +108,26 @@ class EditorPlot(pg.PlotWidget):
                 return
 
             x1, x2 = float(start.x()), float(end.x())
-            y = int(round((float(start.y()) + float(end.y())) * 0.5))
+            y1, y2 = float(start.y()), float(end.y())
+            y = int(round((y1 + y2) * 0.5))
+            mods = int(ev.modifiers().value)
+            alt = bool(mods & int(QtCore.Qt.KeyboardModifier.AltModifier.value))
 
             if abs(x2 - x1) < 0.035:
-                self.note_select_requested.emit(x1, y, int(ev.modifiers().value))
+                self.note_select_requested.emit(x1, y, mods)
             else:
-                a, b = sorted((x1, x2))
+                if x1 <= x2:
+                    a, b = x1, x2
+                    p0, p3 = y1, y2
+                else:
+                    a, b = x2, x1
+                    p0, p3 = y2, y1
+
                 if b - a >= 0.02:
-                    self.note_created.emit(max(0.0, a), max(0.0, b), y)
+                    if alt:
+                        self.curve_created.emit(max(0.0, a), max(0.0, b), p0, p3)
+                    else:
+                        self.note_created.emit(max(0.0, a), max(0.0, b), y)
 
             self._drag_start = None
             self._drag_now = None
@@ -207,6 +220,10 @@ class EditorView(QtWidgets.QWidget):
         self.snap_offset_sec = 0.0
         self.snap_division = 1
 
+        # Shape used when Alt+drag creates a Bezier/Glide note.
+        # "ease" uses control points at start/end pitches, so it is visibly curved.
+        self.curve_shape = "ease"
+
         # Cursor peak display search range. This is not auto-correction.
         self.cursor_peak_range = 5
 
@@ -224,6 +241,7 @@ class EditorView(QtWidgets.QWidget):
 
         self.plot.move_drag_checker = self.start_move_drag
         self.plot.note_created.connect(self.add_note)
+        self.plot.curve_created.connect(self.add_curve_note)
         self.plot.note_delete_requested.connect(self.delete_nearest)
         self.plot.note_select_requested.connect(self.select_nearest)
         self.plot.note_move_preview.connect(self.preview_move_selected)
@@ -344,7 +362,7 @@ class EditorView(QtWidgets.QWidget):
         self._last_move_dy = dy
 
         for i, n in self._move_original_notes:
-            self.notes[i] = Note(n.start + dx, n.end + dx, n.midi + dy, n.velocity).normalized()
+            self.notes[i] = n.shifted(dx, dy).normalized()
 
         self.redraw_notes()
 
@@ -383,7 +401,7 @@ class EditorView(QtWidgets.QWidget):
 
         self.push_undo_state(self._move_original_state)
         for i, n in self._move_original_notes:
-            self.notes[i] = Note(n.start + dx, n.end + dx, n.midi + dy, n.velocity).normalized()
+            self.notes[i] = n.shifted(dx, dy).normalized()
 
         self._move_original_state = None
         self._move_original_notes = []
@@ -706,9 +724,74 @@ class EditorView(QtWidgets.QWidget):
             t = max(0.0, t)
         return t
 
+    def clamp_midi_value(self, midi: float) -> float:
+        if self.spectrogram is None:
+            return float(midi)
+        return max(float(self.spectrogram.midi_min), min(float(self.spectrogram.midi_max), float(midi)))
+
+    def set_curve_shape(self, shape: str) -> None:
+        shape = (shape or "ease").lower().replace(" ", "_").replace("-", "_")
+        allowed = {"ease", "linear", "ease_in", "ease_out", "s_curve"}
+        self.curve_shape = shape if shape in allowed else "ease"
+
+    def curve_control_points(self, p0: float, p3: float) -> tuple[float, float]:
+        """
+        Cubic Bezier pitch control points.
+
+        Important:
+        - linear uses 1/3 and 2/3, which is exactly a straight line.
+        - ease uses p1=p0 and p2=p3, which becomes smoothstep-like and visibly curved.
+        """
+        d = float(p3) - float(p0)
+        shape = getattr(self, "curve_shape", "ease")
+
+        if shape == "linear":
+            return p0 + d / 3.0, p0 + d * 2.0 / 3.0
+
+        if shape == "ease_in":
+            # Slow start, faster end.
+            return p0, p0
+
+        if shape == "ease_out":
+            # Faster start, slow end.
+            return p3, p3
+
+        if shape == "s_curve":
+            # Stronger S-curve than normal ease.
+            return p0 - d * 0.15, p3 + d * 0.15
+
+        # default: ease-in-out
+        return p0, p3
+
+    def add_curve_note(self, start: float, end: float, start_midi: float, end_midi: float) -> None:
+        start_midi = self.clamp_midi_value(start_midi)
+        end_midi = self.clamp_midi_value(end_midi)
+
+        if self.snap_enabled:
+            a = self.snap_time(start)
+            b = self.snap_time(end)
+            if abs(b - a) < 1e-9:
+                step = 60.0 / max(1e-6, self.snap_bpm) / max(1, self.snap_division)
+                b = min((self.spectrogram.duration if self.spectrogram else a + step), a + step)
+            start, end = sorted((a, b))
+
+        # Initial Bezier control points follow the selected curve shape.
+        # Default "ease" is visibly curved; "linear" is available if needed.
+        c1, c2 = self.curve_control_points(start_midi, end_midi)
+
+        self.push_undo()
+        self.notes.append(Note(start, end, start_midi, 100, "curve", end_midi, c1, c2).normalized())
+        self.selected_index = len(self.notes) - 1
+        self.selected_indices = {self.selected_index}
+        self.redraw_notes()
+        self.notes_changed.emit()
+        self.status_changed.emit(
+            f"Added {self.curve_shape} curve {note_name(start_midi)}→{note_name(end_midi)} {start:.3f}-{end:.3f}s"
+        )
+
     def add_note(self, start: float, end: float, midi: int) -> None:
         if self.spectrogram is not None:
-            midi = max(self.spectrogram.midi_min, min(self.spectrogram.midi_max, midi))
+            midi = int(round(self.clamp_midi_value(midi)))
 
         if self.snap_enabled:
             a = self.snap_time(start)
@@ -746,9 +829,18 @@ class EditorView(QtWidgets.QWidget):
         eps = 1e-9
         candidates: list[tuple[float, int]] = []
         for i, n in enumerate(self.notes):
-            if n.start - eps <= x <= n.end + eps and int(round(midi)) == int(round(n.midi)):
-                # If overlapping notes exist on the same pitch, prefer the shorter one.
-                candidates.append((n.duration, i))
+            if not (n.start - eps <= x <= n.end + eps):
+                continue
+
+            if n.is_curve:
+                u = 0.0 if n.duration <= 0 else (x - n.start) / n.duration
+                # Direct-touch feel: same pitch row or very close to the curve.
+                if abs(float(midi) - n.midi_at(u)) <= 0.55:
+                    candidates.append((n.duration, i))
+            else:
+                if int(round(midi)) == int(round(n.midi)):
+                    candidates.append((n.duration, i))
+
         if not candidates:
             return None
         candidates.sort()
@@ -850,13 +942,44 @@ class EditorView(QtWidgets.QWidget):
 
         alpha = 90 if self.mode == 0 else 220 if self.mode == 1 else 165
         for i, n in enumerate(self.notes):
-            rect = QtWidgets.QGraphicsRectItem(QtCore.QRectF(n.start, n.midi - 0.45, n.duration, 0.9))
-            rect.setZValue(20)
-            if i in self.selected_indices:
-                rect.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 255), 0.025))
-                rect.setBrush(QtGui.QBrush(QtGui.QColor(255, 210, 80, min(255, alpha + 55))))
+            if n.is_curve:
+                path = QtGui.QPainterPath()
+                path.moveTo(n.start, n.midi_at(0.0))
+                steps = max(8, min(96, int(max(8, n.duration / 0.02))))
+                for k in range(1, steps + 1):
+                    u = k / steps
+                    path.lineTo(n.start + n.duration * u, n.midi_at(u))
+
+                item = QtWidgets.QGraphicsPathItem(path)
+                item.setZValue(22)
+
+                if i in self.selected_indices:
+                    item.setPen(QtGui.QPen(QtGui.QColor(255, 230, 90, 255), 0.055))
+                else:
+                    item.setPen(QtGui.QPen(QtGui.QColor(120, 230, 255, max(120, alpha)), 0.040))
+
+                self.plot.plotItem.addItem(item)
+                self._note_items.append(item)
+
+                # Endpoint markers for readability.
+                for u in (0.0, 1.0):
+                    x = n.start + n.duration * u
+                    y = n.midi_at(u)
+                    dot = QtWidgets.QGraphicsEllipseItem(QtCore.QRectF(x - 0.025, y - 0.18, 0.05, 0.36))
+                    dot.setZValue(23)
+                    dot.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 220), 0.010))
+                    dot.setBrush(QtGui.QBrush(QtGui.QColor(255, 210, 80, min(255, alpha + 60))))
+                    self.plot.plotItem.addItem(dot)
+                    self._note_items.append(dot)
             else:
-                rect.setPen(QtGui.QPen(QtGui.QColor(180, 230, 255, alpha), 0.015))
-                rect.setBrush(QtGui.QBrush(QtGui.QColor(70, 190, 255, alpha)))
-            self.plot.plotItem.addItem(rect)
-            self._note_items.append(rect)
+                rect = QtWidgets.QGraphicsRectItem(QtCore.QRectF(n.start, float(n.midi) - 0.45, n.duration, 0.9))
+                rect.setZValue(20)
+                if i in self.selected_indices:
+                    rect.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 255), 0.025))
+                    rect.setBrush(QtGui.QBrush(QtGui.QColor(255, 210, 80, min(255, alpha + 55))))
+                else:
+                    rect.setPen(QtGui.QPen(QtGui.QColor(180, 230, 255, alpha), 0.015))
+                    rect.setBrush(QtGui.QBrush(QtGui.QColor(70, 190, 255, alpha)))
+                self.plot.plotItem.addItem(rect)
+                self._note_items.append(rect)
+

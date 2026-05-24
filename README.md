@@ -486,3 +486,135 @@ Gamma = 0.7～1.0
 - `Pitch Assist` 廃止後に残っていた自動音程補正用の内部参照を削除しました。
 - カーソル位置の `nearby peak` 表示は残しています。
   - これは自動補正ではなく、確認用の表示だけです。
+
+
+## Stable30 Bezier / Glideノート
+
+連続的に変化する音用に、Bezier/Glideノートを追加しました。
+
+操作:
+
+```text
+左ドラッグ:
+  通常ノート作成
+
+Alt + 左ドラッグ:
+  Bezier/Glideノート作成
+  ドラッグ開始位置が開始音程
+  ドラッグ終了位置が終了音程
+```
+
+現在の実装:
+
+```text
+・Bezier曲線ノートをプロジェクトに保存可能
+・画面上では曲線として表示
+・プレビュー音に反映
+・MIDI出力では短い固定音へ分割して近似
+・ADOFAI出力では短いHz区間へ分割して近似
+```
+
+ADOFAI出力オプション:
+
+```text
+Curve step:
+  曲線を何msごとに分割するか
+  初期値 25ms
+
+Curve pitch step:
+  何半音ぶん変化したら分割するか
+  初期値 0.25 semitone = 25 cent
+```
+
+小さくすると滑らかになりますが、タイル数が増えます。
+
+同梱テスト音声生成:
+
+```bash
+python scripts/make_bezier_test_audio.py
+```
+
+出力:
+
+```text
+bezier_glide_test.wav
+```
+
+この音声には、固定音、上昇グライド、下降グライド、ビブラート風の連続変化が入っています。
+
+
+## Stable31 160BPMテスト音声
+
+Bezier/Glideテスト音声生成スクリプトを、エディターのBPMグリッドで扱いやすいように **160BPM / 拍基準** に変更しました。
+
+実行:
+
+```bash
+python scripts/make_bezier_test_audio_160bpm.py
+```
+
+従来名でも同じ内容を出力します。
+
+```bash
+python scripts/make_bezier_test_audio.py
+```
+
+出力:
+
+```text
+bezier_glide_test_160bpm.wav
+```
+
+推奨エディター設定:
+
+```text
+BPM: 160
+Offset: 0 ms
+Snap: ON
+Snap div: 1 または 4
+```
+
+構成:
+
+```text
+0-1 beat:   F4 fixed
+1-2 beat:   G4 fixed
+2-6 beat:   F4 -> C5 Bezier glide
+6-10 beat:  C5 -> A4 Bezier fall
+10-14 beat: A4 vibrato
+14-15 beat: C5 fixed
+15-16 beat: F5 fixed
+```
+
+全体は16拍、160BPMなので長さは6秒です。
+
+
+## Stable32 Bezier曲線の初期形状を修正
+
+前版では、Bezierノートの制御点が
+
+```text
+p1 = p0 + 1/3
+p2 = p0 + 2/3
+```
+
+になっていたため、数学的に完全な直線になっていました。
+
+Stable32では `Curve` セレクタを追加し、Alt+ドラッグで作るBezier/Glideノートの初期形状を選べるようにしました。
+
+| Curve | 内容 |
+|---|---|
+| ease | 標準。p1=start, p2=end。見た目も音も曲線になります |
+| s_curve | 強めのS字 |
+| linear | 従来の直線 |
+| ease_in | ゆっくり始まって後半で動く |
+| ease_out | 前半で動いてゆっくり終わる |
+
+操作:
+
+```text
+Curve で形を選ぶ
+Alt + 左ドラッグでBezier/Glideノート作成
+```
+
+既存の直線Bezierは自動変換しません。作り直すか、今後必要なら選択中カーブの形状変更機能を追加してください。

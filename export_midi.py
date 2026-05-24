@@ -14,13 +14,14 @@ def export_midi(notes: list[Note], path: str | Path, *, bpm: float = 120.0, tick
     ticks_per_sec = ticks_per_beat * bpm / 60.0
     events = []
     for n in notes:
-        nn = n.normalized()
-        if nn.duration <= 0:
-            continue
-        s = int(round(nn.start * ticks_per_sec))
-        e = max(s + 1, int(round(nn.end * ticks_per_sec)))
-        events.append((s, 1, nn))
-        events.append((e, 0, nn))
+        for nn in n.sample_fixed_segments(max_seconds=0.030, max_pitch_step=0.25):
+            nn = nn.normalized()
+            if nn.duration <= 0:
+                continue
+            s = int(round(nn.start * ticks_per_sec))
+            e = max(s + 1, int(round(nn.end * ticks_per_sec)))
+            events.append((s, 1, nn))
+            events.append((e, 0, nn))
 
     events.sort(key=lambda x: (x[0], x[1]))
     last = 0
@@ -28,9 +29,9 @@ def export_midi(notes: list[Note], path: str | Path, *, bpm: float = 120.0, tick
         delta = max(0, tick - last)
         last = tick
         if typ:
-            track.append(Message("note_on", note=n.midi, velocity=n.velocity, time=delta))
+            track.append(Message("note_on", note=max(0, min(127, int(round(n.midi)))), velocity=n.velocity, time=delta))
         else:
-            track.append(Message("note_off", note=n.midi, velocity=0, time=delta))
+            track.append(Message("note_off", note=max(0, min(127, int(round(n.midi)))), velocity=0, time=delta))
 
     track.append(MetaMessage("end_of_track", time=0))
     mid.save(str(path))

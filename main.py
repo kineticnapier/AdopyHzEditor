@@ -40,6 +40,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._make_toolbar()
         self._make_bottom_controls()
         self._make_shortcuts()
+        self.apply_curve_shape()
         self._connect_dirty_signals()
         self.update_window_title()
 
@@ -177,6 +178,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self,
             "操作メモ",
             "左ドラッグ: ノート作成\n"
+            "Alt+左ドラッグ: Bezier/Glideノート作成（Curveで形を選択）\n"
             "左クリック: 再生棒移動/ノート選択\n"
             "Ctrl+左クリック: 複数選択の追加/解除\n"
             "Shift+左クリック: 範囲選択\n"
@@ -541,10 +543,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         selected = [self.editor.notes[i].normalized() for i in indices]
         min_start = min(n.start for n in selected)
-        self.note_clipboard = [
-            Note(n.start - min_start, n.end - min_start, n.midi, n.velocity)
-            for n in selected
-        ]
+        self.note_clipboard = [n.with_time_offset(-min_start) for n in selected]
         count = len(self.note_clipboard)
         self.statusBar().showMessage(f"Copied {count} note{'s' if count != 1 else ''}")
 
@@ -565,7 +564,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.editor.push_undo()
         new_indices = []
         for n in self.note_clipboard:
-            pasted = Note(base + n.start, base + n.end, n.midi, n.velocity).normalized()
+            pasted = n.with_time_offset(base).normalized()
             self.editor.notes.append(pasted)
             new_indices.append(len(self.editor.notes) - 1)
 
@@ -602,6 +601,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 division=int(self.snap_div.value()) if hasattr(self, "snap_div") else 1,
             )
 
+
+    def apply_curve_shape(self) -> None:
+        if hasattr(self.editor, "set_curve_shape"):
+            self.editor.set_curve_shape(self.curve_shape.currentText() if hasattr(self, "curve_shape") else "ease")
 
     def apply_visual(self) -> None:
         self.editor.set_visual_options(
@@ -893,6 +896,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "analysis_profile": self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal",
             "display_mode": self.display_mode.currentText() if hasattr(self, "display_mode") else "wavetone",
             "cmap": self.cmap.currentText() if hasattr(self, "cmap") else "wavetone",
+            "curve_shape": self.curve_shape.currentText() if hasattr(self, "curve_shape") else "ease",
         }
 
     def apply_project_settings(self, settings: dict) -> None:
@@ -903,7 +907,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for name in (
             "grid_bpm", "grid_offset_ms", "grid_enabled", "metro_enabled", "metro_vol",
             "snap_enabled", "snap_div", "note_octave", "note_vol", "note_sound_enabled",
-            "volume", "playback_speed", "analysis_profile", "display_mode", "cmap",
+            "volume", "playback_speed", "analysis_profile", "display_mode", "cmap", "curve_shape",
         ):
             widget = getattr(self, name, None)
             if widget is not None and hasattr(widget, "blockSignals"):
@@ -947,6 +951,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 idx = self.cmap.findText(str(settings["cmap"]))
                 if idx >= 0:
                     self.cmap.setCurrentIndex(idx)
+            if hasattr(self, "curve_shape") and "curve_shape" in settings:
+                idx = self.curve_shape.findText(str(settings["curve_shape"]))
+                if idx >= 0:
+                    self.curve_shape.setCurrentIndex(idx)
         finally:
             for widget in blockers:
                 widget.blockSignals(False)
@@ -954,6 +962,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_timing_helpers()
         self.apply_note_sound_settings()
         self.apply_playback_speed()
+        self.apply_curve_shape()
         if hasattr(self.player, "set_volume") and hasattr(self, "volume"):
             self.player.set_volume(self.volume.value() / 100.0)
         self.statusBar().showMessage("Project settings applied")
@@ -1015,14 +1024,26 @@ class MainWindow(QtWidgets.QMainWindow):
     def notes_with_output_octave(self) -> list[Note]:
         """
         Apply Oct to preview/export pitch without moving notes on screen.
-        This is used by both MIDI and ADOFAI export.
+        Curve notes keep their Bezier shape and shift all control points.
         """
         shift = self.current_octave_shift() * 12
         result: list[Note] = []
         for n in self.editor.notes:
-            nn = n.normalized()
-            midi = max(0, min(127, int(nn.midi) + shift))
-            result.append(Note(nn.start, nn.end, midi, nn.velocity))
+            nn = n.normalized().with_pitch_offset(shift)
+            # Clamp only for MIDI-ish note range. Fractional pitch is preserved.
+            if nn.is_curve:
+                result.append(Note(
+                    nn.start,
+                    nn.end,
+                    max(0.0, min(127.0, nn.midi)),
+                    nn.velocity,
+                    "curve",
+                    None if nn.midi_end is None else max(0.0, min(127.0, nn.midi_end)),
+                    None if nn.ctrl1_midi is None else max(0.0, min(127.0, nn.ctrl1_midi)),
+                    None if nn.ctrl2_midi is None else max(0.0, min(127.0, nn.ctrl2_midi)),
+                ).normalized())
+            else:
+                result.append(Note(nn.start, nn.end, max(0.0, min(127.0, nn.midi)), nn.velocity).normalized())
         return result
 
     def export_midi_file(self) -> None:
@@ -1107,6 +1128,20 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.max_tiles_per_note.setSingleStep(500)
         self.max_tiles_per_note.setSpecialValueText("Unlimited")
 
+        self.curve_step_ms = QtWidgets.QDoubleSpinBox()
+        self.curve_step_ms.setRange(1.0, 200.0)
+        self.curve_step_ms.setDecimals(1)
+        self.curve_step_ms.setValue(25.0)
+        self.curve_step_ms.setSuffix(" ms")
+        self.curve_step_ms.setToolTip("Bezier/GlideノートをADOFAI出力時に分割する時間幅")
+
+        self.curve_pitch_step = QtWidgets.QDoubleSpinBox()
+        self.curve_pitch_step.setRange(0.01, 2.0)
+        self.curve_pitch_step.setDecimals(3)
+        self.curve_pitch_step.setValue(0.25)
+        self.curve_pitch_step.setSuffix(" semitone")
+        self.curve_pitch_step.setToolTip("Bezier/Glideノートを分割するときの最大ピッチ変化量。0.25=25cent")
+
         self.track_visual = QtWidgets.QComboBox()
         self.track_visual.addItems(["normal", "faint", "very faint", "hidden"])
         self.track_visual.setCurrentText("normal")
@@ -1121,6 +1156,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow("Fixed change x", self.fixed_x)
         layout.addRow("Max total tiles", self.max_tiles)
         layout.addRow("Max tiles per note", self.max_tiles_per_note)
+        layout.addRow("Curve step", self.curve_step_ms)
+        layout.addRow("Curve pitch step", self.curve_pitch_step)
         layout.addRow("Track visual", self.track_visual)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
@@ -1137,6 +1174,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
             "track_visual": self.track_visual.currentText(),
+            "curve_step_sec": float(self.curve_step_ms.value()) / 1000.0,
+            "curve_pitch_step": float(self.curve_pitch_step.value()),
             "pretty": False,
         }
 
