@@ -168,6 +168,7 @@ class EditorView(QtWidgets.QWidget):
         self.selected_indices: set[int] = set()
         self._note_items: list[QtWidgets.QGraphicsRectItem] = []
         self._guide_items: list[pg.InfiniteLine] = []
+        self._pitch_guide_items: list[pg.InfiniteLine] = []
         self._suppress_playhead = False
 
         self.grid_enabled = False
@@ -175,11 +176,12 @@ class EditorView(QtWidgets.QWidget):
         self.grid_offset_sec = 0.0
 
         self.mode = 0
-        self.contrast = 0.72
+        self.contrast = 1.15
         self.gamma = 0.75
         self.enhance = True
-        self.cmap = "viridis"
+        self.cmap = "wavetone"
         self.harmonic_mode = "off"
+        self.display_mode = "wavetone"
 
         self.snap_enabled = False
         self.snap_bpm = 175.0
@@ -376,8 +378,9 @@ class EditorView(QtWidgets.QWidget):
         self.refresh_image()
         self.image.setRect(QtCore.QRectF(0, spec.midi_min - 0.5, spec.duration, spec.midi_max - spec.midi_min + 1))
         self.set_view(0.0, min(12.0, spec.duration), spec.midi_min, min(60, spec.midi_max - spec.midi_min + 1))
+        self.redraw_pitch_grid()
         self.redraw_beat_grid()
-        self.status_changed.emit(f"Loaded spectrogram: {spec.duration:.2f}s / C0-C10")
+        self.status_changed.emit(f"Loaded spectrogram: {spec.duration:.2f}s / {spec.midi_min}-{spec.midi_max}")
 
     def refresh_image(self) -> None:
         if self.spectrogram is None:
@@ -388,22 +391,82 @@ class EditorView(QtWidgets.QWidget):
             gamma=self.gamma,
             per_bin=self.enhance,
             harmonic_mode=self.harmonic_mode,
+            display_mode=self.display_mode,
         ).T
         self.image.setImage(img, autoLevels=False, levels=(0.0, 1.0))
         try:
-            cmap = pg.colormap.get(self.cmap)
+            if self.cmap == "wavetone":
+                # black -> blue -> cyan -> green -> yellow -> red
+                positions = [0.0, 0.12, 0.35, 0.55, 0.75, 1.0]
+                colors = [
+                    (0, 0, 0, 255),
+                    (0, 0, 120, 255),
+                    (0, 80, 255, 255),
+                    (0, 255, 180, 255),
+                    (255, 240, 0, 255),
+                    (255, 0, 0, 255),
+                ]
+                cmap = pg.ColorMap(positions, colors)
+            else:
+                cmap = pg.colormap.get(self.cmap)
             self.image.setLookupTable(cmap.getLookupTable(0.0, 1.0, 256))
         except Exception:
             pass
 
-    def set_visual_options(self, *, contrast: float, gamma: float, enhance: bool, cmap: str, harmonic_mode: str = "off") -> None:
+    def set_visual_options(
+        self,
+        *,
+        contrast: float,
+        gamma: float,
+        enhance: bool,
+        cmap: str,
+        harmonic_mode: str = "off",
+        display_mode: str = "smooth",
+    ) -> None:
         self.contrast = contrast
         self.gamma = gamma
         self.enhance = enhance
         self.cmap = cmap
         self.harmonic_mode = harmonic_mode
+        self.display_mode = display_mode
         self.refresh_image()
 
+
+    def redraw_pitch_grid(self) -> None:
+        for item in getattr(self, "_pitch_guide_items", []):
+            try:
+                self.plot.plotItem.removeItem(item)
+            except Exception:
+                pass
+        self._pitch_guide_items = []
+
+        if self.spectrogram is None:
+            return
+
+        # WaveTone-like pitch guides: faint semitone lines, stronger C/octave lines.
+        for midi in range(self.spectrogram.midi_min, self.spectrogram.midi_max + 1):
+            y = midi - 0.5
+            line = pg.InfiniteLine(pos=y, angle=0, movable=False)
+            line.setZValue(4)
+
+            if midi % 12 == 0:
+                line.setPen(pg.mkPen((255, 255, 255, 115), width=1))
+            else:
+                line.setPen(pg.mkPen((255, 255, 255, 28), width=1))
+
+            self.plot.plotItem.addItem(line)
+            self._pitch_guide_items.append(line)
+
+        # Left axis: show octave C labels instead of vague MIDI numbers.
+        try:
+            ticks = []
+            for midi in range(self.spectrogram.midi_min, self.spectrogram.midi_max + 1):
+                if midi % 12 == 0:
+                    octave = midi // 12 - 1
+                    ticks.append((midi, f"C{octave}"))
+            self.plot.plotItem.getAxis("left").setTicks([ticks])
+        except Exception:
+            pass
 
     def set_beat_grid(self, *, enabled: bool, bpm: float, offset_sec: float) -> None:
         self.grid_enabled = bool(enabled)

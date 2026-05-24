@@ -266,7 +266,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.contrast = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.contrast.setRange(0, 300)
-        self.contrast.setValue(72)
+        self.contrast.setValue(115)
         self.contrast.setFixedWidth(92)
         self.contrast.valueChanged.connect(self.apply_visual)
 
@@ -309,6 +309,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.enhance.stateChanged.connect(self.apply_visual)
         tb.addWidget(self.enhance)
 
+        tb.addWidget(QtWidgets.QLabel(" Display "))
+        self.display_mode = QtWidgets.QComboBox()
+        self.display_mode.addItems(["wavetone", "ridge", "smooth"])
+        self.display_mode.setCurrentText("wavetone")
+        self.display_mode.setToolTip(
+            "wavetone: 見やすいブロック表示\n"
+            "ridge: ピッチの山だけを残す\n"
+            "smooth: 従来のなめらかなスペクトログラム"
+        )
+        self.display_mode.currentTextChanged.connect(self.apply_visual)
+        tb.addWidget(self.display_mode)
+
         tb.addWidget(QtWidgets.QLabel(" Harmonics "))
         self.harmonics = QtWidgets.QComboBox()
         self.harmonics.addItems(["off", "soft", "strong"])
@@ -316,7 +328,8 @@ class MainWindow(QtWidgets.QMainWindow):
         tb.addWidget(self.harmonics)
 
         self.cmap = QtWidgets.QComboBox()
-        self.cmap.addItems(["viridis", "magma", "inferno", "plasma", "gray"])
+        self.cmap.addItems(["wavetone", "viridis", "magma", "inferno", "plasma", "gray"])
+        self.cmap.setCurrentText("wavetone")
         self.cmap.currentTextChanged.connect(self.apply_visual)
         tb.addWidget(self.cmap)
 
@@ -594,6 +607,7 @@ class MainWindow(QtWidgets.QMainWindow):
             enhance=self.enhance.isChecked(),
             cmap=self.cmap.currentText(),
             harmonic_mode=self.harmonics.currentText() if hasattr(self, "harmonics") else "off",
+            display_mode=self.display_mode.currentText() if hasattr(self, "display_mode") else "smooth",
         )
 
     def open_audio(self) -> None:
@@ -874,6 +888,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "song_volume": int(self.volume.value()) if hasattr(self, "volume") else 85,
             "playback_speed": float(self.playback_speed.value()) if hasattr(self, "playback_speed") else 1.0,
             "analysis_profile": self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal",
+            "display_mode": self.display_mode.currentText() if hasattr(self, "display_mode") else "wavetone",
+            "cmap": self.cmap.currentText() if hasattr(self, "cmap") else "wavetone",
         }
 
     def apply_project_settings(self, settings: dict) -> None:
@@ -884,7 +900,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for name in (
             "grid_bpm", "grid_offset_ms", "grid_enabled", "metro_enabled", "metro_vol",
             "snap_enabled", "snap_div", "note_octave", "note_vol", "note_sound_enabled",
-            "volume", "playback_speed", "analysis_profile",
+            "volume", "playback_speed", "analysis_profile", "display_mode", "cmap",
         ):
             widget = getattr(self, name, None)
             if widget is not None and hasattr(widget, "blockSignals"):
@@ -920,6 +936,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 idx = self.analysis_profile.findText(str(settings["analysis_profile"]))
                 if idx >= 0:
                     self.analysis_profile.setCurrentIndex(idx)
+            if hasattr(self, "display_mode") and "display_mode" in settings:
+                idx = self.display_mode.findText(str(settings["display_mode"]))
+                if idx >= 0:
+                    self.display_mode.setCurrentIndex(idx)
+            if hasattr(self, "cmap") and "cmap" in settings:
+                idx = self.cmap.findText(str(settings["cmap"]))
+                if idx >= 0:
+                    self.cmap.setCurrentIndex(idx)
         finally:
             for widget in blockers:
                 widget.blockSignals(False)

@@ -353,3 +353,32 @@ x = 3, 4, 5, 6
 ```
 
 `floor` は従来通り、各ノートごとに `floor(Keycount)` を使います。
+
+
+## Stable23 表示改善
+
+WaveTone寄りに読みやすくする表示モードを追加しました。
+
+- `Display` を追加
+  - `wavetone`: 黒背景に、弱い成分を落として色付きブロック表示
+  - `ridge`: ピッチ方向の山だけを残す表示
+  - `smooth`: 従来のなめらかなスペクトログラム
+- `wavetone` カラーマップを追加
+  - black → blue → cyan → green → yellow → red
+- ピッチ方向の補助線を追加
+  - 半音ごとに薄い線
+  - C音/オクターブごとに強い線
+- 左軸をC0/C1/...のような音名表示に変更
+- 初期表示を `Display=wavetone`, `Colormap=wavetone`, `Contrast=1.15` に変更
+
+見づらい場合の目安:
+
+```text
+Display = wavetone
+Colormap = wavetone
+Contrast = 1.0～1.6
+Gamma = 0.6～1.0
+Harmonics = soft
+```
+
+細かい倍音やノイズまで確認したい場合は `Display=smooth` に戻してください。

@@ -223,6 +223,53 @@ def suppress_harmonics(z: np.ndarray, *, strength: float = 0.65, mode: str = "so
     return np.clip(y, 0.0, 1.0).astype(np.float32)
 
 
+def apply_display_mode(z: np.ndarray, *, mode: str = "smooth") -> np.ndarray:
+    """
+    Display-only post processing.
+
+    smooth:
+        normal continuous spectrogram
+    ridge:
+        keep only local maxima in pitch direction
+    wavetone:
+        threshold + quantize, closer to WaveTone-style readable blocks
+    """
+    mode = (mode or "smooth").lower()
+    if mode in ("smooth", "normal", "raw"):
+        return z.astype(np.float32, copy=False)
+
+    src = np.clip(z.astype(np.float32, copy=False), 0.0, 1.0)
+    up = np.roll(src, 1, axis=0)
+    down = np.roll(src, -1, axis=0)
+    # Edge bins should not wrap.
+    up[0, :] = 0.0
+    down[-1, :] = 0.0
+
+    local_peak = (src >= up) & (src >= down)
+
+    if mode == "ridge":
+        thr = max(0.035, float(np.percentile(src, 72.0)))
+        out = np.where(local_peak & (src >= thr), src, 0.0)
+        return np.sqrt(np.clip(out, 0.0, 1.0)).astype(np.float32)
+
+    if mode == "wavetone":
+        # More readable for tracing: remove weak haze, keep strong blocks.
+        thr = max(0.04, float(np.percentile(src, 63.0)))
+        strong = src >= max(thr, 0.10)
+        peak_or_strong = local_peak | (src >= max(0.22, float(np.percentile(src, 88.0))))
+        out = np.where(strong & peak_or_strong, src, 0.0)
+
+        if np.max(out) > 0:
+            out = np.clip((out - thr) / max(0.02, 1.0 - thr), 0.0, 1.0)
+
+        # Quantize to colored blocks like WaveTone.
+        levels = 9.0
+        out = np.floor(out * levels) / levels
+        return out.astype(np.float32)
+
+    return src.astype(np.float32, copy=False)
+
+
 def enhance_spectrogram(
     db: np.ndarray,
     *,
@@ -231,6 +278,7 @@ def enhance_spectrogram(
     per_bin: bool = True,
     harmonic_mode: str = "off",
     harmonic_strength: float = 0.65,
+    display_mode: str = "smooth",
 ) -> np.ndarray:
     x = db.astype(np.float32)
 
@@ -269,6 +317,8 @@ def enhance_spectrogram(
 
     if harmonic_mode != "off":
         z = suppress_harmonics(z, strength=harmonic_strength, mode=harmonic_mode)
+
+    z = apply_display_mode(z, mode=display_mode)
 
     z = np.power(np.clip(z, 0.0, 1.0), gamma)
     return z.astype(np.float32)
