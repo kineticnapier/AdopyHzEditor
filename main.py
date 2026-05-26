@@ -417,6 +417,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.snap_div.setToolTip("Snap subdivision per beat. 1 = beat, 4 = quarter-beat grid")
         self.snap_div.valueChanged.connect(self.apply_timing_helpers)
 
+        self.curve_shape = QtWidgets.QComboBox()
+        self.curve_shape.addItems(["ease", "s_curve", "linear", "ease_in", "ease_out"])
+        self.curve_shape.setCurrentText("ease")
+        self.curve_shape.setToolTip(
+            "Alt+ドラッグで作るBezier/Glideノートの初期カーブ\n"
+            "ease: 標準の曲線\n"
+            "s_curve: 強めのS字\n"
+            "linear: 直線\n"
+            "ease_in/ease_out: 片側に寄った曲線"
+        )
+        self.curve_shape.currentTextChanged.connect(self.apply_curve_shape)
+
         layout.addWidget(QtWidgets.QLabel("Time"), 0, 0)
         layout.addWidget(self.time_slider, 0, 1)
         layout.addWidget(QtWidgets.QLabel("Visible"), 0, 2)
@@ -445,6 +457,8 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.snap_enabled, 1, 8)
         layout.addWidget(QtWidgets.QLabel("Snap div"), 1, 9)
         layout.addWidget(self.snap_div, 1, 10)
+        layout.addWidget(QtWidgets.QLabel("Curve"), 1, 11)
+        layout.addWidget(self.curve_shape, 1, 12)
 
         self.addToolBarBreak()
         bottom_tb = QtWidgets.QToolBar("View")

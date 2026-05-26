@@ -618,3 +618,39 @@ Alt + 左ドラッグでBezier/Glideノート作成
 ```
 
 既存の直線Bezierは自動変換しません。作り直すか、今後必要なら選択中カーブの形状変更機能を追加してください。
+
+
+## Stable33 C4→C6 / 160BPM / 4拍テスト音声
+
+C4からC6まで、160BPMで4拍分かけて滑らかに上がるテスト音声生成スクリプトを追加しました。
+
+実行:
+
+```bash
+python scripts/make_c4_c6_glide_160bpm.py
+```
+
+出力:
+
+```text
+c4_to_c6_160bpm_4beats.wav
+```
+
+推奨エディター設定:
+
+```text
+BPM: 160
+Offset: 0 ms
+Snap: ON
+Snap div: 1 または 4
+```
+
+期待するノート:
+
+```text
+start: 0 beat / C4
+end:   4 beat / C6
+```
+
+また、`Curve` セレクタを下部のBPM/Snap欄の横に表示しました。  
+`Alt + 左ドラッグ` でBezier/Glideノートを作る前に、ここで `ease`, `s_curve`, `linear`, `ease_in`, `ease_out` を選べます。
