@@ -1059,3 +1059,132 @@ bezier_hz:
 Hz上で曲線的に動かしたい:
   bezier_hz
 ```
+
+
+## Stable42 Phase-continuous curve/glide export
+
+Curve/GlideノートのADOFAI出力に、位相連続ベースのAngle-only出力を追加しました。
+
+目的:
+
+```text
+従来:
+  Curve/Glide
+  → 短い固定Hzノートへ分割
+  → segment境界でぶつ切り感が出る
+
+Stable42:
+  Curve/Glide
+  → 連続した周波数関数 f(t) として扱う
+  → phase(t) = ∫ f(t) dt を計算
+  → phaseが1周期進む位置にタイルを置く
+```
+
+対象:
+
+```text
+Method = Angle-only
+Phase-continuous glide = ON
+Curve/Glideノート
+```
+
+固定ノートは従来通りです。  
+Angle Compression / Direct 180° では従来通り短い固定Hz区間へ分割します。
+
+計算:
+
+```text
+phase(t) = ∫ f(t) dt
+tile boundary = phaseが1, 2, 3, ... を超える時刻
+dt = 次のtile boundaryまでの秒数
+angle = dt * AngleOnlyBPM * 180 / 60
+```
+
+これにより、Curve/Glideの中で周波数が連続的に変化しても、短い固定Hzノート列に分割せずに角度列を作れます。
+
+出力ダイアログ:
+
+```text
+Phase-continuous glide:
+  ON推奨
+  Angle-onlyでCurve/Glideを連続位相として出力
+```
+
+Debug Preview:
+
+```text
+phase_continuous
+angle_min
+angle_max
+```
+
+を追加しました。
+
+注意:
+
+```text
+Final tile mode = cardinal/custom を使うと、最後の1タイルだけは見た目補正のためSetSpeed補償が入ります。
+Final tile mode = scaled なら基本的にAngle-only BPMのままです。
+```
+
+
+## Stable43 Phase-continuous glide for Direct / Angle Compression
+
+Stable42では、Phase-continuous glide は Angle-only のみ対応でした。  
+Stable43では、Direct 180° と Angle Compression でも Phase-continuous glide を使えるようにしました。
+
+対象:
+
+```text
+Phase-continuous glide = ON
+Curve/Glideノート
+```
+
+対応Method:
+
+```text
+Angle-only
+Direct 180°
+Angle Compression
+```
+
+方式:
+
+```text
+Curve/Glideを短い固定Hzノート列に分割せず、
+周波数曲線 f(t) を積分してタイル境界を決めます。
+```
+
+Direct 180°:
+
+```text
+各タイルの角度は180°
+各タイルの実時間dtに合わせてSetSpeedを置く
+```
+
+Angle Compression:
+
+```text
+Curve全体のtotal phaseからmain angleを決定
+target_angleがあればそれを使用
+各タイルの実時間dtに合わせてSetSpeedを置く
+最後に端数phaseがある場合は final tile mode を適用
+```
+
+注意:
+
+```text
+Direct 180° / Angle Compression のPhase-continuous glideでは、
+基本的にタイルごとにSetSpeedが追加されます。
+そのため、出力は重くなりやすいです。
+
+軽さを優先するなら Angle-only + Phase-continuous glide が最も軽いです。
+```
+
+Debug Preview:
+
+```text
+Direct 180° / Angle Compressionでも
+phase_continuous = True
+effective_bpm = varies
+として表示されます。
