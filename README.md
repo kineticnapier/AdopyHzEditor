@@ -858,3 +858,81 @@ custom:
   Custom final angleを使う
   180°にすればstraight相当
 ```
+
+
+## Stable39 Angle-only Hz charting mode
+
+`Issue #4: Add angle-only Hz charting mode` に対応しました。
+
+ADOFAI出力ダイアログに新しいMethodを追加しました。
+
+```text
+Angle-only: one BPM + angle only
+```
+
+仕様:
+
+```text
+・最初/全体のBPMは Angle-only BPM を使う
+・このBPMを settings.bpm に書き込む
+・各ノートごとのSetSpeedは基本的に置かない
+・Hzはタイル角度だけで合わせる
+```
+
+角度計算:
+
+```text
+HzBPM = Hz * 60
+angle = AngleOnlyBPM * 180 / HzBPM
+```
+
+つまり、
+
+```text
+angle = AngleOnlyBPM * 180 / (Hz * 60)
+```
+
+例:
+
+```text
+Angle-only BPM = 1600
+Hz = 440
+
+angle = 1600 * 180 / (440 * 60)
+      = 10.909090...°
+```
+
+タイル数:
+
+```text
+keycount = Hz * duration
+```
+
+注意:
+
+```text
+Angle-onlyでは角度そのものが音程を決めるため、
+per-note Target Angle override は無視します。
+```
+
+Final tile mode:
+
+```text
+scaled:
+  final_angle = angle * frac
+  基本的にSetSpeedなし
+
+cardinal/custom:
+  最後の端数タイルだけ見た目優先で角度変更
+  その分はSetSpeedで時間補償
+```
+
+おすすめ:
+
+```text
+Method: Angle-only
+Angle-only BPM: 1000～3000くらい
+Final tile mode: scaled
+```
+
+角度が小さすぎて詰まる場合は `Angle-only BPM` を上げてください。
