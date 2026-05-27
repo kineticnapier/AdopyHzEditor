@@ -1156,7 +1156,11 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout = QtWidgets.QFormLayout(self)
 
         self.method = QtWidgets.QComboBox()
-        self.method.addItems(["Angle Compression: corrected Keycount formula", "Direct 180°: BPM = Hz × 60"])
+        self.method.addItems([
+            "Angle Compression: corrected Keycount formula",
+            "Direct 180°: BPM = Hz × 60",
+            "Angle-only: one BPM + angle only",
+        ])
 
         self.base_bpm = QtWidgets.QDoubleSpinBox()
         self.base_bpm.setRange(1.0, 999999.0)
@@ -1165,6 +1169,16 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         if parent is not None and hasattr(parent, "grid_bpm"):
             default_bpm = float(parent.grid_bpm.value())
         self.base_bpm.setValue(default_bpm)
+
+        self.angle_only_bpm = QtWidgets.QDoubleSpinBox()
+        self.angle_only_bpm.setRange(1.0, 999999.0)
+        self.angle_only_bpm.setDecimals(6)
+        self.angle_only_bpm.setValue(max(1000.0, default_bpm * 10.0))
+        self.angle_only_bpm.setToolTip(
+            "Angle-onlyモードで最初に使うグローバルBPM。\n"
+            "このBPMをsettings.bpmに入れ、各Hzは角度だけで合わせます。\n"
+            "値を大きくすると角度が大きくなり、見た目が詰まりにくくなります。"
+        )
 
         self.x_mode = QtWidgets.QComboBox()
         self.x_mode.addItems(["floor", "lowest_floor", "round", "ceil", "fixed"])
@@ -1217,14 +1231,6 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "faint/hidden にするとトラック線を薄く/非表示にできます。"
         )
 
-        self.last_angle_correction = QtWidgets.QCheckBox("Scale final fractional angle")
-        self.last_angle_correction.setChecked(True)
-        self.last_angle_correction.setToolTip(
-            "Target Angleを指定したとき、端数タイルの角度も同じ比率で補正します。\n"
-            "ON: final_angle = target_angle * fractional_part(keycount)\n"
-            "OFF: final_angle = auto_angle * fractional_part(keycount)"
-        )
-
         self.final_angle_mode = QtWidgets.QComboBox()
         self.final_angle_mode.addItems(["scaled", "cardinal", "custom"])
         self.final_angle_mode.setCurrentText("scaled")
@@ -1251,6 +1257,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
 
         layout.addRow("Method", self.method)
         layout.addRow("Base BPM", self.base_bpm)
+        layout.addRow("Angle-only BPM", self.angle_only_bpm)
         layout.addRow("Change x mode", self.x_mode)
         layout.addRow("Fixed change x", self.fixed_x)
         layout.addRow("Max total tiles", self.max_tiles)
@@ -1269,8 +1276,13 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
 
     def options(self) -> dict:
         return {
-            "method": "direct_180" if self.method.currentIndex() == 1 else "rabbit_zip",
+            "method": (
+                "direct_180" if self.method.currentIndex() == 1
+                else "angle_only" if self.method.currentIndex() == 2
+                else "rabbit_zip"
+            ),
             "base_bpm": float(self.base_bpm.value()),
+            "angle_only_bpm": float(self.angle_only_bpm.value()),
             "rabbit_x_mode": self.x_mode.currentText(),
             "rabbit_fixed_x": float(self.fixed_x.value()),
             "max_tiles": int(self.max_tiles.value()),

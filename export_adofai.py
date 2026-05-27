@@ -263,6 +263,90 @@ def emit_direct(angle_data, actions, floor, freq, dur, max_tiles_per_note) -> tu
     return floor, emitted, current_bpm
 
 
+
+def emit_angle_only(
+    angle_data,
+    actions,
+    floor,
+    freq,
+    dur,
+    song_bpm,
+    max_tiles_per_note,
+    final_angle_mode: str = "scaled",
+    final_custom_angle: float = 180.0,
+    final_cardinal_step: float = 90.0,
+) -> tuple[int, int, float | None, bool]:
+    """
+    Angle-only Hz charting.
+
+    One global BPM is used for the generated chart, and each note's pitch is
+    represented only by tile angle.
+
+        angle = song_bpm * 180 / (freq * 60)
+
+    No per-note SetSpeed is emitted, except optional final-tile visual
+    compensation when Final tile mode is cardinal/custom.
+    """
+    if freq <= 0 or dur <= 0 or song_bpm <= 0:
+        return floor, 0, None, False
+
+    keycount = freq * dur
+    if keycount <= EPS:
+        return floor, 0, None, False
+
+    angle = float(song_bpm) * 180.0 / max(EPS, freq * 60.0)
+    angle = clean_relative_angle(angle)
+
+    whole = int(math.floor(keycount + EPS))
+    frac = keycount - math.floor(keycount)
+
+    emitted = 0
+    whole_to_emit = whole
+    if max_tiles_per_note > 0:
+        whole_to_emit = min(whole_to_emit, max_tiles_per_note)
+
+    for _ in range(whole_to_emit):
+        add_relative(angle_data, angle)
+        floor += 1
+        emitted += 1
+
+    final_visual_used = False
+    if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
+        scaled_final_angle = angle * frac
+        prev_abs = float(angle_data[-1])
+        final_angle = final_visual_angle(
+            mode=final_angle_mode,
+            prev_abs=prev_abs,
+            scaled_final_angle=scaled_final_angle,
+            custom_final_angle=final_custom_angle,
+            cardinal_step=final_cardinal_step,
+        )
+
+        if final_angle <= 0:
+            final_angle = scaled_final_angle
+
+        # Keep final fractional duration = frac / freq even when visual angle changes.
+        final_bpm = (freq * 60.0) * (final_angle / max(EPS, 180.0 * frac))
+
+        if abs(final_bpm - float(song_bpm)) > 1e-6:
+            actions.append(set_bpm(floor, final_bpm))
+            final_visual_used = True
+
+        add_relative(angle_data, final_angle)
+        floor += 1
+        emitted += 1
+
+        # Restore the one global angle-only BPM for following tiles/pauses.
+        if abs(final_bpm - float(song_bpm)) > 1e-6:
+            actions.append(set_bpm(floor, song_bpm))
+
+        if abs(final_angle - scaled_final_angle) > 1e-6:
+            final_visual_used = True
+
+    return floor, emitted, float(song_bpm), final_visual_used
+
+
+
 def emit_angle_compression(
     angle_data,
     actions,
@@ -410,6 +494,7 @@ def export_adofai(
     *,
     method: str = "rabbit_zip",
     base_bpm: float = 175.0,
+    angle_only_bpm: float = 1600.0,
     rabbit_x_mode: str = "floor",
     rabbit_fixed_x: float = 8.0,
     max_tiles: int = 200000,
@@ -443,7 +528,14 @@ def export_adofai(
     target_angle_used = 0
     final_visual_corrections = 0
     current_bpm: float | None = None
-    play_bpm = max(1e-6, float(base_bpm))
+    method_key = (method or "rabbit_zip").lower().replace(" ", "_").replace("-", "_")
+    play_bpm = max(1e-6, float(angle_only_bpm if method_key == "angle_only" else base_bpm))
+
+    if method_key == "angle_only":
+        # One initial/global speed for the entire angle-only chart.
+        # No per-note SetSpeed is needed unless final-tile visual compensation is used.
+        level.setdefault("settings", {})["bpm"] = round(play_bpm, 6)
+        current_bpm = play_bpm
 
     for n in sorted_notes:
         if max_tiles > 0 and tiles >= max_tiles:
@@ -463,8 +555,25 @@ def export_adofai(
             remain = max_tiles - tiles
             limit = min(limit, remain) if limit > 0 else remain
 
-        if method == "direct_180":
+        if method_key == "direct_180":
             floor, t, note_bpm = emit_direct(angle_data, actions, floor, n.freq, audible, limit)
+        elif method_key == "angle_only":
+            floor, t, note_bpm, final_visual_used = emit_angle_only(
+                angle_data,
+                actions,
+                floor,
+                n.freq,
+                audible,
+                play_bpm,
+                limit,
+                final_angle_mode=final_angle_mode,
+                final_custom_angle=final_custom_angle,
+                final_cardinal_step=final_cardinal_step,
+            )
+            # In angle-only mode, target_angle is intentionally ignored because
+            # the angle itself determines pitch.
+            if final_visual_used:
+                final_visual_corrections += 1
         else:
             floor, t, note_bpm, target_used, final_visual_used = emit_angle_compression(
                 angle_data,
@@ -498,18 +607,21 @@ def export_adofai(
     Path(path).write_text(text, encoding="utf-8")
 
     return {
-        "method": method,
+        "method": method_key,
         "track_visual": track_visual,
         "curve_step_sec": round(float(curve_step_sec), 6),
         "curve_pitch_step": round(float(curve_pitch_step), 6),
         "input_notes_total": len(notes),
-        "base_bpm": play_bpm,
+        "base_bpm": round(float(base_bpm), 6),
+        "angle_only_bpm": round(float(angle_only_bpm), 6),
+        "effective_play_bpm": round(float(play_bpm), 6),
         "lowest_floor_x": global_lowest_floor_x,
         "effective_fixed_x": round(float(effective_fixed_x), 6),
         "first_note_offset_seconds": round(first_note_offset, 6),
         "start_floor": 1,
         "notes_total": len(sorted_notes),
         "notes_used": used,
+        "target_angle_ignored": sum(1 for n in sorted_notes if method_key == "angle_only" and n.target_angle is not None),
         "target_angle_used": target_angle_used,
         "final_angle_mode": final_angle_mode,
         "final_custom_angle": round(float(final_custom_angle), 6),
