@@ -1217,6 +1217,38 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "faint/hidden にするとトラック線を薄く/非表示にできます。"
         )
 
+        self.last_angle_correction = QtWidgets.QCheckBox("Scale final fractional angle")
+        self.last_angle_correction.setChecked(True)
+        self.last_angle_correction.setToolTip(
+            "Target Angleを指定したとき、端数タイルの角度も同じ比率で補正します。\n"
+            "ON: final_angle = target_angle * fractional_part(keycount)\n"
+            "OFF: final_angle = auto_angle * fractional_part(keycount)"
+        )
+
+        self.final_angle_mode = QtWidgets.QComboBox()
+        self.final_angle_mode.addItems(["scaled", "cardinal", "custom"])
+        self.final_angle_mode.setCurrentText("scaled")
+        self.final_angle_mode.setToolTip(
+            "最後の端数タイルの見た目補正\n"
+            "scaled: 従来通り。angle * frac\n"
+            "cardinal: 最後の絶対角度を0/90/180/270付近へ寄せる\n"
+            "custom: 下の Custom final angle を使う。180°にすれば直進"
+        )
+
+        self.final_custom_angle = QtWidgets.QDoubleSpinBox()
+        self.final_custom_angle.setRange(0.001, 359.999)
+        self.final_custom_angle.setDecimals(6)
+        self.final_custom_angle.setValue(180.0)
+        self.final_custom_angle.setSuffix("°")
+        self.final_custom_angle.setToolTip("Final tile mode が custom のときに使う相対角度")
+
+        self.final_cardinal_step = QtWidgets.QDoubleSpinBox()
+        self.final_cardinal_step.setRange(1.0, 180.0)
+        self.final_cardinal_step.setDecimals(3)
+        self.final_cardinal_step.setValue(90.0)
+        self.final_cardinal_step.setSuffix("°")
+        self.final_cardinal_step.setToolTip("cardinal modeの吸着角度。90=縦横、45=斜めも許可")
+
         layout.addRow("Method", self.method)
         layout.addRow("Base BPM", self.base_bpm)
         layout.addRow("Change x mode", self.x_mode)
@@ -1226,6 +1258,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow("Curve step", self.curve_step_ms)
         layout.addRow("Curve pitch step", self.curve_pitch_step)
         layout.addRow("Track visual", self.track_visual)
+        layout.addRow("Final tile mode", self.final_angle_mode)
+        layout.addRow("Custom final angle", self.final_custom_angle)
+        layout.addRow("Cardinal step", self.final_cardinal_step)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -1243,6 +1278,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "track_visual": self.track_visual.currentText(),
             "curve_step_sec": float(self.curve_step_ms.value()) / 1000.0,
             "curve_pitch_step": float(self.curve_pitch_step.value()),
+            "final_angle_mode": self.final_angle_mode.currentText(),
+            "final_custom_angle": float(self.final_custom_angle.value()),
+            "final_cardinal_step": float(self.final_cardinal_step.value()),
             "pretty": False,
         }
 

@@ -44,6 +44,59 @@ def clean_angle(x: float) -> int | float:
     return round(x, 9)
 
 
+def clean_relative_angle(x: float) -> float:
+    """
+    Relative angle for generated ADOFAI tiles.
+    Avoid exact 0 because it can create awkward/ambiguous U-turn-like geometry.
+    """
+    v = float(x) % 360.0
+    if abs(v) < 1e-9:
+        v = 360.0
+    return round(v, 9)
+
+
+def nearest_cardinal_angle(abs_angle: float, step: float = 90.0) -> float:
+    step = max(1e-6, float(step))
+    return clean_angle(round(float(abs_angle) / step) * step)
+
+
+def final_visual_angle(
+    *,
+    mode: str,
+    prev_abs: float,
+    scaled_final_angle: float,
+    custom_final_angle: float,
+    cardinal_step: float = 90.0,
+) -> float:
+    """
+    Choose the visual final-tile relative angle.
+
+    scaled:
+        current mathematically scaled fractional angle.
+    straight:
+        legacy alias for custom 180. Not exposed in the UI.
+    cardinal:
+        choose a relative angle that makes the final absolute tile direction snap
+        to the nearest cardinal/grid direction.
+    custom:
+        use user-specified relative angle.
+    """
+    mode = (mode or "scaled").lower().replace(" ", "_").replace("-", "_")
+
+    if mode in ("straight", "straight_relative"):
+        return 180.0
+
+    if mode in ("custom", "custom_relative"):
+        return clean_relative_angle(custom_final_angle)
+
+    if mode in ("cardinal", "snap_cardinal", "snap_to_cardinal"):
+        scaled_abs = clean_angle(prev_abs + 180.0 - scaled_final_angle)
+        desired_abs = nearest_cardinal_angle(scaled_abs, cardinal_step)
+        return clean_relative_angle(prev_abs + 180.0 - desired_abs)
+
+    return float(scaled_final_angle)
+
+
 def add_relative(angle_data: list[Any], rel: float) -> None:
     prev = float(angle_data[-1])
     cur = prev + 180.0 - float(rel)
@@ -221,15 +274,18 @@ def emit_angle_compression(
     fixed_x,
     max_tiles_per_note,
     target_angle: float | None = None,
-) -> tuple[int, int, float | None, bool]:
+    final_angle_mode: str = "scaled",
+    final_custom_angle: float = 180.0,
+    final_cardinal_step: float = 90.0,
+) -> tuple[int, int, float | None, bool, bool]:
     if freq <= 0 or dur <= 0:
-        return floor, 0, None, False
+        return floor, 0, None, False, False
 
     beat_count = dur * play_bpm / 60.0
     keycount = freq * 60.0 * beat_count / max(play_bpm, EPS)
 
     if keycount <= EPS:
-        return floor, 0, None, False
+        return floor, 0, None, False, False
 
     x_tiles = int(math.floor(keycount + EPS))
     frac = keycount - math.floor(keycount)
@@ -243,6 +299,17 @@ def emit_angle_compression(
     if angle <= 0:
         angle = auto_angle
         target_used = False
+
+    # Issue #3:
+    # When overriding the main zip angle, the fractional last angle should
+    # be corrected by the same scale ratio.
+    #
+    # auto_last_angle = auto_angle * frac
+    # corrected_last  = auto_last_angle * (target_angle / auto_angle)
+    #                 = target_angle * frac
+    #
+    # If disabled, the final fractional tile uses the old auto angle.
+    frac_base_angle = angle
 
     bpm = (freq * 60.0) * (angle / 180.0)
 
@@ -258,12 +325,42 @@ def emit_angle_compression(
         floor += 1
         emitted += 1
 
+    final_visual_used = False
     if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
-        add_relative(angle_data, angle * frac)
+        scaled_final_angle = frac_base_angle * frac
+        prev_abs = float(angle_data[-1])
+        final_angle = final_visual_angle(
+            mode=final_angle_mode,
+            prev_abs=prev_abs,
+            scaled_final_angle=scaled_final_angle,
+            custom_final_angle=final_custom_angle,
+            cardinal_step=final_cardinal_step,
+        )
+
+        # Keep the note duration correct even when the final tile angle is changed
+        # for visual reasons.
+        #
+        # desired final-tile duration = frac / freq
+        # duration(angle, bpm) = (angle / 180) * (60 / bpm)
+        # => bpm = freq * 60 * angle / (180 * frac)
+        if final_angle <= 0:
+            final_angle = scaled_final_angle
+
+        final_bpm = (freq * 60.0) * (final_angle / max(EPS, 180.0 * frac))
+
+        if abs(final_bpm - bpm) > 1e-6:
+            actions.append(set_bpm(floor, final_bpm))
+            final_visual_used = True
+
+        add_relative(angle_data, final_angle)
         floor += 1
         emitted += 1
+        bpm = final_bpm
 
-    return floor, emitted, bpm, target_used
+        if abs(final_angle - scaled_final_angle) > 1e-6:
+            final_visual_used = True
+
+    return floor, emitted, bpm, target_used, final_visual_used
 
 
 def flatten_curve_notes(
@@ -320,6 +417,9 @@ def export_adofai(
     track_visual: str = "normal",
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
+    final_angle_mode: str = "scaled",
+    final_custom_angle: float = 180.0,
+    final_cardinal_step: float = 90.0,
     pretty: bool = False,
 ) -> dict[str, int | float | str]:
     level = new_level()
@@ -341,6 +441,7 @@ def export_adofai(
     overlaps = 0
     used = 0
     target_angle_used = 0
+    final_visual_corrections = 0
     current_bpm: float | None = None
     play_bpm = max(1e-6, float(base_bpm))
 
@@ -365,7 +466,7 @@ def export_adofai(
         if method == "direct_180":
             floor, t, note_bpm = emit_direct(angle_data, actions, floor, n.freq, audible, limit)
         else:
-            floor, t, note_bpm, target_used = emit_angle_compression(
+            floor, t, note_bpm, target_used, final_visual_used = emit_angle_compression(
                 angle_data,
                 actions,
                 floor,
@@ -376,9 +477,14 @@ def export_adofai(
                 effective_fixed_x,
                 limit,
                 target_angle=n.target_angle,
+                final_angle_mode=final_angle_mode,
+                final_custom_angle=final_custom_angle,
+                final_cardinal_step=final_cardinal_step,
             )
             if target_used:
                 target_angle_used += 1
+            if final_visual_used:
+                final_visual_corrections += 1
 
         if note_bpm is not None:
             current_bpm = note_bpm
@@ -405,6 +511,10 @@ def export_adofai(
         "notes_total": len(sorted_notes),
         "notes_used": used,
         "target_angle_used": target_angle_used,
+        "final_angle_mode": final_angle_mode,
+        "final_custom_angle": round(float(final_custom_angle), 6),
+        "final_cardinal_step": round(float(final_cardinal_step), 6),
+        "final_visual_corrections": final_visual_corrections,
         "overlaps_serialized": overlaps,
         "tiles_total": tiles,
         "floors_total": len(angle_data) - 1,
