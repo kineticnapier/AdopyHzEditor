@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import csv
+import io
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -9,7 +11,7 @@ from audio_analysis import analyze_cqt, analysis_profile_options
 from audio_player import AudioPlayer
 from editor_view import EditorView
 from export_midi import export_midi
-from export_adofai import export_adofai
+from export_adofai import export_adofai, build_adofai_debug_rows
 from project_io import save_project, load_project
 from note_model import Note
 
@@ -1149,6 +1151,125 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "ADOFAI export failed", str(e))
 
 
+class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
+    COLUMNS = [
+        "index",
+        "floor_start",
+        "floor_end",
+        "start_s",
+        "end_s",
+        "duration_s",
+        "pause_before_s",
+        "kind",
+        "note",
+        "midi",
+        "freq_hz",
+        "method",
+        "keycount",
+        "whole",
+        "frac",
+        "change_x",
+        "angle",
+        "auto_angle",
+        "target_angle",
+        "target_angle_used",
+        "target_angle_ignored",
+        "final_angle_scaled",
+        "final_angle_effective",
+        "effective_bpm",
+        "final_bpm",
+        "tiles_est",
+        "final_visual_used",
+        "overlap",
+        "warning",
+    ]
+
+    def __init__(self, rows: list[dict], parent=None) -> None:
+        super().__init__(parent)
+        self.rows = rows
+        self.setWindowTitle("ADOFAI Hz/Angle Debug Preview")
+        self.resize(1280, 720)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        total_tiles = sum(int(r.get("tiles_est", 0) or 0) for r in rows)
+        target_used = sum(1 for r in rows if r.get("target_angle_used"))
+        target_ignored = sum(1 for r in rows if r.get("target_angle_ignored"))
+        visual_fixed = sum(1 for r in rows if r.get("final_visual_used"))
+        warnings = sum(1 for r in rows if r.get("warning"))
+
+        summary = QtWidgets.QLabel(
+            f"Rows: {len(rows)} / Estimated tiles: {total_tiles} / "
+            f"Target angle used: {target_used} / ignored: {target_ignored} / "
+            f"final visual corrections: {visual_fixed} / warnings: {warnings}"
+        )
+        layout.addWidget(summary)
+
+        self.table = QtWidgets.QTableWidget()
+        self.table.setColumnCount(len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(False)
+
+        max_display = 5000
+        shown = min(len(rows), max_display)
+        self.table.setRowCount(shown)
+
+        for r, row in enumerate(rows[:shown]):
+            for c, key in enumerate(self.COLUMNS):
+                value = row.get(key, "")
+                item = QtWidgets.QTableWidgetItem(str(value))
+                if key == "warning" and value:
+                    item.setBackground(QtGui.QColor(255, 210, 120))
+                elif key in ("target_angle_used", "target_angle_ignored", "final_visual_used") and value:
+                    item.setBackground(QtGui.QColor(190, 220, 255))
+                self.table.setItem(r, c, item)
+
+        self.table.resizeColumnsToContents()
+        layout.addWidget(self.table)
+
+        if len(rows) > max_display:
+            layout.addWidget(QtWidgets.QLabel(f"Only first {max_display} rows are shown. Copy buttons still copy all rows."))
+
+        buttons = QtWidgets.QHBoxLayout()
+
+        copy_tsv = QtWidgets.QPushButton("Copy TSV")
+        copy_tsv.clicked.connect(lambda: self.copy_rows("tsv"))
+        buttons.addWidget(copy_tsv)
+
+        copy_csv = QtWidgets.QPushButton("Copy CSV")
+        copy_csv.clicked.connect(lambda: self.copy_rows("csv"))
+        buttons.addWidget(copy_csv)
+
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        buttons.addStretch(1)
+        buttons.addWidget(close_btn)
+
+        layout.addLayout(buttons)
+
+    def rows_as_tsv(self) -> str:
+        lines = ["\t".join(self.COLUMNS)]
+        for row in self.rows:
+            lines.append("\t".join(str(row.get(k, "")) for k in self.COLUMNS))
+        return "\n".join(lines)
+
+    def rows_as_csv(self) -> str:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(self.COLUMNS)
+        for row in self.rows:
+            writer.writerow([row.get(k, "") for k in self.COLUMNS])
+        return buf.getvalue()
+
+    def copy_rows(self, fmt: str) -> None:
+        text = self.rows_as_csv() if fmt == "csv" else self.rows_as_tsv()
+        QtWidgets.QApplication.clipboard().setText(text)
+
+
+
 class ExportAdoFAIDialog(QtWidgets.QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1269,10 +1390,28 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow("Custom final angle", self.final_custom_angle)
         layout.addRow("Cardinal step", self.final_cardinal_step)
 
+        self.debug_preview_button = QtWidgets.QPushButton("Debug Preview")
+        self.debug_preview_button.setToolTip("出力前にHz/BPM/角度/Keycount/端数角度などを表で確認します")
+        self.debug_preview_button.clicked.connect(self.show_debug_preview)
+        layout.addRow("Debug", self.debug_preview_button)
+
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+
+    def show_debug_preview(self) -> None:
+        parent = self.parent()
+        if parent is None or not hasattr(parent, "notes_with_output_octave"):
+            QtWidgets.QMessageBox.warning(self, "Debug preview failed", "Could not access editor notes.")
+            return
+
+        try:
+            rows = build_adofai_debug_rows(parent.notes_with_output_octave(), **self.options())
+            dlg = AdoFAIDebugPreviewDialog(rows, self)
+            dlg.exec()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Debug preview failed", str(e))
 
     def options(self) -> dict:
         return {
