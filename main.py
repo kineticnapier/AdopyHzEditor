@@ -43,6 +43,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._make_bottom_controls()
         self._make_shortcuts()
         self.apply_curve_shape()
+        self.apply_curve_interpolation()
         self._connect_dirty_signals()
         self.update_window_title()
 
@@ -431,6 +432,22 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.curve_shape.currentTextChanged.connect(self.apply_curve_shape)
 
+        self.curve_interpolation = QtWidgets.QComboBox()
+        self.curve_interpolation.addItems(["bezier_pitch", "linear_pitch", "linear_hz", "bezier_hz"])
+        self.curve_interpolation.setCurrentText("bezier_pitch")
+        self.curve_interpolation.setToolTip(
+            "Glide/Bezierノートの補間方式\n"
+            "bezier_pitch: MIDI/semitone上でBezier。従来方式\n"
+            "linear_pitch: MIDI/semitone上で直線。周波数比が一定\n"
+            "linear_hz: Hz上で直線。物理周波数が一定速度で変化\n"
+            "bezier_hz: Hz上でBezier"
+        )
+        self.curve_interpolation.currentTextChanged.connect(self.apply_curve_interpolation)
+
+        self.apply_interpolation_button = QtWidgets.QPushButton("Apply Interp")
+        self.apply_interpolation_button.setToolTip("選択中のCurve/Glideノートに補間方式を適用")
+        self.apply_interpolation_button.clicked.connect(self.apply_interpolation_to_selected)
+
         self.target_angle = QtWidgets.QDoubleSpinBox()
         self.target_angle.setRange(0.001, 359.999)
         self.target_angle.setDecimals(6)
@@ -476,6 +493,9 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.snap_div, 1, 10)
         layout.addWidget(QtWidgets.QLabel("Curve"), 1, 11)
         layout.addWidget(self.curve_shape, 1, 12)
+        layout.addWidget(QtWidgets.QLabel("Interp"), 2, 4)
+        layout.addWidget(self.curve_interpolation, 2, 5)
+        layout.addWidget(self.apply_interpolation_button, 2, 6)
 
         layout.addWidget(QtWidgets.QLabel("Target Angle"), 2, 0)
         layout.addWidget(self.target_angle, 2, 1)
@@ -673,6 +693,35 @@ class MainWindow(QtWidgets.QMainWindow):
     def apply_curve_shape(self) -> None:
         if hasattr(self.editor, "set_curve_shape"):
             self.editor.set_curve_shape(self.curve_shape.currentText() if hasattr(self, "curve_shape") else "ease")
+
+    def apply_curve_interpolation(self) -> None:
+        if hasattr(self.editor, "set_curve_interpolation"):
+            self.editor.set_curve_interpolation(
+                self.curve_interpolation.currentText() if hasattr(self, "curve_interpolation") else "bezier_pitch"
+            )
+
+    def apply_interpolation_to_selected(self) -> None:
+        indices = self.selected_note_indices()
+        if not indices:
+            self.statusBar().showMessage("No selected curve notes for interpolation")
+            return
+
+        mode = self.curve_interpolation.currentText() if hasattr(self, "curve_interpolation") else "bezier_pitch"
+        curve_indices = [i for i in indices if self.editor.notes[i].is_curve]
+        if not curve_indices:
+            self.statusBar().showMessage("Selected notes do not include curve/glide notes")
+            return
+
+        self.editor.push_undo()
+        changed = 0
+        for i in curve_indices:
+            self.editor.notes[i] = self.editor.notes[i].with_interpolation(mode)
+            changed += 1
+
+        self.editor.redraw_notes()
+        self.editor.notes_changed.emit()
+        self.mark_dirty()
+        self.statusBar().showMessage(f"Applied interpolation {mode} to {changed} curve note(s)")
 
     def apply_visual(self) -> None:
         self.editor.set_visual_options(
@@ -965,6 +1014,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "display_mode": self.display_mode.currentText() if hasattr(self, "display_mode") else "wavetone",
             "cmap": self.cmap.currentText() if hasattr(self, "cmap") else "wavetone",
             "curve_shape": self.curve_shape.currentText() if hasattr(self, "curve_shape") else "ease",
+            "curve_interpolation": self.curve_interpolation.currentText() if hasattr(self, "curve_interpolation") else "bezier_pitch",
         }
 
     def apply_project_settings(self, settings: dict) -> None:
@@ -975,7 +1025,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for name in (
             "grid_bpm", "grid_offset_ms", "grid_enabled", "metro_enabled", "metro_vol",
             "snap_enabled", "snap_div", "note_octave", "note_vol", "note_sound_enabled",
-            "volume", "playback_speed", "analysis_profile", "display_mode", "cmap", "curve_shape",
+            "volume", "playback_speed", "analysis_profile", "display_mode", "cmap", "curve_shape", "curve_interpolation",
         ):
             widget = getattr(self, name, None)
             if widget is not None and hasattr(widget, "blockSignals"):
@@ -1023,6 +1073,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 idx = self.curve_shape.findText(str(settings["curve_shape"]))
                 if idx >= 0:
                     self.curve_shape.setCurrentIndex(idx)
+            if hasattr(self, "curve_interpolation") and "curve_interpolation" in settings:
+                idx = self.curve_interpolation.findText(str(settings["curve_interpolation"]))
+                if idx >= 0:
+                    self.curve_interpolation.setCurrentIndex(idx)
         finally:
             for widget in blockers:
                 widget.blockSignals(False)
@@ -1031,6 +1085,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_note_sound_settings()
         self.apply_playback_speed()
         self.apply_curve_shape()
+        self.apply_curve_interpolation()
         if hasattr(self.player, "set_volume") and hasattr(self, "volume"):
             self.player.set_volume(self.volume.value() / 100.0)
         self.statusBar().showMessage("Project settings applied")
@@ -1109,6 +1164,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     None if nn.midi_end is None else max(0.0, min(127.0, nn.midi_end)),
                     None if nn.ctrl1_midi is None else max(0.0, min(127.0, nn.ctrl1_midi)),
                     None if nn.ctrl2_midi is None else max(0.0, min(127.0, nn.ctrl2_midi)),
+                    nn.interpolation,
                     nn.target_angle,
                 ).normalized())
             else:
@@ -1161,6 +1217,7 @@ class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
         "duration_s",
         "pause_before_s",
         "kind",
+        "interpolation",
         "note",
         "midi",
         "freq_hz",

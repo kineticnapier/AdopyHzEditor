@@ -19,6 +19,13 @@ class Note:
     ctrl1_midi: float | None = None
     ctrl2_midi: float | None = None
 
+    # How curve/glide pitch is evaluated.
+    # bezier_pitch: cubic Bezier in semitone/MIDI space
+    # linear_pitch: linear in semitone/MIDI space, constant pitch ratio
+    # linear_hz: linear in frequency Hz space
+    # bezier_hz: cubic Bezier in frequency Hz space
+    interpolation: str = "bezier_pitch"
+
     # Optional per-zip/section angle override for ADOFAI Angle Compression export.
     # None = auto angle.
     target_angle: float | None = None
@@ -45,13 +52,26 @@ class Note:
         p2 = float(self.ctrl2_midi if self.ctrl2_midi is not None else (self.midi_end if self.midi_end is not None else self.midi))
         p3 = float(self.midi_end if self.midi_end is not None else self.midi)
 
-        v = 1.0 - u
-        return (
-            (v ** 3) * p0
-            + 3.0 * (v ** 2) * u * p1
-            + 3.0 * v * (u ** 2) * p2
-            + (u ** 3) * p3
-        )
+        mode = (self.interpolation or "bezier_pitch").lower().replace(" ", "_").replace("-", "_")
+
+        if mode in ("linear_pitch", "linear_midi", "pitch_linear"):
+            return p0 + (p3 - p0) * u
+
+        if mode in ("linear_hz", "hz_linear"):
+            f0 = midi_to_hz(p0)
+            f3 = midi_to_hz(p3)
+            return hz_to_midi(f0 + (f3 - f0) * u)
+
+        if mode in ("bezier_hz", "hz_bezier"):
+            f0 = midi_to_hz(p0)
+            f1 = midi_to_hz(p1)
+            f2 = midi_to_hz(p2)
+            f3 = midi_to_hz(p3)
+            hz = cubic_bezier(f0, f1, f2, f3, u)
+            return hz_to_midi(max(1e-9, hz))
+
+        # Default: Bezier in pitch space.
+        return cubic_bezier(p0, p1, p2, p3, u)
 
     def freq_at(self, u: float) -> float:
         return midi_to_hz(self.midi_at(u))
@@ -70,11 +90,12 @@ class Note:
             p1, p2 = p2, p1
 
         kind = "curve" if self.kind == "curve" else "note"
+        interpolation = (self.interpolation or "bezier_pitch").lower().replace(" ", "_").replace("-", "_")
         target_angle = None if self.target_angle is None else float(self.target_angle)
         if kind != "curve":
-            return Note(a, b, p0, int(self.velocity), "note", None, None, None, target_angle)
+            return Note(a, b, p0, int(self.velocity), "note", None, None, None, interpolation, target_angle)
 
-        return Note(a, b, p0, int(self.velocity), "curve", p3, p1, p2, target_angle)
+        return Note(a, b, p0, int(self.velocity), "curve", p3, p1, p2, interpolation, target_angle)
 
     def with_time_offset(self, offset: float) -> "Note":
         n = self.normalized()
@@ -87,6 +108,7 @@ class Note:
             n.midi_end,
             n.ctrl1_midi,
             n.ctrl2_midi,
+            n.interpolation,
             n.target_angle,
         ).normalized()
 
@@ -102,6 +124,7 @@ class Note:
             None if n.midi_end is None else n.midi_end + s,
             None if n.ctrl1_midi is None else n.ctrl1_midi + s,
             None if n.ctrl2_midi is None else n.ctrl2_midi + s,
+            n.interpolation,
             n.target_angle,
         ).normalized()
 
@@ -120,7 +143,24 @@ class Note:
             n.midi_end,
             n.ctrl1_midi,
             n.ctrl2_midi,
+            n.interpolation,
             angle,
+        ).normalized()
+
+    def with_interpolation(self, interpolation: str) -> "Note":
+        n = self.normalized()
+        mode = (interpolation or "bezier_pitch").lower().replace(" ", "_").replace("-", "_")
+        return Note(
+            n.start,
+            n.end,
+            n.midi,
+            n.velocity,
+            n.kind,
+            n.midi_end,
+            n.ctrl1_midi,
+            n.ctrl2_midi,
+            mode,
+            n.target_angle,
         ).normalized()
 
     def to_dict(self) -> dict[str, Any]:
@@ -130,6 +170,8 @@ class Note:
             d.pop("midi_end", None)
             d.pop("ctrl1_midi", None)
             d.pop("ctrl2_midi", None)
+        if d.get("interpolation") == "bezier_pitch":
+            d.pop("interpolation", None)
         if d.get("target_angle") is None:
             d.pop("target_angle", None)
         return d
@@ -146,6 +188,7 @@ class Note:
             midi_end=None if d.get("midi_end") is None else float(d.get("midi_end")),
             ctrl1_midi=None if d.get("ctrl1_midi") is None else float(d.get("ctrl1_midi")),
             ctrl2_midi=None if d.get("ctrl2_midi") is None else float(d.get("ctrl2_midi")),
+            interpolation=str(d.get("interpolation", "bezier_pitch")),
             target_angle=None if d.get("target_angle") is None else float(d.get("target_angle")),
         ).normalized()
 
@@ -186,8 +229,19 @@ class Note:
             um = (u0 + u1) * 0.5
             s = n.start + n.duration * u0
             e = n.start + n.duration * u1
-            out.append(Note(s, e, n.midi_at(um), n.velocity, target_angle=n.target_angle).normalized())
+            out.append(Note(s, e, n.midi_at(um), n.velocity, interpolation=n.interpolation, target_angle=n.target_angle).normalized())
         return out
+
+
+def cubic_bezier(p0: float, p1: float, p2: float, p3: float, u: float) -> float:
+    u = max(0.0, min(1.0, float(u)))
+    v = 1.0 - u
+    return (
+        (v ** 3) * p0
+        + 3.0 * (v ** 2) * u * p1
+        + 3.0 * v * (u ** 2) * p2
+        + (u ** 3) * p3
+    )
 
 
 def midi_to_hz(note: float) -> float:

@@ -282,6 +282,7 @@ def build_adofai_debug_rows(
             "pause_before_s": round(pause_seconds_before, 6),
             "overlap": bool(overlap),
             "kind": n.kind,
+            "interpolation": "" if n.interpolation == "bezier_pitch" and not n.is_curve else n.interpolation,
             "note": note_name(n.midi),
             "midi": round(float(n.midi), 6),
             "freq_hz": round(freq, 6),
@@ -711,6 +712,7 @@ def normalize_notes_to_first(notes: list[Note]) -> tuple[list[Note], float]:
             n.midi_end,
             n.ctrl1_midi,
             n.ctrl2_midi,
+            n.interpolation,
             n.target_angle,
         ).normalized()
         for n in sorted_notes

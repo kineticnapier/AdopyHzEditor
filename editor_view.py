@@ -223,6 +223,7 @@ class EditorView(QtWidgets.QWidget):
         # Shape used when Alt+drag creates a Bezier/Glide note.
         # "ease" uses control points at start/end pitches, so it is visibly curved.
         self.curve_shape = "ease"
+        self.curve_interpolation = "bezier_pitch"
 
         # Cursor peak display search range. This is not auto-correction.
         self.cursor_peak_range = 5
@@ -748,6 +749,11 @@ class EditorView(QtWidgets.QWidget):
         allowed = {"ease", "linear", "ease_in", "ease_out", "s_curve"}
         self.curve_shape = shape if shape in allowed else "ease"
 
+    def set_curve_interpolation(self, interpolation: str) -> None:
+        mode = (interpolation or "bezier_pitch").lower().replace(" ", "_").replace("-", "_")
+        allowed = {"bezier_pitch", "linear_pitch", "linear_hz", "bezier_hz"}
+        self.curve_interpolation = mode if mode in allowed else "bezier_pitch"
+
     def curve_control_points(self, p0: float, p3: float) -> tuple[float, float]:
         """
         Cubic Bezier pitch control points.
@@ -794,13 +800,25 @@ class EditorView(QtWidgets.QWidget):
         c1, c2 = self.curve_control_points(start_midi, end_midi)
 
         self.push_undo()
-        self.notes.append(Note(start, end, start_midi, 100, "curve", end_midi, c1, c2).normalized())
+        self.notes.append(
+            Note(
+                start,
+                end,
+                start_midi,
+                100,
+                "curve",
+                end_midi,
+                c1,
+                c2,
+                self.curve_interpolation,
+            ).normalized()
+        )
         self.selected_index = len(self.notes) - 1
         self.selected_indices = {self.selected_index}
         self.redraw_notes()
         self.notes_changed.emit()
         self.status_changed.emit(
-            f"Added {self.curve_shape} curve {note_name(start_midi)}→{note_name(end_midi)} {start:.3f}-{end:.3f}s"
+            f"Added {self.curve_shape}/{self.curve_interpolation} curve {note_name(start_midi)}→{note_name(end_midi)} {start:.3f}-{end:.3f}s"
         )
 
     def add_note(self, start: float, end: float, midi: int) -> None:
