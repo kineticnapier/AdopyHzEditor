@@ -740,3 +740,121 @@ Shift + 左クリック:
 空白をクリック:
   選択解除 + 再生バー移動
 ```
+
+
+## Stable36 Last-angle correction
+
+Issue #3: `Add last-angle correction when overriding angle` に対応しました。
+
+ADOFAI出力ダイアログに `Last-angle correction` を追加しました。
+
+```text
+ON:
+  Target Angle を指定したとき、端数タイルも同じ比率で補正します。
+  final_angle = target_angle * fractional_part(keycount)
+
+OFF:
+  端数タイルは自動計算角度のままにします。
+  final_angle = auto_angle * fractional_part(keycount)
+```
+
+通常はON推奨です。
+
+例:
+
+```text
+auto_angle   = 178°
+target_angle = 165°
+frac         = 0.7
+
+ON:
+  final_angle = 165 * 0.7 = 115.5°
+
+OFF:
+  final_angle = 178 * 0.7 = 124.6°
+```
+
+`Target Angle` を使って見た目を調整する場合、ONにしておくと最後の端数タイルも同じスケールで補正されます。
+
+
+## Stable37 Final-tile visual correction with speed compensation
+
+Target Angleを使ったとき、最後の端数タイルが中途半端な向きになって見た目が汚くなる問題への対策を追加しました。
+
+ADOFAI出力ダイアログに次を追加しました。
+
+```text
+Final tile mode
+Custom final angle
+Cardinal step
+```
+
+Final tile mode:
+
+```text
+scaled:
+  従来通り。
+  final_angle = angle * frac
+
+straight:
+  最後の端数タイルを相対180°にして、前のタイルから直進させます。
+  その分の時間はSetSpeedで補償します。
+
+cardinal:
+  最後の絶対角度を0/90/180/270付近へ寄せます。
+  Cardinal stepを45にすると斜め方向も候補に入ります。
+  その分の時間はSetSpeedで補償します。
+
+custom:
+  Custom final angleで指定した相対角度を使います。
+  その分の時間はSetSpeedで補償します。
+```
+
+重要:
+
+```text
+最終タイルの角度を見た目優先で変更しても、
+そのタイルの所要時間が変わらないようにSetSpeedを自動追加します。
+```
+
+つまり、
+
+```text
+角度を綺麗にする
+↓
+ズレた時間をSetSpeedで補償する
+```
+
+という動きです。
+
+おすすめ:
+
+```text
+まずは Final tile mode = straight
+見た目が合わない場合は cardinal
+細かく合わせたい場合は custom
+```
+
+
+## Stable38 Export dialog cleanup
+
+ADOFAI出力ダイアログを整理しました。
+
+- `Last-angle correction` を削除しました。
+  - `Final tile mode = scaled` では常に `final_angle = target_angle * frac` 相当で処理します。
+- `Final tile mode = straight` をUIから削除しました。
+  - 直進させたい場合は `Final tile mode = custom` + `Custom final angle = 180°` を使います。
+
+残した選択肢:
+
+```text
+scaled:
+  angle * frac
+
+cardinal:
+  最後の絶対角度を縦横/斜め方向へ寄せる
+
+custom:
+  Custom final angleを使う
+  180°にすればstraight相当
+```
