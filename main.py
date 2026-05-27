@@ -1218,6 +1218,7 @@ class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
         "pause_before_s",
         "kind",
         "interpolation",
+        "phase_continuous",
         "note",
         "midi",
         "freq_hz",
@@ -1227,6 +1228,8 @@ class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
         "frac",
         "change_x",
         "angle",
+        "angle_min",
+        "angle_max",
         "auto_angle",
         "target_angle",
         "target_angle_used",
@@ -1401,6 +1404,14 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.curve_pitch_step.setSuffix(" semitone")
         self.curve_pitch_step.setToolTip("Bezier/Glideノートを分割するときの最大ピッチ変化量。0.25=25cent")
 
+        self.phase_continuous_glide = QtWidgets.QCheckBox("Phase-continuous glide")
+        self.phase_continuous_glide.setChecked(True)
+        self.phase_continuous_glide.setToolTip(
+            "Angle-onlyモードでCurve/Glideを短い固定Hzノートに分割せず、\n"
+            "周波数曲線を積分してタイルを配置します。\n"
+            "ぶつ切り感を減らすための設定です。"
+        )
+
         self.track_visual = QtWidgets.QComboBox()
         self.track_visual.addItems(["normal", "faint", "very faint", "hidden"])
         self.track_visual.setCurrentText("normal")
@@ -1442,6 +1453,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow("Max tiles per note", self.max_tiles_per_note)
         layout.addRow("Curve step", self.curve_step_ms)
         layout.addRow("Curve pitch step", self.curve_pitch_step)
+        layout.addRow("Phase-continuous glide", self.phase_continuous_glide)
         layout.addRow("Track visual", self.track_visual)
         layout.addRow("Final tile mode", self.final_angle_mode)
         layout.addRow("Custom final angle", self.final_custom_angle)
@@ -1486,6 +1498,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "track_visual": self.track_visual.currentText(),
             "curve_step_sec": float(self.curve_step_ms.value()) / 1000.0,
             "curve_pitch_step": float(self.curve_pitch_step.value()),
+            "phase_continuous_glide": bool(self.phase_continuous_glide.isChecked()),
             "final_angle_mode": self.final_angle_mode.currentText(),
             "final_custom_angle": float(self.final_custom_angle.value()),
             "final_cardinal_step": float(self.final_cardinal_step.value()),
