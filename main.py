@@ -1407,9 +1407,10 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.phase_continuous_glide = QtWidgets.QCheckBox("Phase-continuous glide")
         self.phase_continuous_glide.setChecked(True)
         self.phase_continuous_glide.setToolTip(
-            "Angle-onlyモードでCurve/Glideを短い固定Hzノートに分割せず、\n"
+            "Curve/Glideを短い固定Hzノートに分割せず、\n"
             "周波数曲線を積分してタイルを配置します。\n"
-            "ぶつ切り感を減らすための設定です。"
+            "Angle-only / Direct 180° / Angle Compression で有効です。\n"
+            "Direct/Angle CompressionではタイルごとにSetSpeedが増えます。"
         )
 
         self.track_visual = QtWidgets.QComboBox()

@@ -1126,3 +1126,65 @@ angle_max
 Final tile mode = cardinal/custom を使うと、最後の1タイルだけは見た目補正のためSetSpeed補償が入ります。
 Final tile mode = scaled なら基本的にAngle-only BPMのままです。
 ```
+
+
+## Stable43 Phase-continuous glide for Direct / Angle Compression
+
+Stable42では、Phase-continuous glide は Angle-only のみ対応でした。  
+Stable43では、Direct 180° と Angle Compression でも Phase-continuous glide を使えるようにしました。
+
+対象:
+
+```text
+Phase-continuous glide = ON
+Curve/Glideノート
+```
+
+対応Method:
+
+```text
+Angle-only
+Direct 180°
+Angle Compression
+```
+
+方式:
+
+```text
+Curve/Glideを短い固定Hzノート列に分割せず、
+周波数曲線 f(t) を積分してタイル境界を決めます。
+```
+
+Direct 180°:
+
+```text
+各タイルの角度は180°
+各タイルの実時間dtに合わせてSetSpeedを置く
+```
+
+Angle Compression:
+
+```text
+Curve全体のtotal phaseからmain angleを決定
+target_angleがあればそれを使用
+各タイルの実時間dtに合わせてSetSpeedを置く
+最後に端数phaseがある場合は final tile mode を適用
+```
+
+注意:
+
+```text
+Direct 180° / Angle Compression のPhase-continuous glideでは、
+基本的にタイルごとにSetSpeedが追加されます。
+そのため、出力は重くなりやすいです。
+
+軽さを優先するなら Angle-only + Phase-continuous glide が最も軽いです。
+```
+
+Debug Preview:
+
+```text
+Direct 180° / Angle Compressionでも
+phase_continuous = True
+effective_bpm = varies
+として表示されます。

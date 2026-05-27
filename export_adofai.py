@@ -241,7 +241,7 @@ def build_adofai_debug_rows(
     make angle/BPM/keycount issues visible before exporting.
     """
     method_key = (method or "rabbit_zip").lower().replace(" ", "_").replace("-", "_")
-    use_phase_continuous_glide = bool(phase_continuous_glide) and method_key == "angle_only"
+    use_phase_continuous_glide = bool(phase_continuous_glide)
 
     if use_phase_continuous_glide:
         prepared_notes = [n.normalized() for n in notes if n.duration > 0]
@@ -306,38 +306,89 @@ def build_adofai_debug_rows(
         effective_bpm = ""
 
         if method_key == "direct_180":
-            bpm = freq * 60.0
-            keycount = freq * dur
-            whole = int(math.floor(keycount + EPS))
-            frac = keycount - whole
-            emitted = whole
-            if limit > 0:
-                emitted = min(emitted, limit)
+            if use_phase_continuous_glide and n.is_curve:
+                intervals, total_phase = curve_phase_dt_intervals(n)
+                if limit > 0:
+                    intervals = intervals[:limit]
+                emitted = len(intervals)
+                whole = int(math.floor(total_phase + EPS))
+                frac = total_phase - math.floor(total_phase)
+                bpms = [60.0 / max(EPS, dt) for dt in intervals]
+                final_bpm = bpms[-1] if bpms else ""
+                final_visual_used = False
+                angle_sequence = [180.0 for _ in intervals]
+                effective_final = 180.0 if intervals else ""
 
-            final_angle = 180.0 if frac > 1e-6 and (limit <= 0 or emitted < limit) else ""
-            final_bpm = (bpm / frac) if isinstance(final_angle, float) and frac > 1e-6 else ""
-            if isinstance(final_angle, float):
-                emitted += 1
+                if intervals:
+                    prev_before_final = prev_abs
+                    for rel in angle_sequence[:-1]:
+                        prev_before_final = clean_angle(prev_before_final + 180.0 - float(rel))
+                    adjusted_final = final_visual_angle(
+                        mode=final_angle_mode,
+                        prev_abs=prev_before_final,
+                        scaled_final_angle=180.0,
+                        custom_final_angle=final_custom_angle,
+                        cardinal_step=final_cardinal_step,
+                    )
+                    if adjusted_final > 0 and abs(float(adjusted_final) - 180.0) > 1e-6:
+                        effective_final = adjusted_final
+                        final_bpm = float(adjusted_final) * 60.0 / max(EPS, 180.0 * intervals[-1])
+                        angle_sequence[-1] = adjusted_final
+                        final_visual_used = True
 
-            row.update({
-                "keycount": round(keycount, 6),
-                "whole": whole,
-                "frac": round(frac, 6),
-                "change_x": "",
-                "phase_continuous": False,
-                "angle": 180.0,
-                "angle_min": 180.0,
-                "angle_max": 180.0,
-                "auto_angle": 180.0,
-                "final_angle_scaled": "" if frac <= 1e-6 else round(180.0 * frac, 6),
-                "final_angle_effective": final_angle if final_angle == "" else round(final_angle, 6),
-                "effective_bpm": round(bpm, 6),
-                "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
-                "tiles_est": emitted,
-                "final_visual_used": False,
-                "lowest_floor_x": global_lowest_floor_x,
-                "effective_fixed_x": round(float(effective_fixed_x), 6),
-            })
+                row.update({
+                    "phase_continuous": True,
+                    "keycount": round(total_phase, 6),
+                    "whole": whole,
+                    "frac": round(frac, 6),
+                    "change_x": "",
+                    "angle": 180.0,
+                    "angle_min": 180.0,
+                    "angle_max": 180.0,
+                    "auto_angle": 180.0,
+                    "final_angle_scaled": 180.0 if intervals else "",
+                    "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
+                    "effective_bpm": "varies",
+                    "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
+                    "tiles_est": emitted,
+                    "final_visual_used": bool(final_visual_used),
+                    "lowest_floor_x": global_lowest_floor_x,
+                    "effective_fixed_x": round(float(effective_fixed_x), 6),
+                    "_angle_sequence": angle_sequence,
+                })
+            else:
+                bpm = freq * 60.0
+                keycount = freq * dur
+                whole = int(math.floor(keycount + EPS))
+                frac = keycount - whole
+                emitted = whole
+                if limit > 0:
+                    emitted = min(emitted, limit)
+
+                final_angle = 180.0 if frac > 1e-6 and (limit <= 0 or emitted < limit) else ""
+                final_bpm = (bpm / frac) if isinstance(final_angle, float) and frac > 1e-6 else ""
+                if isinstance(final_angle, float):
+                    emitted += 1
+
+                row.update({
+                    "keycount": round(keycount, 6),
+                    "whole": whole,
+                    "frac": round(frac, 6),
+                    "change_x": "",
+                    "phase_continuous": False,
+                    "angle": 180.0,
+                    "angle_min": 180.0,
+                    "angle_max": 180.0,
+                    "auto_angle": 180.0,
+                    "final_angle_scaled": "" if frac <= 1e-6 else round(180.0 * frac, 6),
+                    "final_angle_effective": final_angle if final_angle == "" else round(final_angle, 6),
+                    "effective_bpm": round(bpm, 6),
+                    "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
+                    "tiles_est": emitted,
+                    "final_visual_used": False,
+                    "lowest_floor_x": global_lowest_floor_x,
+                    "effective_fixed_x": round(float(effective_fixed_x), 6),
+                })
 
         elif method_key == "angle_only":
             if use_phase_continuous_glide and n.is_curve:
@@ -443,56 +494,128 @@ def build_adofai_debug_rows(
                 })
 
         else:
-            beat_count = dur * play_bpm / 60.0
-            keycount = freq * 60.0 * beat_count / max(play_bpm, EPS)
-            whole = int(math.floor(keycount + EPS))
-            frac = keycount - math.floor(keycount)
+            if use_phase_continuous_glide and n.is_curve:
+                intervals, total_phase = curve_phase_dt_intervals(n)
+                if limit > 0:
+                    intervals = intervals[:limit]
 
-            change_x = choose_change_x(keycount, rabbit_x_mode, effective_fixed_x)
-            auto_angle = 180.0 * change_x / keycount if keycount > EPS else 180.0
+                whole = int(math.floor(total_phase + EPS))
+                frac = total_phase - math.floor(total_phase)
+                change_x = choose_change_x(total_phase, rabbit_x_mode, effective_fixed_x)
+                auto_angle = 180.0 * change_x / max(EPS, total_phase)
 
-            target_used = n.target_angle is not None and float(n.target_angle) > 0
-            angle = float(n.target_angle) if target_used else auto_angle
-            bpm = (freq * 60.0) * (angle / 180.0)
+                target_used = n.target_angle is not None and float(n.target_angle) > 0
+                angle = float(n.target_angle) if target_used else auto_angle
 
-            emitted = whole
-            if limit > 0:
-                emitted = min(emitted, limit)
+                emitted = len(intervals)
+                angle_sequence: list[float] = []
+                bpms: list[float] = []
+                final_visual_used = False
+                scaled_final = ""
+                effective_final = ""
 
-            scaled_final = angle * frac if frac > 1e-6 else ""
-            effective_final = ""
-            if frac > 1e-6 and (limit <= 0 or emitted < limit):
-                effective_final = final_visual_angle(
-                    mode=final_angle_mode,
-                    prev_abs=prev_abs,
-                    scaled_final_angle=angle * frac,
-                    custom_final_angle=final_custom_angle,
-                    cardinal_step=final_cardinal_step,
-                )
-                final_bpm = (freq * 60.0) * (effective_final / max(EPS, 180.0 * frac))
-                final_visual_used = abs(float(effective_final) - float(angle * frac)) > 1e-6 or abs(final_bpm - bpm) > 1e-6
-                emitted += 1
+                for i, dt in enumerate(intervals):
+                    is_final = i == len(intervals) - 1
+                    rel = angle
+                    if is_final and frac > 1e-6:
+                        scaled_final = angle * frac
+                        rel = scaled_final
 
-            row.update({
-                "keycount": round(keycount, 6),
-                "whole": whole,
-                "frac": round(frac, 6),
-                "change_x": round(float(change_x), 6),
-                "phase_continuous": False,
-                "angle": round(angle, 6),
-                "angle_min": round(angle, 6),
-                "angle_max": round(angle, 6),
-                "auto_angle": round(auto_angle, 6),
-                "final_angle_scaled": "" if scaled_final == "" else round(float(scaled_final), 6),
-                "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
-                "effective_bpm": round(bpm, 6),
-                "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
-                "tiles_est": emitted,
-                "target_angle_used": bool(target_used),
-                "final_visual_used": bool(final_visual_used),
-                "lowest_floor_x": global_lowest_floor_x,
-                "effective_fixed_x": round(float(effective_fixed_x), 6),
-            })
+                        prev_before_final = prev_abs
+                        for prev_rel in angle_sequence:
+                            prev_before_final = clean_angle(prev_before_final + 180.0 - float(prev_rel))
+
+                        adjusted = final_visual_angle(
+                            mode=final_angle_mode,
+                            prev_abs=prev_before_final,
+                            scaled_final_angle=scaled_final,
+                            custom_final_angle=final_custom_angle,
+                            cardinal_step=final_cardinal_step,
+                        )
+                        if adjusted > 0:
+                            rel = adjusted
+                        effective_final = rel
+                        if abs(float(rel) - float(scaled_final)) > 1e-6:
+                            final_visual_used = True
+
+                    angle_sequence.append(rel)
+                    bpms.append(rel * 60.0 / max(EPS, 180.0 * dt))
+
+                if not effective_final and angle_sequence:
+                    effective_final = angle_sequence[-1]
+
+                row.update({
+                    "phase_continuous": True,
+                    "keycount": round(total_phase, 6),
+                    "whole": whole,
+                    "frac": round(frac, 6),
+                    "change_x": round(float(change_x), 6),
+                    "angle": round(angle, 6),
+                    "angle_min": round(min(angle_sequence), 6) if angle_sequence else "",
+                    "angle_max": round(max(angle_sequence), 6) if angle_sequence else "",
+                    "auto_angle": round(auto_angle, 6),
+                    "final_angle_scaled": "" if scaled_final == "" else round(float(scaled_final), 6),
+                    "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
+                    "effective_bpm": "varies",
+                    "final_bpm": "" if not bpms else round(float(bpms[-1]), 6),
+                    "tiles_est": emitted,
+                    "target_angle_used": bool(target_used),
+                    "final_visual_used": bool(final_visual_used),
+                    "lowest_floor_x": global_lowest_floor_x,
+                    "effective_fixed_x": round(float(effective_fixed_x), 6),
+                    "_angle_sequence": angle_sequence,
+                })
+            else:
+                beat_count = dur * play_bpm / 60.0
+                keycount = freq * 60.0 * beat_count / max(play_bpm, EPS)
+                whole = int(math.floor(keycount + EPS))
+                frac = keycount - math.floor(keycount)
+
+                change_x = choose_change_x(keycount, rabbit_x_mode, effective_fixed_x)
+                auto_angle = 180.0 * change_x / keycount if keycount > EPS else 180.0
+
+                target_used = n.target_angle is not None and float(n.target_angle) > 0
+                angle = float(n.target_angle) if target_used else auto_angle
+                bpm = (freq * 60.0) * (angle / 180.0)
+
+                emitted = whole
+                if limit > 0:
+                    emitted = min(emitted, limit)
+
+                scaled_final = angle * frac if frac > 1e-6 else ""
+                effective_final = ""
+                if frac > 1e-6 and (limit <= 0 or emitted < limit):
+                    effective_final = final_visual_angle(
+                        mode=final_angle_mode,
+                        prev_abs=prev_abs,
+                        scaled_final_angle=angle * frac,
+                        custom_final_angle=final_custom_angle,
+                        cardinal_step=final_cardinal_step,
+                    )
+                    final_bpm = (freq * 60.0) * (effective_final / max(EPS, 180.0 * frac))
+                    final_visual_used = abs(float(effective_final) - float(angle * frac)) > 1e-6 or abs(final_bpm - bpm) > 1e-6
+                    emitted += 1
+
+                row.update({
+                    "keycount": round(keycount, 6),
+                    "whole": whole,
+                    "frac": round(frac, 6),
+                    "change_x": round(float(change_x), 6),
+                    "phase_continuous": False,
+                    "angle": round(angle, 6),
+                    "angle_min": round(angle, 6),
+                    "angle_max": round(angle, 6),
+                    "auto_angle": round(auto_angle, 6),
+                    "final_angle_scaled": "" if scaled_final == "" else round(float(scaled_final), 6),
+                    "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
+                    "effective_bpm": round(bpm, 6),
+                    "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
+                    "tiles_est": emitted,
+                    "target_angle_used": bool(target_used),
+                    "final_visual_used": bool(final_visual_used),
+                    "lowest_floor_x": global_lowest_floor_x,
+                    "effective_fixed_x": round(float(effective_fixed_x), 6),
+                })
 
         if limit > 0 and row.get("whole", 0) > limit:
             row["warning"] = f"clipped by max_tiles_per_note={limit}"
@@ -614,18 +737,16 @@ def invert_phase_time(times: list[float], phases: list[float], target_phase: flo
     return t0 + (t1 - t0) * a, i
 
 
-def angle_only_curve_intervals(note: Note, song_bpm: float) -> tuple[list[float], float]:
+def curve_phase_dt_intervals(note: Note) -> tuple[list[float], float]:
     """
-    Convert a continuous curve/glide to tile relative angles.
+    Convert a continuous curve/glide into time intervals between phase cycles.
 
-    Instead of splitting into short fixed-Hz notes, this integrates the
-    frequency curve and places one tile per accumulated cycle.
-
-    For each tile interval:
-        angle = dt * BPM * 180 / 60
+    The returned intervals cover the entire note duration. Full-cycle intervals
+    come first; if the curve ends mid-cycle, the final partial interval is also
+    included.
     """
     n = note.normalized()
-    if n.duration <= 0 or song_bpm <= 0:
+    if n.duration <= 0:
         return [], 0.0
 
     times, phases, total_phase = curve_phase_samples(n)
@@ -643,14 +764,29 @@ def angle_only_curve_intervals(note: Note, song_bpm: float) -> tuple[list[float]
     if n.duration > (tile_times[-1] if tile_times else 0.0) + 1e-9:
         tile_times.append(n.duration)
 
-    out: list[float] = []
+    intervals: list[float] = []
     prev_t = 0.0
     for t in tile_times:
         dt = max(0.0, t - prev_t)
         if dt > 1e-12:
-            out.append(clean_relative_angle(dt * float(song_bpm) * 180.0 / 60.0))
+            intervals.append(dt)
         prev_t = t
 
+    return intervals, total_phase
+
+
+def angle_only_curve_intervals(note: Note, song_bpm: float) -> tuple[list[float], float]:
+    """
+    Convert a continuous curve/glide to tile relative angles for Angle-only mode.
+    """
+    if song_bpm <= 0:
+        return [], 0.0
+
+    intervals, total_phase = curve_phase_dt_intervals(note)
+    out = [
+        clean_relative_angle(dt * float(song_bpm) * 180.0 / 60.0)
+        for dt in intervals
+    ]
     return out, total_phase
 
 
@@ -714,6 +850,140 @@ def emit_angle_only_curve_continuous(
             actions.append(set_bpm(floor, song_bpm))
 
     return floor, emitted, float(song_bpm), final_visual_used, total_phase
+
+
+def emit_direct_curve_continuous(
+    angle_data,
+    actions,
+    floor,
+    note: Note,
+    max_tiles_per_note,
+    final_angle_mode: str = "scaled",
+    final_custom_angle: float = 180.0,
+    final_cardinal_step: float = 90.0,
+) -> tuple[int, int, float | None, bool, float]:
+    """
+    Phase-continuous Direct 180 export for Curve/Glide notes.
+
+    The pitch curve controls timing. Each tile remains 180°, and SetSpeed is
+    emitted per tile so each interval has the correct duration.
+    """
+    intervals, total_phase = curve_phase_dt_intervals(note)
+    if not intervals:
+        return floor, 0, None, False, total_phase
+
+    if max_tiles_per_note > 0:
+        intervals = intervals[:max_tiles_per_note]
+
+    emitted = 0
+    current_bpm: float | None = None
+    final_visual_used = False
+
+    for i, dt in enumerate(intervals):
+        rel = 180.0
+        is_final = i == len(intervals) - 1
+
+        if is_final:
+            prev_abs = float(angle_data[-1])
+            adjusted = final_visual_angle(
+                mode=final_angle_mode,
+                prev_abs=prev_abs,
+                scaled_final_angle=rel,
+                custom_final_angle=final_custom_angle,
+                cardinal_step=final_cardinal_step,
+            )
+            if adjusted > 0:
+                rel = adjusted
+
+        bpm = rel * 60.0 / max(EPS, 180.0 * dt)
+        actions.append(set_bpm(floor, bpm))
+        current_bpm = bpm
+
+        if is_final and abs(rel - 180.0) > 1e-6:
+            final_visual_used = True
+
+        add_relative(angle_data, rel)
+        floor += 1
+        emitted += 1
+
+    return floor, emitted, current_bpm, final_visual_used, total_phase
+
+
+def emit_angle_compression_curve_continuous(
+    angle_data,
+    actions,
+    floor,
+    note: Note,
+    play_bpm,
+    x_mode,
+    fixed_x,
+    max_tiles_per_note,
+    target_angle: float | None = None,
+    final_angle_mode: str = "scaled",
+    final_custom_angle: float = 180.0,
+    final_cardinal_step: float = 90.0,
+) -> tuple[int, int, float | None, bool, bool, float]:
+    """
+    Phase-continuous Angle Compression export for Curve/Glide notes.
+
+    The curve is not split into short fixed-Hz notes. Instead, f(t) is
+    integrated and one tile is placed per accumulated cycle. The main visual
+    angle is chosen from total keycount, then SetSpeed per tile preserves the
+    exact interval duration.
+    """
+    intervals, total_phase = curve_phase_dt_intervals(note)
+    if not intervals or total_phase <= EPS:
+        return floor, 0, None, False, False, total_phase
+
+    if max_tiles_per_note > 0:
+        intervals = intervals[:max_tiles_per_note]
+
+    whole = int(math.floor(total_phase + EPS))
+    frac = total_phase - math.floor(total_phase)
+
+    change_x = choose_change_x(total_phase, x_mode, fixed_x)
+    auto_angle = 180.0 * change_x / max(EPS, total_phase)
+
+    target_used = target_angle is not None
+    main_angle = float(target_angle) if target_used else auto_angle
+    if main_angle <= 0:
+        main_angle = auto_angle
+        target_used = False
+
+    emitted = 0
+    current_bpm: float | None = None
+    final_visual_used = False
+
+    for i, dt in enumerate(intervals):
+        is_final = i == len(intervals) - 1
+        rel = main_angle
+
+        # If the note ends mid-cycle, the last tile is the fractional visual tile.
+        if is_final and frac > 1e-6:
+            rel = main_angle * frac
+            prev_abs = float(angle_data[-1])
+            adjusted = final_visual_angle(
+                mode=final_angle_mode,
+                prev_abs=prev_abs,
+                scaled_final_angle=rel,
+                custom_final_angle=final_custom_angle,
+                cardinal_step=final_cardinal_step,
+            )
+            if adjusted > 0:
+                rel = adjusted
+
+            if abs(rel - main_angle * frac) > 1e-6:
+                final_visual_used = True
+
+        bpm = rel * 60.0 / max(EPS, 180.0 * dt)
+        actions.append(set_bpm(floor, bpm))
+        current_bpm = bpm
+
+        add_relative(angle_data, rel)
+        floor += 1
+        emitted += 1
+
+    return floor, emitted, current_bpm, target_used, final_visual_used, total_phase
 
 
 def emit_direct(angle_data, actions, floor, freq, dur, max_tiles_per_note) -> tuple[int, int, float | None]:
@@ -1002,7 +1272,7 @@ def export_adofai(
     apply_track_visual(level, actions, track_visual)
 
     method_key = (method or "rabbit_zip").lower().replace(" ", "_").replace("-", "_")
-    use_phase_continuous_glide = bool(phase_continuous_glide) and method_key == "angle_only"
+    use_phase_continuous_glide = bool(phase_continuous_glide)
 
     if use_phase_continuous_glide:
         prepared_notes = [n.normalized() for n in notes if n.duration > 0]
@@ -1052,7 +1322,22 @@ def export_adofai(
             limit = min(limit, remain) if limit > 0 else remain
 
         if method_key == "direct_180":
-            floor, t, note_bpm = emit_direct(angle_data, actions, floor, n.freq, audible, limit)
+            if use_phase_continuous_glide and n.is_curve:
+                floor, t, note_bpm, final_visual_used, _total_phase = emit_direct_curve_continuous(
+                    angle_data,
+                    actions,
+                    floor,
+                    n,
+                    limit,
+                    final_angle_mode=final_angle_mode,
+                    final_custom_angle=final_custom_angle,
+                    final_cardinal_step=final_cardinal_step,
+                )
+                phase_continuous_curves += 1
+                if final_visual_used:
+                    final_visual_corrections += 1
+            else:
+                floor, t, note_bpm = emit_direct(angle_data, actions, floor, n.freq, audible, limit)
         elif method_key == "angle_only":
             if use_phase_continuous_glide and n.is_curve:
                 floor, t, note_bpm, final_visual_used, _total_phase = emit_angle_only_curve_continuous(
@@ -1085,21 +1370,38 @@ def export_adofai(
             if final_visual_used:
                 final_visual_corrections += 1
         else:
-            floor, t, note_bpm, target_used, final_visual_used = emit_angle_compression(
-                angle_data,
-                actions,
-                floor,
-                n.freq,
-                audible,
-                play_bpm,
-                rabbit_x_mode,
-                effective_fixed_x,
-                limit,
-                target_angle=n.target_angle,
-                final_angle_mode=final_angle_mode,
-                final_custom_angle=final_custom_angle,
-                final_cardinal_step=final_cardinal_step,
-            )
+            if use_phase_continuous_glide and n.is_curve:
+                floor, t, note_bpm, target_used, final_visual_used, _total_phase = emit_angle_compression_curve_continuous(
+                    angle_data,
+                    actions,
+                    floor,
+                    n,
+                    play_bpm,
+                    rabbit_x_mode,
+                    effective_fixed_x,
+                    limit,
+                    target_angle=n.target_angle,
+                    final_angle_mode=final_angle_mode,
+                    final_custom_angle=final_custom_angle,
+                    final_cardinal_step=final_cardinal_step,
+                )
+                phase_continuous_curves += 1
+            else:
+                floor, t, note_bpm, target_used, final_visual_used = emit_angle_compression(
+                    angle_data,
+                    actions,
+                    floor,
+                    n.freq,
+                    audible,
+                    play_bpm,
+                    rabbit_x_mode,
+                    effective_fixed_x,
+                    limit,
+                    target_angle=n.target_angle,
+                    final_angle_mode=final_angle_mode,
+                    final_custom_angle=final_custom_angle,
+                    final_cardinal_step=final_cardinal_step,
+                )
             if target_used:
                 target_angle_used += 1
             if final_visual_used:
