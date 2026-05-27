@@ -955,6 +955,8 @@ class EditorView(QtWidgets.QWidget):
 
                 if i in self.selected_indices:
                     item.setPen(QtGui.QPen(QtGui.QColor(255, 230, 90, 255), 0.055))
+                elif n.target_angle is not None:
+                    item.setPen(QtGui.QPen(QtGui.QColor(255, 100, 220, 240), 0.050))
                 else:
                     item.setPen(QtGui.QPen(QtGui.QColor(120, 230, 255, max(120, alpha)), 0.040))
 
@@ -977,6 +979,9 @@ class EditorView(QtWidgets.QWidget):
                 if i in self.selected_indices:
                     rect.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 255), 0.025))
                     rect.setBrush(QtGui.QBrush(QtGui.QColor(255, 210, 80, min(255, alpha + 55))))
+                elif n.target_angle is not None:
+                    rect.setPen(QtGui.QPen(QtGui.QColor(255, 100, 220, 240), 0.022))
+                    rect.setBrush(QtGui.QBrush(QtGui.QColor(180, 70, 220, min(255, alpha + 20))))
                 else:
                     rect.setPen(QtGui.QPen(QtGui.QColor(180, 230, 255, alpha), 0.015))
                     rect.setBrush(QtGui.QBrush(QtGui.QColor(70, 190, 255, alpha)))

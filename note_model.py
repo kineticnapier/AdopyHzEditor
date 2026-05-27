@@ -19,6 +19,10 @@ class Note:
     ctrl1_midi: float | None = None
     ctrl2_midi: float | None = None
 
+    # Optional per-zip/section angle override for ADOFAI Angle Compression export.
+    # None = auto angle.
+    target_angle: float | None = None
+
     @property
     def duration(self) -> float:
         return max(0.0, self.end - self.start)
@@ -66,10 +70,11 @@ class Note:
             p1, p2 = p2, p1
 
         kind = "curve" if self.kind == "curve" else "note"
+        target_angle = None if self.target_angle is None else float(self.target_angle)
         if kind != "curve":
-            return Note(a, b, p0, int(self.velocity), "note", None, None, None)
+            return Note(a, b, p0, int(self.velocity), "note", None, None, None, target_angle)
 
-        return Note(a, b, p0, int(self.velocity), "curve", p3, p1, p2)
+        return Note(a, b, p0, int(self.velocity), "curve", p3, p1, p2, target_angle)
 
     def with_time_offset(self, offset: float) -> "Note":
         n = self.normalized()
@@ -82,6 +87,7 @@ class Note:
             n.midi_end,
             n.ctrl1_midi,
             n.ctrl2_midi,
+            n.target_angle,
         ).normalized()
 
     def with_pitch_offset(self, semitones: float) -> "Note":
@@ -96,18 +102,36 @@ class Note:
             None if n.midi_end is None else n.midi_end + s,
             None if n.ctrl1_midi is None else n.ctrl1_midi + s,
             None if n.ctrl2_midi is None else n.ctrl2_midi + s,
+            n.target_angle,
         ).normalized()
 
     def shifted(self, dx: float = 0.0, dy: float = 0.0) -> "Note":
         return self.with_time_offset(dx).with_pitch_offset(dy)
 
+    def with_target_angle(self, target_angle: float | None) -> "Note":
+        n = self.normalized()
+        angle = None if target_angle is None else float(target_angle)
+        return Note(
+            n.start,
+            n.end,
+            n.midi,
+            n.velocity,
+            n.kind,
+            n.midi_end,
+            n.ctrl1_midi,
+            n.ctrl2_midi,
+            angle,
+        ).normalized()
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self.normalized())
-        # Keep old project files readable-ish and avoid noisy nulls for ordinary notes.
+        # Keep old project files readable-ish and avoid noisy nulls.
         if d.get("kind") == "note":
             d.pop("midi_end", None)
             d.pop("ctrl1_midi", None)
             d.pop("ctrl2_midi", None)
+        if d.get("target_angle") is None:
+            d.pop("target_angle", None)
         return d
 
     @staticmethod
@@ -122,6 +146,7 @@ class Note:
             midi_end=None if d.get("midi_end") is None else float(d.get("midi_end")),
             ctrl1_midi=None if d.get("ctrl1_midi") is None else float(d.get("ctrl1_midi")),
             ctrl2_midi=None if d.get("ctrl2_midi") is None else float(d.get("ctrl2_midi")),
+            target_angle=None if d.get("target_angle") is None else float(d.get("target_angle")),
         ).normalized()
 
     def sample_fixed_segments(
@@ -161,7 +186,7 @@ class Note:
             um = (u0 + u1) * 0.5
             s = n.start + n.duration * u0
             e = n.start + n.duration * u1
-            out.append(Note(s, e, n.midi_at(um), n.velocity).normalized())
+            out.append(Note(s, e, n.midi_at(um), n.velocity, target_angle=n.target_angle).normalized())
         return out
 
 

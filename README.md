@@ -654,3 +654,65 @@ end:   4 beat / C6
 
 また、`Curve` セレクタを下部のBPM/Snap欄の横に表示しました。  
 `Alt + 左ドラッグ` でBezier/Glideノートを作る前に、ここで `ease`, `s_curve`, `linear`, `ease_in`, `ease_out` を選べます。
+
+
+## Stable34 per-zip Target Angle override
+
+ADOFAI Angle Compression出力用に、ノート/zip単位の `Target Angle` 上書きを追加しました。
+
+操作:
+
+```text
+1. ノートを選択
+2. 下部の Target Angle に角度を入力
+3. Apply Angle
+```
+
+解除:
+
+```text
+選択中ノート → Clear Angle
+```
+
+ショートカット:
+
+```text
+Ctrl + Alt + A:
+  Apply Angle
+```
+
+仕様:
+
+```text
+target_angle = None:
+  従来通り自動計算
+
+target_angle = 165:
+  そのノート/zipだけ angle = 165° として出力
+```
+
+端数タイルも同じ角度を基準にします。
+
+```text
+final_angle = target_angle * fractional_part(keycount)
+```
+
+見た目:
+
+```text
+Target Angle が設定されたノートは紫寄りの色で表示されます。
+```
+
+Curve/Glideノートの場合:
+
+```text
+Curveを短い固定Hz区間へ分割したあと、
+各segmentに同じ Target Angle を引き継ぎます。
+```
+
+注意:
+
+```text
+この機能は Angle Compression 用です。
+Direct 180° 出力では基本的に無視されます。
+```

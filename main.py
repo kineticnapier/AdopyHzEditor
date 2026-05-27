@@ -429,6 +429,21 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.curve_shape.currentTextChanged.connect(self.apply_curve_shape)
 
+        self.target_angle = QtWidgets.QDoubleSpinBox()
+        self.target_angle.setRange(0.001, 359.999)
+        self.target_angle.setDecimals(6)
+        self.target_angle.setValue(165.0)
+        self.target_angle.setSuffix("°")
+        self.target_angle.setToolTip("選択中ノート/zipのAngle Compression角度を上書きします")
+
+        self.apply_target_angle_button = QtWidgets.QPushButton("Apply Angle")
+        self.apply_target_angle_button.setToolTip("選択中ノートへTarget Angleを設定")
+        self.apply_target_angle_button.clicked.connect(self.apply_target_angle_to_selected)
+
+        self.clear_target_angle_button = QtWidgets.QPushButton("Clear Angle")
+        self.clear_target_angle_button.setToolTip("選択中ノートのTarget Angleを解除して自動計算に戻す")
+        self.clear_target_angle_button.clicked.connect(self.clear_target_angle_for_selected)
+
         layout.addWidget(QtWidgets.QLabel("Time"), 0, 0)
         layout.addWidget(self.time_slider, 0, 1)
         layout.addWidget(QtWidgets.QLabel("Visible"), 0, 2)
@@ -459,6 +474,11 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.snap_div, 1, 10)
         layout.addWidget(QtWidgets.QLabel("Curve"), 1, 11)
         layout.addWidget(self.curve_shape, 1, 12)
+
+        layout.addWidget(QtWidgets.QLabel("Target Angle"), 2, 0)
+        layout.addWidget(self.target_angle, 2, 1)
+        layout.addWidget(self.apply_target_angle_button, 2, 2)
+        layout.addWidget(self.clear_target_angle_button, 2, 3)
 
         self.addToolBarBreak()
         bottom_tb = QtWidgets.QToolBar("View")
@@ -497,6 +517,7 @@ class MainWindow(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Shift+Right"), self, activated=lambda: self.nudge_selected_notes(+1, 0))
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Shift+Up"), self, activated=lambda: self.nudge_selected_notes(0, +1))
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Shift+Down"), self, activated=lambda: self.nudge_selected_notes(0, -1))
+        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Alt+A"), self, activated=self.apply_target_angle_to_selected)
 
     def format_time(self, seconds: float) -> str:
         seconds = max(0.0, float(seconds))
@@ -591,6 +612,37 @@ class MainWindow(QtWidgets.QMainWindow):
         self.editor.notes_changed.emit()
         self.sync_notes_to_player()
         self.statusBar().showMessage(f"Pasted {len(new_indices)} note{'s' if len(new_indices) != 1 else ''} at {self.format_time(base)}")
+
+    def apply_target_angle_to_selected(self) -> None:
+        indices = self.selected_note_indices()
+        if not indices:
+            self.statusBar().showMessage("No selected notes for Target Angle")
+            return
+
+        angle = float(self.target_angle.value())
+        self.editor.push_undo()
+        for i in indices:
+            self.editor.notes[i] = self.editor.notes[i].with_target_angle(angle)
+
+        self.editor.redraw_notes()
+        self.editor.notes_changed.emit()
+        self.mark_dirty()
+        self.statusBar().showMessage(f"Applied Target Angle {angle:.6f}° to {len(indices)} note(s)")
+
+    def clear_target_angle_for_selected(self) -> None:
+        indices = self.selected_note_indices()
+        if not indices:
+            self.statusBar().showMessage("No selected notes to clear Target Angle")
+            return
+
+        self.editor.push_undo()
+        for i in indices:
+            self.editor.notes[i] = self.editor.notes[i].with_target_angle(None)
+
+        self.editor.redraw_notes()
+        self.editor.notes_changed.emit()
+        self.mark_dirty()
+        self.statusBar().showMessage(f"Cleared Target Angle from {len(indices)} note(s)")
 
     def apply_timing_helpers(self) -> None:
         offset_sec = float(self.grid_offset_ms.value()) / 1000.0
@@ -1055,9 +1107,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     None if nn.midi_end is None else max(0.0, min(127.0, nn.midi_end)),
                     None if nn.ctrl1_midi is None else max(0.0, min(127.0, nn.ctrl1_midi)),
                     None if nn.ctrl2_midi is None else max(0.0, min(127.0, nn.ctrl2_midi)),
+                    nn.target_angle,
                 ).normalized())
             else:
-                result.append(Note(nn.start, nn.end, max(0.0, min(127.0, nn.midi)), nn.velocity).normalized())
+                result.append(Note(nn.start, nn.end, max(0.0, min(127.0, nn.midi)), nn.velocity, target_angle=nn.target_angle).normalized())
         return result
 
     def export_midi_file(self) -> None:
