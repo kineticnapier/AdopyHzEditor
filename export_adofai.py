@@ -220,21 +220,30 @@ def emit_angle_compression(
     x_mode,
     fixed_x,
     max_tiles_per_note,
-) -> tuple[int, int, float | None]:
+    target_angle: float | None = None,
+) -> tuple[int, int, float | None, bool]:
     if freq <= 0 or dur <= 0:
-        return floor, 0, None
+        return floor, 0, None, False
 
     beat_count = dur * play_bpm / 60.0
     keycount = freq * 60.0 * beat_count / max(play_bpm, EPS)
 
     if keycount <= EPS:
-        return floor, 0, None
+        return floor, 0, None, False
 
     x_tiles = int(math.floor(keycount + EPS))
     frac = keycount - math.floor(keycount)
 
     change_x = choose_change_x(keycount, x_mode, fixed_x)
-    angle = 180.0 * change_x / keycount
+    auto_angle = 180.0 * change_x / keycount
+
+    target_used = target_angle is not None
+    angle = float(target_angle) if target_used else auto_angle
+    # Keep obviously invalid values from producing impossible geometry.
+    if angle <= 0:
+        angle = auto_angle
+        target_used = False
+
     bpm = (freq * 60.0) * (angle / 180.0)
 
     actions.append(set_bpm(floor, bpm))
@@ -254,7 +263,7 @@ def emit_angle_compression(
         floor += 1
         emitted += 1
 
-    return floor, emitted, bpm
+    return floor, emitted, bpm, target_used
 
 
 def flatten_curve_notes(
@@ -282,7 +291,17 @@ def normalize_notes_to_first(notes: list[Note]) -> tuple[list[Note], float]:
 
     first_start = sorted_notes[0].start
     normalized = [
-        Note(max(0.0, n.start - first_start), max(0.0, n.end - first_start), n.midi, n.velocity).normalized()
+        Note(
+            max(0.0, n.start - first_start),
+            max(0.0, n.end - first_start),
+            n.midi,
+            n.velocity,
+            n.kind,
+            n.midi_end,
+            n.ctrl1_midi,
+            n.ctrl2_midi,
+            n.target_angle,
+        ).normalized()
         for n in sorted_notes
     ]
     return normalized, first_start
@@ -321,6 +340,7 @@ def export_adofai(
     tiles = 0
     overlaps = 0
     used = 0
+    target_angle_used = 0
     current_bpm: float | None = None
     play_bpm = max(1e-6, float(base_bpm))
 
@@ -345,7 +365,7 @@ def export_adofai(
         if method == "direct_180":
             floor, t, note_bpm = emit_direct(angle_data, actions, floor, n.freq, audible, limit)
         else:
-            floor, t, note_bpm = emit_angle_compression(
+            floor, t, note_bpm, target_used = emit_angle_compression(
                 angle_data,
                 actions,
                 floor,
@@ -355,7 +375,10 @@ def export_adofai(
                 rabbit_x_mode,
                 effective_fixed_x,
                 limit,
+                target_angle=n.target_angle,
             )
+            if target_used:
+                target_angle_used += 1
 
         if note_bpm is not None:
             current_bpm = note_bpm
@@ -381,6 +404,7 @@ def export_adofai(
         "start_floor": 1,
         "notes_total": len(sorted_notes),
         "notes_used": used,
+        "target_angle_used": target_angle_used,
         "overlaps_serialized": overlaps,
         "tiles_total": tiles,
         "floors_total": len(angle_data) - 1,

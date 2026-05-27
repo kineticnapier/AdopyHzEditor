@@ -232,6 +232,7 @@ class EditorView(QtWidgets.QWidget):
         self._move_original_state: list[dict] | None = None
         self._move_original_notes: list[tuple[int, Note]] = []
         self._move_active = False
+        self._move_clicked_index: int | None = None
         self._last_move_dx = 0.0
         self._last_move_dy = 0
 
@@ -317,6 +318,7 @@ class EditorView(QtWidgets.QWidget):
         self._move_original_state = self.snapshot_state()
         self._move_original_notes = [(i, self.notes[i].normalized()) for i in indices]
         self._move_active = True
+        self._move_clicked_index = idx
         self._last_move_dx = 0.0
         self._last_move_dy = 0
         return True
@@ -378,11 +380,22 @@ class EditorView(QtWidgets.QWidget):
             self.notes_changed.emit()
             self.status_changed.emit(f"Moved {len(self._move_original_notes)} note(s): {self._last_move_dx:+.3f}s, {self._last_move_dy:+d} semitone(s)")
         else:
-            if self._move_original_state is not None:
-                self.restore_state(self._move_original_state)
+            # Plain click on a note: select that note and keep it selected.
+            # Do not restore the old selection; that was the reason clicks appeared
+            # to do nothing after mouse release.
+            idx = self._move_clicked_index
+            if idx is not None and 0 <= idx < len(self.notes):
+                self.selected_indices = {idx}
+                self.selected_index = idx
+                self.redraw_notes()
+                n = self.notes[idx]
+                self.status_changed.emit(f"Selected {note_name(n.midi)} {n.start:.3f}-{n.end:.3f}s")
+            else:
+                self.redraw_notes()
 
         self._move_original_state = None
         self._move_original_notes = []
+        self._move_clicked_index = None
         self._move_active = False
 
     def nudge_selected(self, dx: float = 0.0, dy: int = 0) -> None:
@@ -405,6 +418,7 @@ class EditorView(QtWidgets.QWidget):
 
         self._move_original_state = None
         self._move_original_notes = []
+        self._move_clicked_index = None
         self.redraw_notes()
         self.notes_changed.emit()
         self.status_changed.emit(f"Nudged {len(indices)} note(s): {dx:+.3f}s, {dy:+d} semitone(s)")
@@ -955,6 +969,8 @@ class EditorView(QtWidgets.QWidget):
 
                 if i in self.selected_indices:
                     item.setPen(QtGui.QPen(QtGui.QColor(255, 230, 90, 255), 0.055))
+                elif n.target_angle is not None:
+                    item.setPen(QtGui.QPen(QtGui.QColor(255, 100, 220, 240), 0.050))
                 else:
                     item.setPen(QtGui.QPen(QtGui.QColor(120, 230, 255, max(120, alpha)), 0.040))
 
@@ -977,6 +993,9 @@ class EditorView(QtWidgets.QWidget):
                 if i in self.selected_indices:
                     rect.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 255), 0.025))
                     rect.setBrush(QtGui.QBrush(QtGui.QColor(255, 210, 80, min(255, alpha + 55))))
+                elif n.target_angle is not None:
+                    rect.setPen(QtGui.QPen(QtGui.QColor(255, 100, 220, 240), 0.022))
+                    rect.setBrush(QtGui.QBrush(QtGui.QColor(180, 70, 220, min(255, alpha + 20))))
                 else:
                     rect.setPen(QtGui.QPen(QtGui.QColor(180, 230, 255, alpha), 0.015))
                     rect.setBrush(QtGui.QBrush(QtGui.QColor(70, 190, 255, alpha)))
