@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import math
 from typing import Any
-from note_model import Note
+from note_model import Note, note_name
 
 EPS = 1e-9
 
@@ -214,6 +214,236 @@ def choose_change_x(keycount: float, mode: str, fixed: float) -> float:
         return max(1.0, float(math.ceil(keycount)))
 
     return max(1.0, float(x_floor))
+
+
+def build_adofai_debug_rows(
+    notes: list[Note],
+    *,
+    method: str = "rabbit_zip",
+    base_bpm: float = 175.0,
+    angle_only_bpm: float = 1600.0,
+    rabbit_x_mode: str = "floor",
+    rabbit_fixed_x: float = 8.0,
+    max_tiles: int = 200000,
+    max_tiles_per_note: int = 5000,
+    curve_step_sec: float = 0.025,
+    curve_pitch_step: float = 0.25,
+    final_angle_mode: str = "scaled",
+    final_custom_angle: float = 180.0,
+    final_cardinal_step: float = 90.0,
+    **_: Any,
+) -> list[dict[str, Any]]:
+    """
+    Build a per-note / per-zip calculation preview for ADOFAI Hz export.
+
+    This does not write a file. It mirrors the export calculations enough to
+    make angle/BPM/keycount issues visible before exporting.
+    """
+    flattened_notes = flatten_curve_notes(notes, curve_step_sec=curve_step_sec, curve_pitch_step=curve_pitch_step)
+    sorted_notes, first_note_offset = normalize_notes_to_first(flattened_notes)
+
+    method_key = (method or "rabbit_zip").lower().replace(" ", "_").replace("-", "_")
+    play_bpm = max(1e-6, float(angle_only_bpm if method_key == "angle_only" else base_bpm))
+
+    global_lowest_floor_x = compute_lowest_floor_x(sorted_notes)
+    effective_fixed_x = global_lowest_floor_x if (rabbit_x_mode or "").lower().replace(" ", "_").replace("-", "_") in (
+        "lowest_floor", "lowest", "min_floor", "minimum_floor"
+    ) else rabbit_fixed_x
+
+    rows: list[dict[str, Any]] = []
+    floor = 1
+    now = 0.0
+    tiles_so_far = 0
+    prev_abs = 0.0
+
+    for idx, n in enumerate(sorted_notes):
+        if max_tiles > 0 and tiles_so_far >= max_tiles:
+            break
+
+        freq = float(n.freq)
+        dur = float(n.duration)
+        if freq <= 0 or dur <= 0:
+            continue
+
+        pause_seconds_before = max(0.0, n.start - now)
+        overlap = n.start < now - 1e-6
+
+        limit = max_tiles_per_note
+        if max_tiles > 0:
+            remain = max_tiles - tiles_so_far
+            limit = min(limit, remain) if limit > 0 else remain
+
+        row: dict[str, Any] = {
+            "index": idx,
+            "floor_start": floor,
+            "start_s": round(n.start, 6),
+            "end_s": round(n.end, 6),
+            "duration_s": round(dur, 6),
+            "pause_before_s": round(pause_seconds_before, 6),
+            "overlap": bool(overlap),
+            "kind": n.kind,
+            "note": note_name(n.midi),
+            "midi": round(float(n.midi), 6),
+            "freq_hz": round(freq, 6),
+            "method": method_key,
+            "target_angle": "" if n.target_angle is None else round(float(n.target_angle), 6),
+            "target_angle_used": False,
+            "target_angle_ignored": bool(method_key == "angle_only" and n.target_angle is not None),
+            "warning": "",
+        }
+
+        emitted = 0
+        final_visual_used = False
+        final_bpm = ""
+        effective_bpm = ""
+
+        if method_key == "direct_180":
+            bpm = freq * 60.0
+            keycount = freq * dur
+            whole = int(math.floor(keycount + EPS))
+            frac = keycount - whole
+            emitted = whole
+            if limit > 0:
+                emitted = min(emitted, limit)
+
+            final_angle = 180.0 if frac > 1e-6 and (limit <= 0 or emitted < limit) else ""
+            final_bpm = (bpm / frac) if isinstance(final_angle, float) and frac > 1e-6 else ""
+            if isinstance(final_angle, float):
+                emitted += 1
+
+            row.update({
+                "keycount": round(keycount, 6),
+                "whole": whole,
+                "frac": round(frac, 6),
+                "change_x": "",
+                "angle": 180.0,
+                "auto_angle": 180.0,
+                "final_angle_scaled": "" if frac <= 1e-6 else round(180.0 * frac, 6),
+                "final_angle_effective": final_angle if final_angle == "" else round(final_angle, 6),
+                "effective_bpm": round(bpm, 6),
+                "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
+                "tiles_est": emitted,
+                "final_visual_used": False,
+                "lowest_floor_x": global_lowest_floor_x,
+                "effective_fixed_x": round(float(effective_fixed_x), 6),
+            })
+
+        elif method_key == "angle_only":
+            keycount = freq * dur
+            whole = int(math.floor(keycount + EPS))
+            frac = keycount - math.floor(keycount)
+            angle = clean_relative_angle(play_bpm * 180.0 / max(EPS, freq * 60.0))
+
+            emitted = whole
+            if limit > 0:
+                emitted = min(emitted, limit)
+
+            scaled_final = angle * frac if frac > 1e-6 else ""
+            effective_final = ""
+            if frac > 1e-6 and (limit <= 0 or emitted < limit):
+                effective_final = final_visual_angle(
+                    mode=final_angle_mode,
+                    prev_abs=prev_abs,
+                    scaled_final_angle=angle * frac,
+                    custom_final_angle=final_custom_angle,
+                    cardinal_step=final_cardinal_step,
+                )
+                final_bpm = (freq * 60.0) * (effective_final / max(EPS, 180.0 * frac))
+                final_visual_used = abs(float(effective_final) - float(angle * frac)) > 1e-6 or abs(final_bpm - play_bpm) > 1e-6
+                emitted += 1
+
+            row.update({
+                "keycount": round(keycount, 6),
+                "whole": whole,
+                "frac": round(frac, 6),
+                "change_x": "",
+                "angle": round(angle, 6),
+                "auto_angle": round(angle, 6),
+                "final_angle_scaled": "" if scaled_final == "" else round(float(scaled_final), 6),
+                "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
+                "effective_bpm": round(play_bpm, 6),
+                "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
+                "tiles_est": emitted,
+                "final_visual_used": bool(final_visual_used),
+                "lowest_floor_x": global_lowest_floor_x,
+                "effective_fixed_x": round(float(effective_fixed_x), 6),
+            })
+
+        else:
+            beat_count = dur * play_bpm / 60.0
+            keycount = freq * 60.0 * beat_count / max(play_bpm, EPS)
+            whole = int(math.floor(keycount + EPS))
+            frac = keycount - math.floor(keycount)
+
+            change_x = choose_change_x(keycount, rabbit_x_mode, effective_fixed_x)
+            auto_angle = 180.0 * change_x / keycount if keycount > EPS else 180.0
+
+            target_used = n.target_angle is not None and float(n.target_angle) > 0
+            angle = float(n.target_angle) if target_used else auto_angle
+            bpm = (freq * 60.0) * (angle / 180.0)
+
+            emitted = whole
+            if limit > 0:
+                emitted = min(emitted, limit)
+
+            scaled_final = angle * frac if frac > 1e-6 else ""
+            effective_final = ""
+            if frac > 1e-6 and (limit <= 0 or emitted < limit):
+                effective_final = final_visual_angle(
+                    mode=final_angle_mode,
+                    prev_abs=prev_abs,
+                    scaled_final_angle=angle * frac,
+                    custom_final_angle=final_custom_angle,
+                    cardinal_step=final_cardinal_step,
+                )
+                final_bpm = (freq * 60.0) * (effective_final / max(EPS, 180.0 * frac))
+                final_visual_used = abs(float(effective_final) - float(angle * frac)) > 1e-6 or abs(final_bpm - bpm) > 1e-6
+                emitted += 1
+
+            row.update({
+                "keycount": round(keycount, 6),
+                "whole": whole,
+                "frac": round(frac, 6),
+                "change_x": round(float(change_x), 6),
+                "angle": round(angle, 6),
+                "auto_angle": round(auto_angle, 6),
+                "final_angle_scaled": "" if scaled_final == "" else round(float(scaled_final), 6),
+                "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
+                "effective_bpm": round(bpm, 6),
+                "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
+                "tiles_est": emitted,
+                "target_angle_used": bool(target_used),
+                "final_visual_used": bool(final_visual_used),
+                "lowest_floor_x": global_lowest_floor_x,
+                "effective_fixed_x": round(float(effective_fixed_x), 6),
+            })
+
+        if limit > 0 and row.get("whole", 0) > limit:
+            row["warning"] = f"clipped by max_tiles_per_note={limit}"
+        if row.get("angle") != "" and isinstance(row.get("angle"), (int, float)) and float(row["angle"]) < 1.0:
+            row["warning"] = (row["warning"] + "; " if row["warning"] else "") + "very small angle"
+
+        rows.append(row)
+
+        # Approximate floor/abs angle progression for next debug row.
+        floor += int(row.get("tiles_est", 0))
+        tiles_so_far += int(row.get("tiles_est", 0))
+        now = max(now, n.end)
+
+        # Reconstruct approximate previous absolute angle from generated relative angles.
+        rel_main = row.get("angle")
+        if isinstance(rel_main, (int, float)):
+            for _ in range(int(row.get("whole", 0))):
+                prev_abs = clean_angle(prev_abs + 180.0 - float(rel_main))
+
+        rel_final = row.get("final_angle_effective")
+        if isinstance(rel_final, (int, float)):
+            prev_abs = clean_angle(prev_abs + 180.0 - float(rel_final))
+
+        row["floor_end"] = floor
+
+    return rows
+
 
 
 def compute_lowest_floor_x(notes: list[Note]) -> int:

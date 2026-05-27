@@ -936,3 +936,58 @@ Final tile mode: scaled
 ```
 
 角度が小さすぎて詰まる場合は `Angle-only BPM` を上げてください。
+
+
+## Stable40 Hz/Angle Debug Preview
+
+`Issue #5: Add Hz/angle debug preview` に対応しました。
+
+ADOFAI出力ダイアログに `Debug Preview` ボタンを追加しました。
+
+表示される主な値:
+
+```text
+index
+floor_start / floor_end
+start_s / end_s / duration_s
+note / midi / freq_hz
+method
+keycount
+whole / frac
+change_x
+angle
+auto_angle
+target_angle
+target_angle_used
+target_angle_ignored
+final_angle_scaled
+final_angle_effective
+effective_bpm
+final_bpm
+tiles_est
+final_visual_used
+warning
+```
+
+コピー機能:
+
+```text
+Copy TSV
+Copy CSV
+```
+
+注意:
+
+```text
+Curve/Glideノートは、ADOFAI出力時と同じように短い固定Hz区間へ分割した後の行として表示します。
+```
+
+用途:
+
+```text
+・Target Angle が効いているか確認
+・Angle-onlyでTarget Angleが無視されているか確認
+・final tile補正が入っているか確認
+・角度が小さすぎる場所を確認
+・max_tiles_per_noteで切られそうな場所を確認
+```
