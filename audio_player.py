@@ -68,6 +68,19 @@ class AudioPlayer:
             # srが確定したので、ノートサンプル位置は再設定が必要。
             # main側の sync_notes_to_player が後で呼ばれる。
 
+    def clear_audio(self) -> None:
+        """
+        Unload the currently decoded audio and close the stream.
+        Preview/metronome settings are kept, but playback becomes silent because
+        there is no main audio buffer/stream.
+        """
+        with self.lock:
+            self.stop()
+            self.audio = None
+            self.pos = 0
+            self._pos_float = 0.0
+            self.preview_notes = []
+
     @property
     def duration(self) -> float:
         if self.audio is None or self.sr <= 0:

@@ -4,10 +4,11 @@ import sys
 from pathlib import Path
 import csv
 import io
+import numpy as np
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_cache
+from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_cache, Spectrogram
 from audio_player import AudioPlayer
 from editor_view import EditorView
 from export_midi import export_midi
@@ -1169,7 +1170,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage("Playback audio is still loading. Try again in a moment.")
                 QtCore.QTimer.singleShot(1, lambda p=self.current_audio: self.load_audio_for_playback(p))
             else:
-                self.statusBar().showMessage("Open an audio file first")
+                self.statusBar().showMessage("No audio loaded")
             return
 
         if not self.player.playing:
@@ -1328,6 +1329,98 @@ class MainWindow(QtWidgets.QMainWindow):
     def load_project_notes_only(self) -> None:
         self.load_project_from_file(notes_only=True)
 
+    def estimate_blank_spectrogram_bounds(self, notes: list[Note] | None = None) -> tuple[float, int, int]:
+        """
+        Return a sane black spectrogram size when no audio is loaded.
+
+        Duration follows the loaded notes so notes still remain visible.
+        Pitch range defaults to C0-C10, but expands if notes are outside it.
+        """
+        src = notes if notes is not None else self.editor.notes
+        duration = 60.0
+        midi_min = 12
+        midi_max = 120
+
+        if src:
+            duration = max(12.0, max(float(n.end) for n in src) + 2.0)
+            pitches: list[float] = []
+            for n in src:
+                nn = n.normalized()
+                pitches.append(float(nn.midi))
+                if nn.midi_end is not None:
+                    pitches.append(float(nn.midi_end))
+                if nn.ctrl1_midi is not None:
+                    pitches.append(float(nn.ctrl1_midi))
+                if nn.ctrl2_midi is not None:
+                    pitches.append(float(nn.ctrl2_midi))
+
+            if pitches:
+                midi_min = min(12, max(0, int(min(pitches)) - 12))
+                midi_max = max(120, min(127, int(max(pitches)) + 12))
+
+        duration = max(1.0, float(duration))
+        midi_min = int(max(0, min(127, midi_min)))
+        midi_max = int(max(midi_min + 12, min(127, midi_max)))
+        return duration, midi_min, midi_max
+
+    def make_blank_spectrogram(self, notes: list[Note] | None = None) -> Spectrogram:
+        """
+        Create a black placeholder spectrogram.
+
+        This is used when a project is loaded without loading/analyzing audio,
+        so stale spectrogram/audio from the previous project cannot remain.
+        """
+        duration, midi_min, midi_max = self.estimate_blank_spectrogram_bounds(notes)
+        hop = 0.05
+        frames = max(2, int(duration / hop) + 1)
+        rows = int(midi_max - midi_min + 1)
+        db = np.zeros((rows, frames), dtype=np.float32)
+        frame_times = np.linspace(0.0, duration, frames, dtype=np.float32)
+        return Spectrogram(
+            audio_path="",
+            db=db,
+            duration=float(duration),
+            midi_min=int(midi_min),
+            midi_max=int(midi_max),
+            frame_times=frame_times,
+            sr=22050,
+        )
+
+    def unload_audio_to_blank_spectrogram(self, notes: list[Note] | None = None, *, message: str = "Audio not loaded") -> None:
+        """
+        Drop any previous audio/spectrogram and show a black CQT placeholder.
+        """
+        self._analysis_request_id += 1  # invalidate any pending analysis result
+        self.current_audio = None
+        self._current_analysis_signature = None
+
+        if hasattr(self.player, "clear_audio"):
+            self.player.clear_audio()
+        else:
+            self.player.stop()
+            self.player.audio = None
+
+        spec = self.make_blank_spectrogram(notes)
+        self.editor.set_spectrogram(spec)
+
+        self._ignore_scroll_signal = True
+        try:
+            self.time_slider.setValue(0)
+            self.visible_sec.setValue(min(12.0, max(0.5, spec.duration)))
+            self.pitch_bottom.setRange(spec.midi_min, spec.midi_max)
+            self.pitch_bottom.setValue(spec.midi_min)
+            self.visible_notes.setRange(6, spec.midi_max - spec.midi_min + 1)
+            self.visible_notes.setValue(min(60, spec.midi_max - spec.midi_min + 1))
+        finally:
+            self._ignore_scroll_signal = False
+
+        self.editor.set_playhead(0.0)
+        self.update_time_labels()
+        self.update_view_from_controls()
+        self.apply_timing_helpers()
+        self.sync_notes_to_player()
+        self.statusBar().showMessage(message)
+
     def choose_project_audio_load_mode(self, audio: str | None) -> str:
         if not audio or not Path(audio).exists():
             return "skip"
@@ -1387,7 +1480,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.load_audio(audio, reset_notes=False, clear_project=False)
                 self.statusBar().showMessage(f"Loaded project notes, loading audio: {Path(path).name}")
             else:
-                self.statusBar().showMessage(f"Loaded project notes only: {Path(path).name}")
+                self.unload_audio_to_blank_spectrogram(
+                    notes,
+                    message=f"Loaded project notes only, audio unloaded: {Path(path).name}",
+                )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Load failed", str(e))
 

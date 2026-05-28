@@ -1210,3 +1210,22 @@ effective_bpm = varies
 CQT解析そのものはまだCPU処理です。
 GPU STFT/CQTバックエンドは未実装です。
 ```
+
+
+## Stable46 Notes-only project load behavior
+
+Project loading behavior was adjusted for notes-only / unloaded-audio cases.
+
+- When loading a project without loading its audio, the previous spectrogram is no longer kept.
+- The editor now shows a black placeholder CQT instead.
+- Previous decoded audio is unloaded, so playback does not accidentally use the old audio file.
+- Note data still remains visible on top of the black placeholder.
+- The placeholder duration is estimated from the loaded notes so the notes remain reachable.
+
+This applies to:
+
+```text
+Load project -> ノートだけ読み込む
+File menu -> プロジェクト読込（ノートのみ）
+Missing/unavailable project audio path
+```
