@@ -4,16 +4,65 @@ import sys
 from pathlib import Path
 import csv
 import io
+import numpy as np
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from audio_analysis import analyze_cqt, analysis_profile_options
+from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_cache, Spectrogram
 from audio_player import AudioPlayer
 from editor_view import EditorView
 from export_midi import export_midi
 from export_adofai import export_adofai, build_adofai_debug_rows
 from project_io import save_project, load_project
 from note_model import Note
+
+
+class AnalysisWorker(QtCore.QObject):
+    finished = QtCore.Signal(object, str, str, bool, str, bool, int)
+    failed = QtCore.Signal(str, str, str, bool, str, bool, int)
+
+    def __init__(
+        self,
+        path: str,
+        opts: dict,
+        signature: str,
+        reset_notes: bool,
+        profile: str,
+        clear_project: bool,
+        request_id: int,
+    ) -> None:
+        super().__init__()
+        self.path = path
+        self.opts = dict(opts)
+        self.signature = signature
+        self.reset_notes = bool(reset_notes)
+        self.profile = profile
+        self.clear_project = bool(clear_project)
+        self.request_id = int(request_id)
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        try:
+            spec = analyze_cqt(self.path, use_cache=True, **self.opts)
+            self.finished.emit(
+                spec,
+                self.path,
+                self.signature,
+                self.reset_notes,
+                self.profile,
+                self.clear_project,
+                self.request_id,
+            )
+        except Exception as e:
+            self.failed.emit(
+                str(e),
+                self.path,
+                self.signature,
+                self.reset_notes,
+                self.profile,
+                self.clear_project,
+                self.request_id,
+            )
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -33,6 +82,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.player = AudioPlayer()
         self.current_audio: str | None = None
         self.current_project: Path | None = None
+        self._current_analysis_signature: str | None = None
+        self._analysis_thread: QtCore.QThread | None = None
+        self._analysis_worker: AnalysisWorker | None = None
+        self._analysis_request_id = 0
+        self._analysis_cursor_active = False
         self._ignore_scroll_signal = False
         self._suppress_dirty = False
         self._dirty = False
@@ -132,6 +186,21 @@ class MainWindow(QtWidgets.QMainWindow):
         return False
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        if self._analysis_thread is not None and self._analysis_thread.isRunning():
+            box = QtWidgets.QMessageBox(self)
+            box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+            box.setWindowTitle("Analysis running")
+            box.setText("音声解析がまだ実行中です。")
+            box.setInformativeText("終了すると解析結果は破棄されます。続行しますか？")
+            quit_btn = box.addButton("終了", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = box.addButton("キャンセル", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(cancel_btn)
+            box.exec()
+            if box.clickedButton() != quit_btn:
+                event.ignore()
+                return
+            self._analysis_request_id += 1
+
         if self.confirm_discard_unsaved("Close AdopyHzEditor"):
             event.accept()
         else:
@@ -144,6 +213,7 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addAction("開く(&O)", self.open_audio, QtGui.QKeySequence("Ctrl+O"))
         file_menu.addAction("プロジェクト保存(&S)", self.save_project_as, QtGui.QKeySequence("Ctrl+S"))
         file_menu.addAction("プロジェクト読込(&L)", self.load_project_from_file, QtGui.QKeySequence("Ctrl+L"))
+        file_menu.addAction("プロジェクト読込（ノートのみ）", self.load_project_notes_only)
         file_menu.addSeparator()
         file_menu.addAction("MIDI出力", self.export_midi_file, QtGui.QKeySequence("Ctrl+M"))
         file_menu.addAction("ADOFAI Hz出力", self.export_adofai_file, QtGui.QKeySequence("Ctrl+E"))
@@ -168,6 +238,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         analyze_menu = menubar.addMenu("解析(&A)")
         analyze_menu.addAction("スペクトログラム再描画", self.apply_visual)
+        analyze_menu.addAction("音声を再解析", self.reanalyze_current_audio)
 
         view_menu = menubar.addMenu("表示(&V)")
         view_menu.addAction("スペクトログラム重視", lambda: self.editor.set_mode(0), QtGui.QKeySequence("1"))
@@ -747,24 +818,59 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.load_audio(path, reset_notes=True)
 
+    def reanalyze_current_audio(self) -> None:
+        if not self.current_audio:
+            self.statusBar().showMessage("Open an audio file first")
+            return
+        self.load_audio(self.current_audio, reset_notes=False, clear_project=False, force_reanalysis=True)
+
     def analysis_options(self) -> dict:
         profile = self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal"
         return analysis_profile_options(profile)
 
-    def load_audio(self, path: str, *, reset_notes: bool = True) -> None:
+    def analysis_signature(self, path: str, opts: dict | None = None) -> str:
+        """Signature for the currently displayed spectrogram analysis."""
+        import json
+
+        p = Path(path)
+        opts = dict(opts or self.analysis_options())
+        try:
+            stat = p.stat()
+            payload = {
+                "path": str(p.resolve()),
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+                **opts,
+            }
+        except Exception:
+            payload = {"path": str(p), **opts}
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+    def has_same_loaded_analysis(self, path: str, opts: dict | None = None) -> bool:
+        sig = self.analysis_signature(path, opts)
+        return (
+            self.editor.spectrogram is not None
+            and self.current_audio == str(Path(path).resolve())
+            and self._current_analysis_signature == sig
+        )
+
+    def load_audio(
+        self,
+        path: str,
+        *,
+        reset_notes: bool = True,
+        clear_project: bool = True,
+        force_reanalysis: bool = False,
+    ) -> None:
         opts = self.analysis_options()
         profile = self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal"
+        abs_path = str(Path(path).resolve())
+        signature = self.analysis_signature(abs_path, opts)
 
-        self.statusBar().showMessage(
-            f"Analyzing CQT ({profile}, sr={opts['sr']}, hop={opts['hop_length']})..."
-        )
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-        try:
-            spec = analyze_cqt(path, use_cache=True, **opts)
-            self.current_audio = str(Path(path))
-            self.current_project = None
-            self.editor.set_spectrogram(spec)
-
+        if not force_reanalysis and self.has_same_loaded_analysis(abs_path, opts):
+            if clear_project:
+                self.current_project = None
+            self.current_audio = abs_path
             if reset_notes:
                 self._suppress_dirty = True
                 try:
@@ -773,40 +879,149 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._suppress_dirty = False
                 self.note_clipboard.clear()
                 self.sync_notes_to_player()
+            self.update_time_labels()
+            self.update_view_from_controls()
+            self.apply_timing_helpers()
+            if self.player.available and getattr(self.player, "audio", None) is None:
+                QtCore.QTimer.singleShot(1, lambda p=abs_path: self.load_audio_for_playback(p))
+            self.statusBar().showMessage(f"Reused loaded spectrogram: {Path(path).name} / {profile}")
+            return
 
-            self._ignore_scroll_signal = True
+        if self._analysis_thread is not None and self._analysis_thread.isRunning():
+            self.statusBar().showMessage("Audio analysis is already running. Please wait.")
+            return
+
+        if reset_notes:
+            self._suppress_dirty = True
+            try:
+                self.editor.set_notes([])
+            finally:
+                self._suppress_dirty = False
+            self.note_clipboard.clear()
+            self.sync_notes_to_player()
+
+        cache_status = "cache hit" if has_analysis_cache(abs_path, **opts) else "cache miss"
+        self.statusBar().showMessage(
+            f"Loading CQT in background ({profile}, {cache_status}, sr={opts['sr']}, hop={opts['hop_length']})..."
+        )
+
+        self._analysis_request_id += 1
+        request_id = self._analysis_request_id
+
+        thread = QtCore.QThread(self)
+        worker = AnalysisWorker(abs_path, opts, signature, reset_notes, profile, clear_project, request_id)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(self.on_audio_analysis_finished)
+        worker.failed.connect(self.on_audio_analysis_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self.on_audio_analysis_thread_finished)
+
+        self._analysis_thread = thread
+        self._analysis_worker = worker
+        if not self._analysis_cursor_active:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            self._analysis_cursor_active = True
+        thread.start()
+
+    @QtCore.Slot(object, str, str, bool, str, bool, int)
+    def on_audio_analysis_finished(
+        self,
+        spec,
+        path: str,
+        signature: str,
+        reset_notes: bool,
+        profile: str,
+        clear_project: bool,
+        request_id: int,
+    ) -> None:
+        if request_id != self._analysis_request_id:
+            return
+        self.apply_loaded_spectrogram(spec, path, signature, reset_notes, profile, clear_project)
+
+    @QtCore.Slot(str, str, str, bool, str, bool, int)
+    def on_audio_analysis_failed(
+        self,
+        message: str,
+        path: str,
+        signature: str,
+        reset_notes: bool,
+        profile: str,
+        clear_project: bool,
+        request_id: int,
+    ) -> None:
+        if request_id != self._analysis_request_id:
+            return
+        QtWidgets.QMessageBox.critical(self, "Load failed", message)
+        self.statusBar().showMessage(f"Audio analysis failed: {Path(path).name}")
+
+    @QtCore.Slot()
+    def on_audio_analysis_thread_finished(self) -> None:
+        self._analysis_thread = None
+        self._analysis_worker = None
+        if self._analysis_cursor_active:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            self._analysis_cursor_active = False
+        self._ignore_scroll_signal = False
+
+    def apply_loaded_spectrogram(
+        self,
+        spec,
+        path: str,
+        signature: str,
+        reset_notes: bool,
+        profile: str,
+        clear_project: bool,
+    ) -> None:
+        self.current_audio = str(Path(path).resolve())
+        self._current_analysis_signature = signature
+        if clear_project:
+            self.current_project = None
+        self.editor.set_spectrogram(spec)
+
+        if reset_notes:
+            self._suppress_dirty = True
+            try:
+                self.editor.set_notes([])
+            finally:
+                self._suppress_dirty = False
+            self.note_clipboard.clear()
+            self.sync_notes_to_player()
+
+        self._ignore_scroll_signal = True
+        try:
             self.time_slider.setValue(0)
             self.visible_sec.setValue(min(12.0, max(0.5, spec.duration)))
             self.pitch_bottom.setRange(spec.midi_min, spec.midi_max)
             self.pitch_bottom.setValue(spec.midi_min)
             self.visible_notes.setRange(6, spec.midi_max - spec.midi_min + 1)
             self.visible_notes.setValue(min(60, spec.midi_max - spec.midi_min + 1))
-            self._ignore_scroll_signal = False
-
-            self.editor.set_playhead(0.0)
-            self.update_time_labels()
-            self.update_view_from_controls()
-            self.apply_timing_helpers()
-
-            # Perceived-speed improvement:
-            # Display the spectrogram first, then decode playback audio after returning to the event loop.
-            if self.player.available:
-                QtCore.QTimer.singleShot(1, lambda p=str(path): self.load_audio_for_playback(p))
-
-            self.set_dirty(False if reset_notes else self._dirty)
-            self.statusBar().showMessage(
-                f"Loaded spectrogram: {Path(path).name} / {profile} / playback loading..."
-            )
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Load failed", str(e))
         finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
             self._ignore_scroll_signal = False
+
+        self.editor.set_playhead(0.0)
+        self.update_time_labels()
+        self.update_view_from_controls()
+        self.apply_timing_helpers()
+
+        # Display the spectrogram first, then decode playback audio after returning to the event loop.
+        if self.player.available:
+            QtCore.QTimer.singleShot(1, lambda p=str(path): self.load_audio_for_playback(p))
+
+        self.set_dirty(False if reset_notes else self._dirty)
+        self.statusBar().showMessage(
+            f"Loaded spectrogram: {Path(path).name} / {profile} / playback loading..."
+        )
 
     def load_audio_for_playback(self, path: str) -> None:
         if not self.player.available:
             return
-        if self.current_audio is None or str(Path(path)) != self.current_audio:
+        if self.current_audio is None or str(Path(path).resolve()) != self.current_audio:
             return
 
         try:
@@ -955,7 +1170,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage("Playback audio is still loading. Try again in a moment.")
                 QtCore.QTimer.singleShot(1, lambda p=self.current_audio: self.load_audio_for_playback(p))
             else:
-                self.statusBar().showMessage("Open an audio file first")
+                self.statusBar().showMessage("No audio loaded")
             return
 
         if not self.player.playing:
@@ -1111,7 +1326,128 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Save failed", str(e))
             return False
 
-    def load_project_from_file(self) -> None:
+    def load_project_notes_only(self) -> None:
+        self.load_project_from_file(notes_only=True)
+
+    def estimate_blank_spectrogram_bounds(self, notes: list[Note] | None = None) -> tuple[float, int, int]:
+        """
+        Return a sane black spectrogram size when no audio is loaded.
+
+        Duration follows the loaded notes so notes still remain visible.
+        Pitch range defaults to C0-C10, but expands if notes are outside it.
+        """
+        src = notes if notes is not None else self.editor.notes
+        duration = 60.0
+        midi_min = 12
+        midi_max = 120
+
+        if src:
+            duration = max(12.0, max(float(n.end) for n in src) + 2.0)
+            pitches: list[float] = []
+            for n in src:
+                nn = n.normalized()
+                pitches.append(float(nn.midi))
+                if nn.midi_end is not None:
+                    pitches.append(float(nn.midi_end))
+                if nn.ctrl1_midi is not None:
+                    pitches.append(float(nn.ctrl1_midi))
+                if nn.ctrl2_midi is not None:
+                    pitches.append(float(nn.ctrl2_midi))
+
+            if pitches:
+                midi_min = min(12, max(0, int(min(pitches)) - 12))
+                midi_max = max(120, min(127, int(max(pitches)) + 12))
+
+        duration = max(1.0, float(duration))
+        midi_min = int(max(0, min(127, midi_min)))
+        midi_max = int(max(midi_min + 12, min(127, midi_max)))
+        return duration, midi_min, midi_max
+
+    def make_blank_spectrogram(self, notes: list[Note] | None = None) -> Spectrogram:
+        """
+        Create a black placeholder spectrogram.
+
+        This is used when a project is loaded without loading/analyzing audio,
+        so stale spectrogram/audio from the previous project cannot remain.
+        """
+        duration, midi_min, midi_max = self.estimate_blank_spectrogram_bounds(notes)
+        hop = 0.05
+        frames = max(2, int(duration / hop) + 1)
+        rows = int(midi_max - midi_min + 1)
+        db = np.zeros((rows, frames), dtype=np.float32)
+        frame_times = np.linspace(0.0, duration, frames, dtype=np.float32)
+        return Spectrogram(
+            audio_path="",
+            db=db,
+            duration=float(duration),
+            midi_min=int(midi_min),
+            midi_max=int(midi_max),
+            frame_times=frame_times,
+            sr=22050,
+        )
+
+    def unload_audio_to_blank_spectrogram(self, notes: list[Note] | None = None, *, message: str = "Audio not loaded") -> None:
+        """
+        Drop any previous audio/spectrogram and show a black CQT placeholder.
+        """
+        self._analysis_request_id += 1  # invalidate any pending analysis result
+        self.current_audio = None
+        self._current_analysis_signature = None
+
+        if hasattr(self.player, "clear_audio"):
+            self.player.clear_audio()
+        else:
+            self.player.stop()
+            self.player.audio = None
+
+        spec = self.make_blank_spectrogram(notes)
+        self.editor.set_spectrogram(spec)
+
+        self._ignore_scroll_signal = True
+        try:
+            self.time_slider.setValue(0)
+            self.visible_sec.setValue(min(12.0, max(0.5, spec.duration)))
+            self.pitch_bottom.setRange(spec.midi_min, spec.midi_max)
+            self.pitch_bottom.setValue(spec.midi_min)
+            self.visible_notes.setRange(6, spec.midi_max - spec.midi_min + 1)
+            self.visible_notes.setValue(min(60, spec.midi_max - spec.midi_min + 1))
+        finally:
+            self._ignore_scroll_signal = False
+
+        self.editor.set_playhead(0.0)
+        self.update_time_labels()
+        self.update_view_from_controls()
+        self.apply_timing_helpers()
+        self.sync_notes_to_player()
+        self.statusBar().showMessage(message)
+
+    def choose_project_audio_load_mode(self, audio: str | None) -> str:
+        if not audio or not Path(audio).exists():
+            return "skip"
+
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        box.setWindowTitle("Load project audio")
+        box.setText("プロジェクトに音声ファイルが関連付けられています。")
+        box.setInformativeText(
+            "音声も読み込みますか？キャッシュがない場合はバックグラウンド解析を開始します。"
+        )
+        load_btn = box.addButton("音声も読み込む", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        notes_btn = box.addButton("ノートだけ読み込む", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = box.addButton("キャンセル", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(load_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == load_btn:
+            return "load"
+        if clicked == notes_btn:
+            return "skip"
+        if clicked == cancel_btn:
+            return "cancel"
+        return "cancel"
+
+    def load_project_from_file(self, *, notes_only: bool = False) -> None:
         if not self.confirm_discard_unsaved("Load project"):
             return
 
@@ -1127,17 +1463,27 @@ class MainWindow(QtWidgets.QMainWindow):
             audio, notes, settings = load_project(path)
             self._suppress_dirty = True
             try:
-                if audio and Path(audio).exists():
-                    self.load_audio(audio, reset_notes=False)
-                self.editor.set_notes(notes)
+                # Apply settings first so the saved analysis_profile is used when loading audio.
                 self.apply_project_settings(settings)
+                self.editor.set_notes(notes)
             finally:
                 self._suppress_dirty = False
 
             self.current_project = Path(path)
             self.set_dirty(False)
             self.sync_notes_to_player()
-            self.statusBar().showMessage(f"Loaded project: {Path(path).name}")
+
+            mode = "skip" if notes_only else self.choose_project_audio_load_mode(audio)
+            if mode == "cancel":
+                return
+            if mode == "load" and audio and Path(audio).exists():
+                self.load_audio(audio, reset_notes=False, clear_project=False)
+                self.statusBar().showMessage(f"Loaded project notes, loading audio: {Path(path).name}")
+            else:
+                self.unload_audio_to_blank_spectrogram(
+                    notes,
+                    message=f"Loaded project notes only, audio unloaded: {Path(path).name}",
+                )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Load failed", str(e))
 
