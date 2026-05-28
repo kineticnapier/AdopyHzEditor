@@ -7,6 +7,9 @@ import json
 import numpy as np
 
 
+CACHE_VERSION = 3
+
+
 @dataclass
 class Spectrogram:
     audio_path: str
@@ -126,6 +129,42 @@ def analysis_profile_options(profile: str) -> dict:
         "bins_per_semitone": 1,
     }
 
+
+def analysis_cache_path(
+    audio_path: str | Path,
+    *,
+    sr: int = 22050,
+    midi_min: int = 12,
+    midi_max: int = 108,
+    hop_length: int = 1536,
+    engine: str = "hybrid",
+    bins_per_semitone: int = 1,
+) -> Path:
+    path = Path(audio_path)
+    midi_min, midi_max = clamp_midi_range_for_sr(midi_min, midi_max, sr)
+    bins_per_semitone = max(1, int(bins_per_semitone))
+    bins_per_octave = 12 * bins_per_semitone
+    key = cache_key(
+        path,
+        cache_version=CACHE_VERSION,
+        sr=sr,
+        midi_min=midi_min,
+        midi_max=midi_max,
+        hop_length=hop_length,
+        bins_per_octave=bins_per_octave,
+        engine=engine,
+        bins_per_semitone=bins_per_semitone,
+    )
+    return Path.home() / ".adopyhzeditor_cache" / f"{key}.npz"
+
+
+def has_analysis_cache(audio_path: str | Path, **kwargs) -> bool:
+    try:
+        return analysis_cache_path(audio_path, **kwargs).exists()
+    except Exception:
+        return False
+
+
 def analyze_cqt(
     audio_path: str | Path,
     *,
@@ -151,7 +190,7 @@ def analyze_cqt(
     # v3: uncompressed npz, hybrid CQT, safe MIDI range clamping
     key = cache_key(
         path,
-        cache_version=3,
+        cache_version=CACHE_VERSION,
         sr=sr,
         midi_min=midi_min,
         midi_max=midi_max,
