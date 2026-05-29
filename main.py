@@ -15,6 +15,7 @@ from export_midi import export_midi
 from export_adofai import export_adofai, build_adofai_debug_rows
 from project_io import save_project, load_project
 from note_model import Note
+from i18n import tr, current_language, set_language
 
 
 class AnalysisWorker(QtCore.QObject):
@@ -69,7 +70,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
-        self.setWindowTitle("AdopyHzEditor")
+        self.setWindowTitle(tr("app.title"))
         self.resize(1320, 820)
 
         self.editor = EditorView()
@@ -109,12 +110,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.player.available:
             self.statusBar().showMessage(f"Playback disabled: {self.player.error}")
         else:
-            self.statusBar().showMessage("Open an audio file")
+            self.statusBar().showMessage(tr("status.open_audio"))
 
     def update_window_title(self) -> None:
         mark = "*" if self._dirty else ""
         project = f" - {self.current_project.name}" if self.current_project else ""
-        self.setWindowTitle(f"AdopyHzEditor{mark}{project}")
+        self.setWindowTitle(f"{tr('app.title')}{mark}{project}")
 
     def set_dirty(self, dirty: bool = True) -> None:
         if self._suppress_dirty and dirty:
@@ -161,18 +162,18 @@ class MainWindow(QtWidgets.QMainWindow):
             if hasattr(w, "currentTextChanged"):
                 w.currentTextChanged.connect(lambda *args: self.mark_dirty())
 
-    def confirm_discard_unsaved(self, title: str = "Unsaved changes") -> bool:
+    def confirm_discard_unsaved(self, title: str | None = None) -> bool:
         if not self._dirty:
             return True
 
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-        box.setWindowTitle(title)
-        box.setText("保存していない変更があります。")
-        box.setInformativeText("続行する前に保存しますか？")
-        save_btn = box.addButton("保存", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        discard_btn = box.addButton("保存せず続行", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
-        cancel_btn = box.addButton("キャンセル", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setWindowTitle(title or tr("dialog.unsaved.title"))
+        box.setText(tr("dialog.unsaved.text"))
+        box.setInformativeText(tr("dialog.unsaved.info"))
+        save_btn = box.addButton(tr("dialog.unsaved.save"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        discard_btn = box.addButton(tr("dialog.unsaved.discard"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = box.addButton(tr("dialog.unsaved.cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(save_btn)
         box.exec()
 
@@ -189,11 +190,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._analysis_thread is not None and self._analysis_thread.isRunning():
             box = QtWidgets.QMessageBox(self)
             box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-            box.setWindowTitle("Analysis running")
-            box.setText("音声解析がまだ実行中です。")
-            box.setInformativeText("終了すると解析結果は破棄されます。続行しますか？")
-            quit_btn = box.addButton("終了", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
-            cancel_btn = box.addButton("キャンセル", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+            box.setWindowTitle(tr("dialog.analysis_running.title"))
+            box.setText(tr("dialog.analysis_running.text"))
+            box.setInformativeText(tr("dialog.analysis_running.info"))
+            quit_btn = box.addButton(tr("dialog.analysis_running.quit"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = box.addButton(tr("dialog.unsaved.cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
             box.setDefaultButton(cancel_btn)
             box.exec()
             if box.clickedButton() != quit_btn:
@@ -209,57 +210,73 @@ class MainWindow(QtWidgets.QMainWindow):
     def _make_menus(self) -> None:
         menubar = self.menuBar()
 
-        file_menu = menubar.addMenu("ファイル(&F)")
-        file_menu.addAction("開く(&O)", self.open_audio, QtGui.QKeySequence("Ctrl+O"))
-        file_menu.addAction("プロジェクト保存(&S)", self.save_project_as, QtGui.QKeySequence("Ctrl+S"))
-        file_menu.addAction("プロジェクト読込(&L)", self.load_project_from_file, QtGui.QKeySequence("Ctrl+L"))
-        file_menu.addAction("プロジェクト読込（ノートのみ）", self.load_project_notes_only)
+        file_menu = menubar.addMenu(tr("menu.file"))
+        file_menu.addAction(tr("menu.open_audio"), self.open_audio, QtGui.QKeySequence("Ctrl+O"))
+        file_menu.addAction(tr("menu.save_project"), self.save_project_as, QtGui.QKeySequence("Ctrl+S"))
+        file_menu.addAction(tr("menu.load_project"), self.load_project_from_file, QtGui.QKeySequence("Ctrl+L"))
+        file_menu.addAction(tr("menu.load_project_notes_only"), self.load_project_notes_only)
         file_menu.addSeparator()
-        file_menu.addAction("MIDI出力", self.export_midi_file, QtGui.QKeySequence("Ctrl+M"))
-        file_menu.addAction("ADOFAI Hz出力", self.export_adofai_file, QtGui.QKeySequence("Ctrl+E"))
+        file_menu.addAction(tr("menu.export_midi"), self.export_midi_file, QtGui.QKeySequence("Ctrl+M"))
+        file_menu.addAction(tr("menu.export_adofai"), self.export_adofai_file, QtGui.QKeySequence("Ctrl+E"))
 
-        edit_menu = menubar.addMenu("編集(&E)")
-        edit_menu.addAction("元に戻す", self.editor.undo)
-        edit_menu.addAction("やり直し", self.editor.redo)
+        edit_menu = menubar.addMenu(tr("menu.edit"))
+        edit_menu.addAction(tr("menu.undo"), self.editor.undo)
+        edit_menu.addAction(tr("menu.redo"), self.editor.redo)
         edit_menu.addSeparator()
-        edit_menu.addAction("コピー", self.copy_selected_notes)
-        edit_menu.addAction("切り取り", self.cut_selected_notes)
-        edit_menu.addAction("貼り付け", self.paste_notes)
+        edit_menu.addAction(tr("menu.copy"), self.copy_selected_notes)
+        edit_menu.addAction(tr("menu.cut"), self.cut_selected_notes)
+        edit_menu.addAction(tr("menu.paste"), self.paste_notes)
         edit_menu.addSeparator()
-        edit_menu.addAction("すべて選択", self.editor.select_all_notes, QtGui.QKeySequence("Ctrl+A"))
-        edit_menu.addAction("選択解除", self.editor.clear_selection, QtGui.QKeySequence("Esc"))
-        edit_menu.addAction("選択ノート削除", self.editor.delete_selected, QtGui.QKeySequence("Delete"))
+        edit_menu.addAction(tr("menu.select_all"), self.editor.select_all_notes, QtGui.QKeySequence("Ctrl+A"))
+        edit_menu.addAction(tr("menu.clear_selection"), self.editor.clear_selection, QtGui.QKeySequence("Esc"))
+        edit_menu.addAction(tr("menu.delete_selected"), self.editor.delete_selected, QtGui.QKeySequence("Delete"))
 
-        play_menu = menubar.addMenu("再生(&P)")
-        play_menu.addAction("再生/一時停止", self.toggle_playback)
-        play_menu.addAction("停止", self.stop_playback, QtGui.QKeySequence("Ctrl+Space"))
-        play_menu.addAction("1秒戻る", lambda: self.seek_relative(-1.0), QtGui.QKeySequence("Left"))
-        play_menu.addAction("1秒進む", lambda: self.seek_relative(1.0), QtGui.QKeySequence("Right"))
+        play_menu = menubar.addMenu(tr("menu.play"))
+        play_menu.addAction(tr("menu.play_pause"), self.toggle_playback)
+        play_menu.addAction(tr("menu.stop"), self.stop_playback, QtGui.QKeySequence("Ctrl+Space"))
+        play_menu.addAction(tr("menu.seek_back_1"), lambda: self.seek_relative(-1.0), QtGui.QKeySequence("Left"))
+        play_menu.addAction(tr("menu.seek_forward_1"), lambda: self.seek_relative(1.0), QtGui.QKeySequence("Right"))
 
-        analyze_menu = menubar.addMenu("解析(&A)")
-        analyze_menu.addAction("スペクトログラム再描画", self.apply_visual)
-        analyze_menu.addAction("音声を再解析", self.reanalyze_current_audio)
+        analyze_menu = menubar.addMenu(tr("menu.analyze"))
+        analyze_menu.addAction(tr("menu.redraw_spectrogram"), self.apply_visual)
+        analyze_menu.addAction(tr("menu.reanalyze_audio"), self.reanalyze_current_audio)
 
-        view_menu = menubar.addMenu("表示(&V)")
-        view_menu.addAction("スペクトログラム重視", lambda: self.editor.set_mode(0), QtGui.QKeySequence("1"))
-        view_menu.addAction("ノート重視", lambda: self.editor.set_mode(1), QtGui.QKeySequence("2"))
-        view_menu.addAction("両方表示", lambda: self.editor.set_mode(2), QtGui.QKeySequence("3"))
-        view_menu.addAction("全体表示", self.fit_all)
+        view_menu = menubar.addMenu(tr("menu.view"))
+        view_menu.addAction(tr("menu.view_spectrogram"), lambda: self.editor.set_mode(0), QtGui.QKeySequence("1"))
+        view_menu.addAction(tr("menu.view_notes"), lambda: self.editor.set_mode(1), QtGui.QKeySequence("2"))
+        view_menu.addAction(tr("menu.view_both"), lambda: self.editor.set_mode(2), QtGui.QKeySequence("3"))
+        view_menu.addAction(tr("menu.fit_all"), self.fit_all)
 
-        menubar.addMenu("オプション(&O)")
-        help_menu = menubar.addMenu("ヘルプ(&H)")
-        help_menu.addAction("操作メモ", lambda: QtWidgets.QMessageBox.information(
+        options_menu = menubar.addMenu(tr("menu.options"))
+        language_menu = options_menu.addMenu(tr("menu.language"))
+        en_action = language_menu.addAction(tr("menu.language_en"))
+        ja_action = language_menu.addAction(tr("menu.language_ja"))
+        en_action.setCheckable(True)
+        ja_action.setCheckable(True)
+        lang_group = QtGui.QActionGroup(self)
+        lang_group.setExclusive(True)
+        lang_group.addAction(en_action)
+        lang_group.addAction(ja_action)
+        en_action.setChecked(current_language() == "en")
+        ja_action.setChecked(current_language() == "ja")
+        en_action.triggered.connect(lambda: self.change_language("en"))
+        ja_action.triggered.connect(lambda: self.change_language("ja"))
+
+        help_menu = menubar.addMenu(tr("menu.help"))
+        help_menu.addAction(tr("menu.operation_notes"), lambda: QtWidgets.QMessageBox.information(
             self,
-            "操作メモ",
-            "左ドラッグ: ノート作成\n"
-            "Alt+左ドラッグ: Bezier/Glideノート作成（Curveで形を選択）\n"
-            "左クリック: 再生棒移動/ノート選択\n"
-            "Ctrl+左クリック: 複数選択の追加/解除\n"
-            "Shift+左クリック: 範囲選択\n"
-            "右クリック: ノート削除\n"
-            "Space: 再生/一時停止\n"
-            "Snap: BPMグリッドへ吸着"
+            tr("menu.operation_notes"),
+            tr("help.operation_notes"),
         ))
+
+    def change_language(self, lang: str) -> None:
+        set_language(lang)
+        QtWidgets.QMessageBox.information(
+            self,
+            tr("dialog.language.title"),
+            tr("dialog.language.restart"),
+        )
+
 
     def _make_toolbar(self) -> None:
         tb = QtWidgets.QToolBar("Main")
@@ -278,15 +295,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return a
 
         # WaveToneっぽい、小さめの操作列
-        action("↶", lambda: self.seek_to(0.0), tip="先頭へ")
-        action("■", self.stop_playback, "Ctrl+Space", "停止")
-        action("▶", self.toggle_playback, tip="再生/一時停止")
-        action("◀", lambda: self.seek_relative(-1.0), tip="1秒戻る")
-        action("▶", lambda: self.seek_relative(1.0), tip="1秒進む")
+        action("↶", lambda: self.seek_to(0.0), tip=tr("toolbar.first"))
+        action("■", self.stop_playback, "Ctrl+Space", tr("toolbar.stop"))
+        action("▶", self.toggle_playback, tip=tr("toolbar.play"))
+        action("◀", lambda: self.seek_relative(-1.0), tip=tr("toolbar.back"))
+        action("▶", lambda: self.seek_relative(1.0), tip=tr("toolbar.forward"))
         tb.addSeparator()
 
-        action("MIDI", self.export_midi_file, "Ctrl+M", "Export MIDI")
-        action("Hz", self.export_adofai_file, "Ctrl+E", "Export ADOFAI Hz")
+        action("MIDI", self.export_midi_file, "Ctrl+M", tr("dialog.export_midi.title"))
+        action("Hz", self.export_adofai_file, "Ctrl+E", tr("dialog.export_adofai.title"))
         tb.addSeparator()
 
         action("Spec", lambda: self.editor.set_mode(0), "1")
@@ -805,12 +822,12 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def open_audio(self) -> None:
-        if not self.confirm_discard_unsaved("Open new audio"):
+        if not self.confirm_discard_unsaved(tr("dialog.open_audio.title")):
             return
 
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
-            "Open Audio",
+            tr("dialog.open_audio.title"),
             "",
             "Audio Files (*.wav *.ogg *.mp3 *.flac *.m4a);;All Files (*)",
         )
@@ -820,7 +837,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def reanalyze_current_audio(self) -> None:
         if not self.current_audio:
-            self.statusBar().showMessage("Open an audio file first")
+            self.statusBar().showMessage(tr("status.open_audio"))
             return
         self.load_audio(self.current_audio, reset_notes=False, clear_project=False, force_reanalysis=True)
 
@@ -884,11 +901,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.apply_timing_helpers()
             if self.player.available and getattr(self.player, "audio", None) is None:
                 QtCore.QTimer.singleShot(1, lambda p=abs_path: self.load_audio_for_playback(p))
-            self.statusBar().showMessage(f"Reused loaded spectrogram: {Path(path).name} / {profile}")
+            self.statusBar().showMessage(tr("status.reused_spectrogram", name=Path(path).name, profile=profile))
             return
 
         if self._analysis_thread is not None and self._analysis_thread.isRunning():
-            self.statusBar().showMessage("Audio analysis is already running. Please wait.")
+            self.statusBar().showMessage(tr("status.audio_analysis_running"))
             return
 
         if reset_notes:
@@ -902,7 +919,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         cache_status = "cache hit" if has_analysis_cache(abs_path, **opts) else "cache miss"
         self.statusBar().showMessage(
-            f"Loading CQT in background ({profile}, {cache_status}, sr={opts['sr']}, hop={opts['hop_length']})..."
+            tr("status.loading_cqt", profile=profile, cache_status=cache_status, sr=opts["sr"], hop=opts["hop_length"])
         )
 
         self._analysis_request_id += 1
@@ -957,8 +974,8 @@ class MainWindow(QtWidgets.QMainWindow):
     ) -> None:
         if request_id != self._analysis_request_id:
             return
-        QtWidgets.QMessageBox.critical(self, "Load failed", message)
-        self.statusBar().showMessage(f"Audio analysis failed: {Path(path).name}")
+        QtWidgets.QMessageBox.critical(self, tr("dialog.load_failed"), message)
+        self.statusBar().showMessage(tr("status.analysis_failed", name=Path(path).name))
 
     @QtCore.Slot()
     def on_audio_analysis_thread_finished(self) -> None:
@@ -1015,7 +1032,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.set_dirty(False if reset_notes else self._dirty)
         self.statusBar().showMessage(
-            f"Loaded spectrogram: {Path(path).name} / {profile} / playback loading..."
+            tr("status.loaded_spectrogram", name=Path(path).name, profile=profile)
         )
 
     def load_audio_for_playback(self, path: str) -> None:
@@ -1025,16 +1042,16 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            self.statusBar().showMessage("Loading audio for playback...")
+            self.statusBar().showMessage(tr("status.loading_playback"))
             self.player.load(path)
             if hasattr(self.player, "set_volume"):
                 self.player.set_volume(self.volume.value() / 100.0)
             self.sync_notes_to_player()
             self.apply_playback_speed()
             self.apply_timing_helpers()
-            self.statusBar().showMessage(f"Playback ready: {Path(path).name} / Space: play-pause")
+            self.statusBar().showMessage(tr("status.playback_ready", name=Path(path).name))
         except Exception as e:
-            self.statusBar().showMessage(f"Playback load failed, editor still usable: {e!r}")
+            self.statusBar().showMessage(tr("status.playback_load_failed", error=repr(e)))
 
     def slider_to_start(self) -> float:
         spec = self.editor.spectrogram
@@ -1160,17 +1177,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def toggle_playback(self) -> None:
         if not self.current_audio and self.editor.spectrogram is None:
-            self.statusBar().showMessage("Open an audio file first")
+            self.statusBar().showMessage(tr("status.open_audio"))
             return
         if not self.player.available:
-            self.statusBar().showMessage(f"Playback unavailable: {self.player.error}")
+            self.statusBar().showMessage(tr("status.playback_unavailable", error=self.player.error))
             return
         if getattr(self.player, "audio", None) is None:
             if self.current_audio:
-                self.statusBar().showMessage("Playback audio is still loading. Try again in a moment.")
+                self.statusBar().showMessage(tr("status.playback_loading"))
                 QtCore.QTimer.singleShot(1, lambda p=self.current_audio: self.load_audio_for_playback(p))
             else:
-                self.statusBar().showMessage("No audio loaded")
+                self.statusBar().showMessage(tr("status.no_audio_loaded"))
             return
 
         if not self.player.playing:
@@ -1178,13 +1195,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.apply_playback_speed()
             self.player.seek(self.editor.playhead_time())
         self.player.toggle()
-        self.statusBar().showMessage("Playing" if self.player.playing else f"Paused at {self.editor.playhead_time():.3f}s")
+        self.statusBar().showMessage(tr("status.playing") if self.player.playing else tr("status.paused", time=self.editor.playhead_time()))
 
     def stop_playback(self) -> None:
         self.player.stop()
         self.editor.set_playhead(0.0)
         self.update_time_labels()
-        self.statusBar().showMessage("Stopped")
+        self.statusBar().showMessage(tr("status.stopped"))
 
     def seek_relative(self, seconds: float) -> None:
         self.seek_to(self.editor.playhead_time() + seconds)
@@ -1303,12 +1320,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_curve_interpolation()
         if hasattr(self.player, "set_volume") and hasattr(self, "volume"):
             self.player.set_volume(self.volume.value() / 100.0)
-        self.statusBar().showMessage("Project settings applied")
+        self.statusBar().showMessage(tr("status.project_settings_applied"))
 
     def save_project_as(self) -> bool:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Save Project",
+            tr("dialog.save_project.title"),
             str(self.current_project) if self.current_project else "",
             "AdopyHzEditor Project (*.adopyhz);;Old Project (*.ahe.json *.json);;All Files (*)",
         )
@@ -1323,7 +1340,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"Saved: {Path(path).name}")
             return True
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Save failed", str(e))
+            QtWidgets.QMessageBox.critical(self, tr("dialog.save_failed"), str(e))
             return False
 
     def load_project_notes_only(self) -> None:
@@ -1427,14 +1444,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Question)
-        box.setWindowTitle("Load project audio")
-        box.setText("プロジェクトに音声ファイルが関連付けられています。")
-        box.setInformativeText(
-            "音声も読み込みますか？キャッシュがない場合はバックグラウンド解析を開始します。"
-        )
-        load_btn = box.addButton("音声も読み込む", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        notes_btn = box.addButton("ノートだけ読み込む", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
-        cancel_btn = box.addButton("キャンセル", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setWindowTitle(tr("dialog.load_audio.title"))
+        box.setText(tr("dialog.load_audio.text"))
+        box.setInformativeText(tr("dialog.load_audio.info"))
+        load_btn = box.addButton(tr("dialog.load_audio.load"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        notes_btn = box.addButton(tr("dialog.load_audio.notes_only"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = box.addButton(tr("dialog.load_audio.cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(load_btn)
         box.exec()
 
@@ -1448,12 +1463,12 @@ class MainWindow(QtWidgets.QMainWindow):
         return "cancel"
 
     def load_project_from_file(self, *, notes_only: bool = False) -> None:
-        if not self.confirm_discard_unsaved("Load project"):
+        if not self.confirm_discard_unsaved(tr("dialog.load_project.title")):
             return
 
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
-            "Load Project",
+            tr("dialog.load_project.title"),
             "",
             "AdopyHzEditor Project (*.adopyhz);;Old Project (*.ahe.json *.json);;JSON (*.json);;All Files (*)",
         )
@@ -1478,14 +1493,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             if mode == "load" and audio and Path(audio).exists():
                 self.load_audio(audio, reset_notes=False, clear_project=False)
-                self.statusBar().showMessage(f"Loaded project notes, loading audio: {Path(path).name}")
+                self.statusBar().showMessage(tr("status.loaded_project_audio", name=Path(path).name))
             else:
                 self.unload_audio_to_blank_spectrogram(
                     notes,
-                    message=f"Loaded project notes only, audio unloaded: {Path(path).name}",
+                    message=tr("status.loaded_notes_only", name=Path(path).name),
                 )
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Load failed", str(e))
+            QtWidgets.QMessageBox.critical(self, tr("dialog.load_failed"), str(e))
 
     def current_octave_shift(self) -> int:
         return int(self.note_octave.value()) if hasattr(self, "note_octave") else 0
@@ -1519,9 +1534,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def export_midi_file(self) -> None:
         if not self.editor.notes:
-            QtWidgets.QMessageBox.information(self, "No notes", "There are no notes to export.")
+            QtWidgets.QMessageBox.information(self, tr("dialog.no_notes.title"), tr("dialog.no_notes.text"))
             return
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export MIDI", "", "MIDI File (*.mid);;All Files (*)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, tr("dialog.export_midi.title"), "", "MIDI File (*.mid);;All Files (*)")
         if not path:
             return
         if not path.lower().endswith((".mid", ".midi")):
@@ -1530,13 +1545,13 @@ class MainWindow(QtWidgets.QMainWindow):
             export_midi(self.notes_with_output_octave(), path)
             self.statusBar().showMessage(f"Exported MIDI: {Path(path).name} / Oct {self.current_octave_shift():+d}")
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "MIDI export failed", str(e))
+            QtWidgets.QMessageBox.critical(self, tr("dialog.midi_export_failed"), str(e))
 
     def export_adofai_file(self) -> None:
         if not self.editor.notes:
-            QtWidgets.QMessageBox.information(self, "No notes", "There are no notes to export.")
+            QtWidgets.QMessageBox.information(self, tr("dialog.no_notes.title"), tr("dialog.no_notes.text"))
             return
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export ADOFAI Hz", "", "ADOFAI Level (*.adofai);;All Files (*)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, tr("dialog.export_adofai.title"), "", "ADOFAI Level (*.adofai);;All Files (*)")
         if not path:
             return
         if not path.lower().endswith(".adofai"):
@@ -1547,10 +1562,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             stats = export_adofai(self.notes_with_output_octave(), path, **dialog.options())
-            QtWidgets.QMessageBox.information(self, "Export complete", "\n".join(f"{k}: {v}" for k, v in stats.items()))
+            QtWidgets.QMessageBox.information(self, tr("dialog.export_complete.title"), "\n".join(f"{k}: {v}" for k, v in stats.items()))
             self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name} / Oct {self.current_octave_shift():+d}")
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "ADOFAI export failed", str(e))
+            QtWidgets.QMessageBox.critical(self, tr("dialog.adofai_export_failed"), str(e))
 
 
 class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
@@ -1593,7 +1608,7 @@ class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
     def __init__(self, rows: list[dict], parent=None) -> None:
         super().__init__(parent)
         self.rows = rows
-        self.setWindowTitle("ADOFAI Hz/Angle Debug Preview")
+        self.setWindowTitle(tr("debug.title"))
         self.resize(1280, 720)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -1641,15 +1656,15 @@ class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
 
         buttons = QtWidgets.QHBoxLayout()
 
-        copy_tsv = QtWidgets.QPushButton("Copy TSV")
+        copy_tsv = QtWidgets.QPushButton(tr("debug.copy_tsv"))
         copy_tsv.clicked.connect(lambda: self.copy_rows("tsv"))
         buttons.addWidget(copy_tsv)
 
-        copy_csv = QtWidgets.QPushButton("Copy CSV")
+        copy_csv = QtWidgets.QPushButton(tr("debug.copy_csv"))
         copy_csv.clicked.connect(lambda: self.copy_rows("csv"))
         buttons.addWidget(copy_csv)
 
-        close_btn = QtWidgets.QPushButton("Close")
+        close_btn = QtWidgets.QPushButton(tr("debug.close"))
         close_btn.clicked.connect(self.accept)
         buttons.addStretch(1)
         buttons.addWidget(close_btn)
@@ -1679,7 +1694,7 @@ class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
 class ExportAdoFAIDialog(QtWidgets.QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("ADOFAI Hz Export Options")
+        self.setWindowTitle(tr("export.title"))
         layout = QtWidgets.QFormLayout(self)
 
         self.method = QtWidgets.QComboBox()
@@ -1791,25 +1806,25 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.final_cardinal_step.setSuffix("°")
         self.final_cardinal_step.setToolTip("cardinal modeの吸着角度。90=縦横、45=斜めも許可")
 
-        layout.addRow("Method", self.method)
-        layout.addRow("Base BPM", self.base_bpm)
-        layout.addRow("Angle-only BPM", self.angle_only_bpm)
-        layout.addRow("Change x mode", self.x_mode)
-        layout.addRow("Fixed change x", self.fixed_x)
-        layout.addRow("Max total tiles", self.max_tiles)
-        layout.addRow("Max tiles per note", self.max_tiles_per_note)
-        layout.addRow("Curve step", self.curve_step_ms)
-        layout.addRow("Curve pitch step", self.curve_pitch_step)
-        layout.addRow("Phase-continuous glide", self.phase_continuous_glide)
-        layout.addRow("Track visual", self.track_visual)
-        layout.addRow("Final tile mode", self.final_angle_mode)
-        layout.addRow("Custom final angle", self.final_custom_angle)
-        layout.addRow("Cardinal step", self.final_cardinal_step)
+        layout.addRow(tr("export.method"), self.method)
+        layout.addRow(tr("export.base_bpm"), self.base_bpm)
+        layout.addRow(tr("export.angle_only_bpm"), self.angle_only_bpm)
+        layout.addRow(tr("export.change_x_mode"), self.x_mode)
+        layout.addRow(tr("export.fixed_change_x"), self.fixed_x)
+        layout.addRow(tr("export.max_tiles"), self.max_tiles)
+        layout.addRow(tr("export.max_tiles_per_note"), self.max_tiles_per_note)
+        layout.addRow(tr("export.curve_step"), self.curve_step_ms)
+        layout.addRow(tr("export.curve_pitch_step"), self.curve_pitch_step)
+        layout.addRow(tr("export.phase_continuous_glide"), self.phase_continuous_glide)
+        layout.addRow(tr("export.track_visual"), self.track_visual)
+        layout.addRow(tr("export.final_tile_mode"), self.final_angle_mode)
+        layout.addRow(tr("export.custom_final_angle"), self.final_custom_angle)
+        layout.addRow(tr("export.cardinal_step"), self.final_cardinal_step)
 
-        self.debug_preview_button = QtWidgets.QPushButton("Debug Preview")
+        self.debug_preview_button = QtWidgets.QPushButton(tr("export.debug_preview"))
         self.debug_preview_button.setToolTip("出力前にHz/BPM/角度/Keycount/端数角度などを表で確認します")
         self.debug_preview_button.clicked.connect(self.show_debug_preview)
-        layout.addRow("Debug", self.debug_preview_button)
+        layout.addRow(tr("export.debug"), self.debug_preview_button)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -1819,7 +1834,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
     def show_debug_preview(self) -> None:
         parent = self.parent()
         if parent is None or not hasattr(parent, "notes_with_output_octave"):
-            QtWidgets.QMessageBox.warning(self, "Debug preview failed", "Could not access editor notes.")
+            QtWidgets.QMessageBox.warning(self, tr("debug.title"), "Could not access editor notes.")
             return
 
         try:
@@ -1827,7 +1842,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             dlg = AdoFAIDebugPreviewDialog(rows, self)
             dlg.exec()
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Debug preview failed", str(e))
+            QtWidgets.QMessageBox.critical(self, tr("debug.title"), str(e))
 
     def options(self) -> dict:
         return {

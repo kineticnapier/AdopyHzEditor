@@ -1229,3 +1229,53 @@ Load project -> ノートだけ読み込む
 File menu -> プロジェクト読込（ノートのみ）
 Missing/unavailable project audio path
 ```
+
+
+## Stable47 UI language support
+
+Basic UI language switching was added.
+
+Supported languages:
+
+```text
+English
+Japanese
+```
+
+Menu path:
+
+```text
+Options -> Language -> English / Japanese
+```
+
+The selected language is saved in the app settings and is applied after restarting AdopyHzEditor.
+
+Translated areas include:
+
+```text
+main menus
+main confirmation dialogs
+project audio loading dialog
+major status bar messages
+ADOFAI export dialog labels
+debug preview buttons
+operation notes
+```
+
+Some technical labels are intentionally kept in English, such as:
+
+```text
+keycount
+target_angle
+phase_continuous
+Angle-only
+Final tile mode
+```
+
+PyInstaller note:
+
+If you build an exe manually, include the locale JSON files:
+
+```powershell
+pyinstaller main.py --name AdopyHzEditor --windowed --add-data "locales;locales" --collect-all PySide6 --collect-all pyqtgraph --collect-all librosa --collect-all soundfile --collect-all sounddevice --collect-all audioread --collect-all mido
+```
