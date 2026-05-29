@@ -16,7 +16,6 @@ build/
 dist/
 *.egg-info/
 .eggs/
-*.spec
 
 # Test / coverage
 .pytest_cache/
