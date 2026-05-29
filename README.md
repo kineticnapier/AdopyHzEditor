@@ -1279,3 +1279,73 @@ If you build an exe manually, include the locale JSON files:
 ```powershell
 pyinstaller main.py --name AdopyHzEditor --windowed --add-data "locales;locales" --collect-all PySide6 --collect-all pyqtgraph --collect-all librosa --collect-all soundfile --collect-all sounddevice --collect-all audioread --collect-all mido
 ```
+
+
+## Stable48 Playback audio loading and updater
+
+Playback audio decoding was moved to a background worker.
+
+Before:
+
+```text
+CQT analysis: background
+playback audio decode: main UI thread
+```
+
+Now:
+
+```text
+CQT analysis: background
+playback audio decode: background
+```
+
+This reduces short freezes after CQT loading, especially for long audio files or compressed formats.
+
+### Auto updater
+
+AdopyHzEditor can check GitHub Releases for updates.
+
+Menu:
+
+```text
+Options -> Check for Updates
+```
+
+It also performs a silent update check shortly after startup.
+
+Update requirements:
+
+```text
+- Releases must use version tags such as v0.1.1, v0.1.2, ...
+- A release asset zip should be attached.
+- The asset name should contain AdopyHzEditor and preferably Windows or win.
+```
+
+Recommended release asset name:
+
+```text
+AdopyHzEditor_Windows_v0.1.1.zip
+```
+
+When an update is available:
+
+```text
+1. The app asks whether to download it.
+2. The zip is downloaded into the app config folder.
+3. The app launches a temporary updater script.
+4. The app closes.
+5. The updater waits for the app process to exit.
+6. The updater extracts and copies the new files.
+7. The updated exe is restarted.
+```
+
+Automatic apply/restart is intended for PyInstaller Windows builds.  
+When running from source, update checking works, but automatic apply/restart is disabled.
+
+### PyInstaller note
+
+The locale files must be included:
+
+```powershell
+pyinstaller main.py --name AdopyHzEditor --windowed --add-data "locales;locales" --collect-all PySide6 --collect-all pyqtgraph --collect-all librosa --collect-all soundfile --collect-all sounddevice --collect-all audioread --collect-all mido
+```
