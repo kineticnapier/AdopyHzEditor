@@ -5,17 +5,19 @@ from pathlib import Path
 import csv
 import io
 import numpy as np
+import webbrowser
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_cache, Spectrogram
-from audio_player import AudioPlayer
+from audio_player import AudioPlayer, decode_audio_file
 from editor_view import EditorView
 from export_midi import export_midi
 from export_adofai import export_adofai, build_adofai_debug_rows
 from project_io import save_project, load_project
 from note_model import Note
 from i18n import tr, current_language, set_language
+from app_info import APP_VERSION, GITHUB_RELEASES_URL
 
 
 class AnalysisWorker(QtCore.QObject):
@@ -66,6 +68,26 @@ class AnalysisWorker(QtCore.QObject):
             )
 
 
+
+class PlaybackLoadWorker(QtCore.QObject):
+    finished = QtCore.Signal(object, int, str, int)
+    failed = QtCore.Signal(str, str, int)
+
+    def __init__(self, path: str, request_id: int) -> None:
+        super().__init__()
+        self.path = path
+        self.request_id = int(request_id)
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        try:
+            audio, sr = decode_audio_file(self.path, sr=44100)
+            self.finished.emit(audio, int(sr), self.path, self.request_id)
+        except Exception as e:
+            self.failed.emit(repr(e), self.path, self.request_id)
+
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -88,6 +110,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._analysis_worker: AnalysisWorker | None = None
         self._analysis_request_id = 0
         self._analysis_cursor_active = False
+        self._playback_thread: QtCore.QThread | None = None
+        self._playback_worker: PlaybackLoadWorker | None = None
+        self._playback_request_id = 0
         self._ignore_scroll_signal = False
         self._suppress_dirty = False
         self._dirty = False
@@ -202,6 +227,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             self._analysis_request_id += 1
 
+        self._playback_request_id += 1
+
         if self.confirm_discard_unsaved("Close AdopyHzEditor"):
             event.accept()
         else:
@@ -261,6 +288,8 @@ class MainWindow(QtWidgets.QMainWindow):
         ja_action.setChecked(current_language() == "ja")
         en_action.triggered.connect(lambda: self.change_language("en"))
         ja_action.triggered.connect(lambda: self.change_language("ja"))
+        options_menu.addSeparator()
+        options_menu.addAction(tr("menu.check_updates"), lambda: self.check_for_updates(silent=False))
 
         help_menu = menubar.addMenu(tr("menu.help"))
         help_menu.addAction(tr("menu.operation_notes"), lambda: QtWidgets.QMessageBox.information(
@@ -1038,12 +1067,48 @@ class MainWindow(QtWidgets.QMainWindow):
     def load_audio_for_playback(self, path: str) -> None:
         if not self.player.available:
             return
-        if self.current_audio is None or str(Path(path).resolve()) != self.current_audio:
+
+        abs_path = str(Path(path).resolve())
+        if self.current_audio is None or abs_path != self.current_audio:
+            return
+
+        if self._playback_thread is not None and self._playback_thread.isRunning():
+            self.statusBar().showMessage(tr("status.playback_loading"))
+            return
+
+        self._playback_request_id += 1
+        request_id = self._playback_request_id
+
+        self.statusBar().showMessage(tr("status.loading_playback_background"))
+
+        thread = QtCore.QThread(self)
+        worker = PlaybackLoadWorker(abs_path, request_id)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(self.on_playback_audio_loaded)
+        worker.failed.connect(self.on_playback_audio_load_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self.on_playback_audio_thread_finished)
+
+        self._playback_thread = thread
+        self._playback_worker = worker
+        thread.start()
+
+    @QtCore.Slot(object, int, str, int)
+    def on_playback_audio_loaded(self, audio, sr: int, path: str, request_id: int) -> None:
+        if request_id != self._playback_request_id:
+            return
+        abs_path = str(Path(path).resolve())
+        if self.current_audio is None or abs_path != self.current_audio:
             return
 
         try:
-            self.statusBar().showMessage(tr("status.loading_playback"))
-            self.player.load(path)
+            self.player.set_audio(audio, int(sr))
             if hasattr(self.player, "set_volume"):
                 self.player.set_volume(self.volume.value() / 100.0)
             self.sync_notes_to_player()
@@ -1052,6 +1117,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage(tr("status.playback_ready", name=Path(path).name))
         except Exception as e:
             self.statusBar().showMessage(tr("status.playback_load_failed", error=repr(e)))
+
+    @QtCore.Slot(str, str, int)
+    def on_playback_audio_load_failed(self, message: str, path: str, request_id: int) -> None:
+        if request_id != self._playback_request_id:
+            return
+        self.statusBar().showMessage(tr("status.playback_load_failed", error=message))
+
+    @QtCore.Slot()
+    def on_playback_audio_thread_finished(self) -> None:
+        self._playback_thread = None
+        self._playback_worker = None
+
 
     def slider_to_start(self) -> float:
         spec = self.editor.spectrogram
@@ -1501,6 +1578,38 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.load_failed"), str(e))
+
+    def check_for_updates(self, *, silent: bool = False) -> None:
+        """
+        Open the GitHub Releases page instead of doing in-app HTTPS/download/update.
+
+        This intentionally avoids PyInstaller SSL/OpenSSL issues and keeps the
+        update flow safe and predictable.
+        """
+        if silent:
+            return
+
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        box.setWindowTitle(tr("update.title"))
+        box.setText(tr("update.open_releases_text", version=APP_VERSION))
+        box.setInformativeText(tr("update.open_releases_info"))
+
+        open_btn = box.addButton(tr("update.open_releases"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = box.addButton(tr("update.later"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(open_btn)
+        box.exec()
+
+        if box.clickedButton() == open_btn:
+            try:
+                webbrowser.open(GITHUB_RELEASES_URL)
+                self.statusBar().showMessage(tr("status.opened_releases"))
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    tr("update.title"),
+                    tr("update.open_failed", error=repr(e), url=GITHUB_RELEASES_URL),
+                )
 
     def current_octave_shift(self) -> int:
         return int(self.note_octave.value()) if hasattr(self, "note_octave") else 0

@@ -9,6 +9,22 @@ def midi_to_hz(note: float) -> float:
     return 440.0 * (2.0 ** ((note - 69.0) / 12.0))
 
 
+def decode_audio_file(path: str | Path, *, sr: int = 44100) -> tuple[np.ndarray, int]:
+    """
+    Decode audio without touching AudioPlayer state.
+
+    This is intentionally separated from AudioPlayer.load so decoding can run
+    in a background thread without freezing the Qt UI.
+    """
+    import librosa
+
+    y, actual_sr = librosa.load(str(path), sr=sr, mono=True)
+    y = np.asarray(y, dtype=np.float32)
+    if y.ndim == 1:
+        y = y[:, None]
+    return y, int(actual_sr)
+
+
 class AudioPlayer:
     """
     QMediaPlayerを使わない簡易プレイヤー。
@@ -53,16 +69,21 @@ class AudioPlayer:
     def load(self, path: str | Path, *, sr: int = 44100) -> None:
         if not self.available:
             return
-        import librosa
+        y, actual_sr = decode_audio_file(path, sr=sr)
+        self.set_audio(y, actual_sr)
 
-        y, actual_sr = librosa.load(str(path), sr=sr, mono=True)
-        y = np.asarray(y, dtype=np.float32)
+    def set_audio(self, audio: np.ndarray, sr: int) -> None:
+        """
+        Set already-decoded audio. Safe to call from the Qt/main thread after a
+        background decoder worker finishes.
+        """
+        y = np.asarray(audio, dtype=np.float32)
         if y.ndim == 1:
             y = y[:, None]
         with self.lock:
             self.stop()
             self.audio = y
-            self.sr = int(actual_sr)
+            self.sr = int(sr)
             self.pos = 0
             self._pos_float = 0.0
             # srが確定したので、ノートサンプル位置は再設定が必要。
