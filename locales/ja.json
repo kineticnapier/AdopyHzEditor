@@ -111,7 +111,7 @@
   "debug.close": "Close",
   "debug.copy_tsv": "Copy TSV",
   "debug.copy_csv": "Copy CSV",
-  "menu.check_updates": "更新を確認",
+  "menu.check_updates": "Releasesを開く",
   "status.loading_playback_background": "再生用音声をバックグラウンド読み込み中...",
   "status.update_checking": "更新を確認中...",
   "status.update_check_running": "更新確認はすでに実行中です。",
@@ -119,7 +119,7 @@
   "status.update_download_running": "更新のダウンロードはすでに実行中です。",
   "status.update_downloading": "更新をダウンロード中: {name}",
   "status.update_downloaded": "更新をダウンロードしました: {path}",
-  "update.title": "AdopyHzEditor 更新",
+  "update.title": "AdopyHzEditor Releases",
   "update.no_update": "最新バージョンを使用中です。現在のバージョン: {version}",
   "update.available": "新しいバージョンがあります。\n現在: {current}\n最新: {latest}",
   "update.available_no_asset": "新しいバージョンがあります。\n現在: {current}\n最新: {latest}\n\nダウンロード可能なWindows zip assetが見つかりませんでした。\n手動でリリースページを開いてください:\n{url}",
@@ -131,5 +131,10 @@
   "update.restart_now_info": "AdopyHzEditorを終了し、更新を適用して再起動します。",
   "update.restart_now": "適用して再起動",
   "update.apply_failed": "更新の適用に失敗しました:\n{error}",
-  "update.download_failed": "更新のダウンロードに失敗しました:\n{error}"
+  "update.download_failed": "更新のダウンロードに失敗しました:\n{error}",
+  "status.opened_releases": "GitHub Releasesページを開きました。",
+  "update.open_releases_text": "現在のバージョン: {version}",
+  "update.open_releases_info": "ブラウザでGitHub Releasesページを開き、新しいバージョンの確認と手動ダウンロードを行いますか？",
+  "update.open_releases": "Releasesを開く",
+  "update.open_failed": "Releasesページを開けませんでした:\n{error}\n\nURL:\n{url}"
 }

@@ -1349,3 +1349,43 @@ The locale files must be included:
 ```powershell
 pyinstaller main.py --name AdopyHzEditor --windowed --add-data "locales;locales" --collect-all PySide6 --collect-all pyqtgraph --collect-all librosa --collect-all soundfile --collect-all sounddevice --collect-all audioread --collect-all mido
 ```
+
+
+## Stable49 Release-page update check
+
+The previous in-app auto update experiment was removed.
+
+Reason:
+
+```text
+PyInstaller + urllib + ssl/_ssl/OpenSSL DLLs
+```
+
+caused unstable behavior in some Windows builds.
+
+The updater now only opens the GitHub Releases page.
+
+Menu:
+
+```text
+Options -> Open Releases
+```
+
+Current behavior:
+
+```text
+1. Shows the current app version.
+2. Opens GitHub Releases in the default browser.
+3. The user manually downloads the latest zip asset.
+```
+
+The app no longer:
+
+```text
+- calls the GitHub API from inside the exe
+- downloads update zip files automatically
+- overwrites itself
+- restarts itself
+```
+
+This avoids SSL/OpenSSL DLL problems and is safer for early releases.

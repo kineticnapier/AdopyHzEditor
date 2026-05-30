@@ -5,6 +5,7 @@ from pathlib import Path
 import csv
 import io
 import numpy as np
+import webbrowser
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -15,9 +16,8 @@ from export_midi import export_midi
 from export_adofai import export_adofai, build_adofai_debug_rows
 from project_io import save_project, load_project
 from note_model import Note
-from i18n import tr, current_language, set_language, app_config_dir
-from app_info import APP_VERSION, GITHUB_LATEST_RELEASE_API, GITHUB_RELEASES_URL
-from update_manager import check_for_update, download_file, start_apply_update
+from i18n import tr, current_language, set_language
+from app_info import APP_VERSION, GITHUB_RELEASES_URL
 
 
 class AnalysisWorker(QtCore.QObject):
@@ -87,39 +87,6 @@ class PlaybackLoadWorker(QtCore.QObject):
             self.failed.emit(repr(e), self.path, self.request_id)
 
 
-class UpdateCheckWorker(QtCore.QObject):
-    finished = QtCore.Signal(object, bool)
-    failed = QtCore.Signal(str, bool)
-
-    def __init__(self, silent: bool = False) -> None:
-        super().__init__()
-        self.silent = bool(silent)
-
-    @QtCore.Slot()
-    def run(self) -> None:
-        try:
-            info = check_for_update(APP_VERSION, GITHUB_LATEST_RELEASE_API)
-            self.finished.emit(info, self.silent)
-        except Exception as e:
-            self.failed.emit(repr(e), self.silent)
-
-
-class UpdateDownloadWorker(QtCore.QObject):
-    finished = QtCore.Signal(str)
-    failed = QtCore.Signal(str)
-
-    def __init__(self, url: str, path: str) -> None:
-        super().__init__()
-        self.url = url
-        self.path = path
-
-    @QtCore.Slot()
-    def run(self) -> None:
-        try:
-            download_file(self.url, Path(self.path))
-            self.finished.emit(self.path)
-        except Exception as e:
-            self.failed.emit(repr(e))
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
@@ -146,10 +113,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._playback_thread: QtCore.QThread | None = None
         self._playback_worker: PlaybackLoadWorker | None = None
         self._playback_request_id = 0
-        self._update_thread: QtCore.QThread | None = None
-        self._update_worker = None
-        self._download_thread: QtCore.QThread | None = None
-        self._download_worker = None
         self._ignore_scroll_signal = False
         self._suppress_dirty = False
         self._dirty = False
@@ -168,8 +131,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer.setInterval(33)
         self.timer.timeout.connect(self.update_playhead_from_player)
         self.timer.start()
-
-        QtCore.QTimer.singleShot(2500, lambda: self.check_for_updates(silent=True))
 
         if not self.player.available:
             self.statusBar().showMessage(f"Playback disabled: {self.player.error}")
@@ -1619,136 +1580,36 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, tr("dialog.load_failed"), str(e))
 
     def check_for_updates(self, *, silent: bool = False) -> None:
-        if self._update_thread is not None and self._update_thread.isRunning():
-            if not silent:
-                self.statusBar().showMessage(tr("status.update_check_running"))
-            return
+        """
+        Open the GitHub Releases page instead of doing in-app HTTPS/download/update.
 
-        if not silent:
-            self.statusBar().showMessage(tr("status.update_checking"))
-
-        thread = QtCore.QThread(self)
-        worker = UpdateCheckWorker(silent=silent)
-        worker.moveToThread(thread)
-
-        thread.started.connect(worker.run)
-        worker.finished.connect(self.on_update_check_finished)
-        worker.failed.connect(self.on_update_check_failed)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self.on_update_thread_finished)
-
-        self._update_thread = thread
-        self._update_worker = worker
-        thread.start()
-
-    @QtCore.Slot(object, bool)
-    def on_update_check_finished(self, info, silent: bool) -> None:
-        if not getattr(info, "is_available", False):
-            if not silent:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    tr("update.title"),
-                    tr("update.no_update", version=APP_VERSION),
-                )
-            return
-
-        asset = getattr(info, "asset", None)
-        if asset is None:
-            if not silent:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    tr("update.title"),
-                    tr("update.available_no_asset", current=APP_VERSION, latest=info.latest_version, url=info.html_url or GITHUB_RELEASES_URL),
-                )
+        This intentionally avoids PyInstaller SSL/OpenSSL issues and keeps the
+        update flow safe and predictable.
+        """
+        if silent:
             return
 
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Information)
         box.setWindowTitle(tr("update.title"))
-        box.setText(tr("update.available", current=APP_VERSION, latest=info.latest_version))
-        box.setInformativeText(tr("update.ask_download", asset=asset.name))
-        download_btn = box.addButton(tr("update.download_restart"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        later_btn = box.addButton(tr("update.later"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(download_btn)
+        box.setText(tr("update.open_releases_text", version=APP_VERSION))
+        box.setInformativeText(tr("update.open_releases_info"))
+
+        open_btn = box.addButton(tr("update.open_releases"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = box.addButton(tr("update.later"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(open_btn)
         box.exec()
 
-        if box.clickedButton() == download_btn:
-            self.download_update(asset.browser_download_url, asset.name)
-
-    @QtCore.Slot(str, bool)
-    def on_update_check_failed(self, message: str, silent: bool) -> None:
-        if not silent:
-            QtWidgets.QMessageBox.warning(self, tr("update.title"), tr("update.check_failed", error=message))
-        else:
-            self.statusBar().showMessage(tr("status.update_check_failed"))
-
-    @QtCore.Slot()
-    def on_update_thread_finished(self) -> None:
-        self._update_thread = None
-        self._update_worker = None
-
-    def download_update(self, url: str, asset_name: str) -> None:
-        if self._download_thread is not None and self._download_thread.isRunning():
-            self.statusBar().showMessage(tr("status.update_download_running"))
-            return
-
-        safe_name = Path(asset_name).name or "AdopyHzEditor_update.zip"
-        dst = app_config_dir() / "updates" / safe_name
-
-        self.statusBar().showMessage(tr("status.update_downloading", name=safe_name))
-
-        thread = QtCore.QThread(self)
-        worker = UpdateDownloadWorker(url, str(dst))
-        worker.moveToThread(thread)
-
-        thread.started.connect(worker.run)
-        worker.finished.connect(self.on_update_download_finished)
-        worker.failed.connect(self.on_update_download_failed)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self.on_update_download_thread_finished)
-
-        self._download_thread = thread
-        self._download_worker = worker
-        thread.start()
-
-    @QtCore.Slot(str)
-    def on_update_download_finished(self, zip_path: str) -> None:
-        box = QtWidgets.QMessageBox(self)
-        box.setIcon(QtWidgets.QMessageBox.Icon.Information)
-        box.setWindowTitle(tr("update.title"))
-        box.setText(tr("update.download_complete"))
-        box.setInformativeText(tr("update.restart_now_info"))
-        restart_btn = box.addButton(tr("update.restart_now"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        later_btn = box.addButton(tr("update.later"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(restart_btn)
-        box.exec()
-
-        if box.clickedButton() != restart_btn:
-            self.statusBar().showMessage(tr("status.update_downloaded", path=zip_path))
-            return
-
-        try:
-            start_apply_update(Path(zip_path))
-            QtWidgets.QApplication.quit()
-        except Exception as e:
-            QtWidgets.QMessageBox.warning(self, tr("update.title"), tr("update.apply_failed", error=repr(e)))
-
-    @QtCore.Slot(str)
-    def on_update_download_failed(self, message: str) -> None:
-        QtWidgets.QMessageBox.warning(self, tr("update.title"), tr("update.download_failed", error=message))
-
-    @QtCore.Slot()
-    def on_update_download_thread_finished(self) -> None:
-        self._download_thread = None
-        self._download_worker = None
+        if box.clickedButton() == open_btn:
+            try:
+                webbrowser.open(GITHUB_RELEASES_URL)
+                self.statusBar().showMessage(tr("status.opened_releases"))
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    tr("update.title"),
+                    tr("update.open_failed", error=repr(e), url=GITHUB_RELEASES_URL),
+                )
 
     def current_octave_shift(self) -> int:
         return int(self.note_octave.value()) if hasattr(self, "note_octave") else 0
