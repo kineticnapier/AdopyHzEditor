@@ -171,6 +171,8 @@ class MainWindow(QtWidgets.QMainWindow):
             getattr(self, "snap_enabled", None),
             getattr(self, "snap_div", None),
             getattr(self, "note_octave", None),
+            getattr(self, "export_octave", None),
+            getattr(self, "export_semitone", None),
             getattr(self, "note_vol", None),
             getattr(self, "note_sound_enabled", None),
             getattr(self, "volume", None),
@@ -296,6 +298,7 @@ class MainWindow(QtWidgets.QMainWindow):
         help_menu.addAction(tr("help.quick_start.title"), lambda: self.open_help("quick_start"), QtGui.QKeySequence("F1"))
         help_menu.addAction(tr("help.controls.title"), lambda: self.open_help("controls"))
         help_menu.addAction(tr("help.adofai_export.title"), lambda: self.open_help("adofai_export"))
+        help_menu.addAction(tr("help.pitch_export.title"), lambda: self.open_help("pitch_export"))
         help_menu.addAction(tr("help.curve_glide.title"), lambda: self.open_help("curve_glide"))
         help_menu.addAction(tr("help.troubleshooting.title"), lambda: self.open_help("troubleshooting"))
         help_menu.addSeparator()
@@ -389,9 +392,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.note_octave = QtWidgets.QSpinBox()
         self.note_octave.setRange(-4, 4)
         self.note_octave.setValue(0)
-        self.note_octave.setFixedWidth(78)
-        self.note_octave.setToolTip("プレビュー/MIDI/ADOFAI出力だけをオクターブ単位で上下。画面上のノート位置は変えません。")
+        self.note_octave.setFixedWidth(62)
+        self.note_octave.setToolTip("Preview Oct: ノートプレビュー音だけをオクターブ単位で上下。画面上のノート位置や出力には影響しません。")
         self.note_octave.valueChanged.connect(self.apply_note_sound_settings)
+
+        self.export_octave = QtWidgets.QSpinBox()
+        self.export_octave.setRange(-4, 4)
+        self.export_octave.setValue(0)
+        self.export_octave.setFixedWidth(62)
+        self.export_octave.setToolTip("Export Oct: MIDI/ADOFAI出力だけをオクターブ単位で上下。プレビュー音と画面上のノート位置には影響しません。")
+
+        self.export_semitone = QtWidgets.QSpinBox()
+        self.export_semitone.setRange(-12, 12)
+        self.export_semitone.setValue(0)
+        self.export_semitone.setFixedWidth(62)
+        self.export_semitone.setToolTip("Export Semi: MIDI/ADOFAI出力だけを半音単位で上下。Export Octと合算されます。")
 
         self.contrast = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.contrast.setRange(0, 300)
@@ -421,8 +436,12 @@ class MainWindow(QtWidgets.QMainWindow):
         note_layout.setSpacing(3)
         note_layout.addWidget(self.note_sound_enabled)
         note_layout.addWidget(self.note_vol)
-        note_layout.addWidget(QtWidgets.QLabel("Oct"))
+        note_layout.addWidget(QtWidgets.QLabel("Preview Oct"))
         note_layout.addWidget(self.note_octave, 0)
+        note_layout.addWidget(QtWidgets.QLabel("Export Oct"))
+        note_layout.addWidget(self.export_octave, 0)
+        note_layout.addWidget(QtWidgets.QLabel("Semi"))
+        note_layout.addWidget(self.export_semitone, 0)
         grid.addWidget(note_box, 1, 1)
 
         grid.addWidget(QtWidgets.QLabel("Contrast"), 0, 2)
@@ -688,7 +707,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.player.set_note_sound(
                 enabled=self.note_sound_enabled.isChecked() if hasattr(self, "note_sound_enabled") else True,
                 volume=float(self.note_vol.value()) / 100.0 if hasattr(self, "note_vol") else 0.20,
-                octave_shift=int(self.note_octave.value()) if hasattr(self, "note_octave") else 0,
+                octave_shift=self.current_preview_octave_shift(),
             )
 
     def sync_notes_to_player(self) -> None:
@@ -1322,7 +1341,11 @@ class MainWindow(QtWidgets.QMainWindow):
             "metronome_volume": int(self.metro_vol.value()) if hasattr(self, "metro_vol") else 35,
             "snap_enabled": bool(self.snap_enabled.isChecked()) if hasattr(self, "snap_enabled") else False,
             "snap_div": int(self.snap_div.value()) if hasattr(self, "snap_div") else 1,
+            # Backward-compatible alias: old projects used note_octave for preview/export together.
             "note_octave": int(self.note_octave.value()) if hasattr(self, "note_octave") else 0,
+            "preview_octave": int(self.note_octave.value()) if hasattr(self, "note_octave") else 0,
+            "export_octave": int(self.export_octave.value()) if hasattr(self, "export_octave") else 0,
+            "export_semitone": int(self.export_semitone.value()) if hasattr(self, "export_semitone") else 0,
             "note_volume": int(self.note_vol.value()) if hasattr(self, "note_vol") else 20,
             "note_sound_enabled": bool(self.note_sound_enabled.isChecked()) if hasattr(self, "note_sound_enabled") else True,
             "song_volume": int(self.volume.value()) if hasattr(self, "volume") else 85,
@@ -1341,7 +1364,7 @@ class MainWindow(QtWidgets.QMainWindow):
         blockers = []
         for name in (
             "grid_bpm", "grid_offset_ms", "grid_enabled", "metro_enabled", "metro_vol",
-            "snap_enabled", "snap_div", "note_octave", "note_vol", "note_sound_enabled",
+            "snap_enabled", "snap_div", "note_octave", "export_octave", "export_semitone", "note_vol", "note_sound_enabled",
             "volume", "playback_speed", "analysis_profile", "display_mode", "cmap", "curve_shape", "curve_interpolation",
         ):
             widget = getattr(self, name, None)
@@ -1364,8 +1387,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.snap_enabled.setChecked(bool(settings["snap_enabled"]))
             if hasattr(self, "snap_div") and "snap_div" in settings:
                 self.snap_div.setValue(int(settings["snap_div"]))
-            if hasattr(self, "note_octave") and "note_octave" in settings:
-                self.note_octave.setValue(int(settings["note_octave"]))
+            old_single_octave = int(settings["note_octave"]) if "note_octave" in settings else 0
+            has_new_pitch_controls = (
+                "preview_octave" in settings
+                or "export_octave" in settings
+                or "export_semitone" in settings
+            )
+
+            if hasattr(self, "note_octave"):
+                if "preview_octave" in settings:
+                    self.note_octave.setValue(int(settings["preview_octave"]))
+                elif "note_octave" in settings:
+                    # Backward compatibility: old projects used one Oct value for
+                    # both preview and export.
+                    self.note_octave.setValue(old_single_octave)
+
+            if hasattr(self, "export_octave"):
+                if "export_octave" in settings:
+                    self.export_octave.setValue(int(settings["export_octave"]))
+                elif "note_octave" in settings and not has_new_pitch_controls:
+                    # Preserve old project export behavior.
+                    self.export_octave.setValue(old_single_octave)
+
+            if hasattr(self, "export_semitone") and "export_semitone" in settings:
+                self.export_semitone.setValue(int(settings["export_semitone"]))
             if hasattr(self, "note_vol") and "note_volume" in settings:
                 self.note_vol.setValue(int(settings["note_volume"]))
             if hasattr(self, "note_sound_enabled") and "note_sound_enabled" in settings:
@@ -1619,15 +1664,38 @@ class MainWindow(QtWidgets.QMainWindow):
                     tr("update.open_failed", error=repr(e), url=GITHUB_RELEASES_URL),
                 )
 
-    def current_octave_shift(self) -> int:
+    def current_preview_octave_shift(self) -> int:
         return int(self.note_octave.value()) if hasattr(self, "note_octave") else 0
 
-    def notes_with_output_octave(self) -> list[Note]:
+    def current_export_octave_shift(self) -> int:
+        return int(self.export_octave.value()) if hasattr(self, "export_octave") else 0
+
+    def current_export_semitone_shift(self) -> int:
+        return int(self.export_semitone.value()) if hasattr(self, "export_semitone") else 0
+
+    def current_export_pitch_shift(self) -> int:
+        return self.current_export_octave_shift() * 12 + self.current_export_semitone_shift()
+
+    # Backward-compatible name for older internal callers. It now means Preview Oct.
+    def current_octave_shift(self) -> int:
+        return self.current_preview_octave_shift()
+
+    def describe_export_pitch_shift(self) -> str:
+        oct_shift = self.current_export_octave_shift()
+        semi_shift = self.current_export_semitone_shift()
+        total = self.current_export_pitch_shift()
+        return f"Export Oct {oct_shift:+d}, Semi {semi_shift:+d} ({total:+d} semitone)"
+
+    def notes_with_export_pitch_offset(self) -> list[Note]:
         """
-        Apply Oct to preview/export pitch without moving notes on screen.
-        Curve notes keep their Bezier shape and shift all control points.
+        Apply explicit export pitch controls without moving notes on screen.
+
+        Preview Oct is intentionally ignored here. Export pitch is:
+            note_pitch + export_octave * 12 + export_semitone
+
+        Curve notes keep their Bezier/Glide shape and shift all control points.
         """
-        shift = self.current_octave_shift() * 12
+        shift = self.current_export_pitch_shift()
         result: list[Note] = []
         for n in self.editor.notes:
             nn = n.normalized().with_pitch_offset(shift)
@@ -1646,8 +1714,18 @@ class MainWindow(QtWidgets.QMainWindow):
                     nn.target_angle,
                 ).normalized())
             else:
-                result.append(Note(nn.start, nn.end, max(0.0, min(127.0, nn.midi)), nn.velocity, target_angle=nn.target_angle).normalized())
+                result.append(Note(
+                    nn.start,
+                    nn.end,
+                    max(0.0, min(127.0, nn.midi)),
+                    nn.velocity,
+                    target_angle=nn.target_angle,
+                ).normalized())
         return result
+
+    # Backward-compatible name for older internal callers.
+    def notes_with_output_octave(self) -> list[Note]:
+        return self.notes_with_export_pitch_offset()
 
     def export_midi_file(self) -> None:
         if not self.editor.notes:
@@ -1659,8 +1737,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path.lower().endswith((".mid", ".midi")):
             path += ".mid"
         try:
-            export_midi(self.notes_with_output_octave(), path)
-            self.statusBar().showMessage(f"Exported MIDI: {Path(path).name} / Oct {self.current_octave_shift():+d}")
+            export_midi(self.notes_with_export_pitch_offset(), path)
+            self.statusBar().showMessage(f"Exported MIDI: {Path(path).name} / {self.describe_export_pitch_shift()}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.midi_export_failed"), str(e))
 
@@ -1678,9 +1756,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         try:
-            stats = export_adofai(self.notes_with_output_octave(), path, **dialog.options())
+            stats = export_adofai(self.notes_with_export_pitch_offset(), path, **dialog.options())
             QtWidgets.QMessageBox.information(self, tr("dialog.export_complete.title"), "\n".join(f"{k}: {v}" for k, v in stats.items()))
-            self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name} / Oct {self.current_octave_shift():+d}")
+            self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name} / {self.describe_export_pitch_shift()}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.adofai_export_failed"), str(e))
 
@@ -1964,7 +2042,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             return
 
         try:
-            rows = build_adofai_debug_rows(parent.notes_with_output_octave(), **self.options())
+            note_source = parent.notes_with_export_pitch_offset() if hasattr(parent, "notes_with_export_pitch_offset") else parent.notes_with_output_octave()
+            rows = build_adofai_debug_rows(note_source, **self.options())
             dlg = AdoFAIDebugPreviewDialog(rows, self)
             dlg.exec()
         except Exception as e:
