@@ -1532,3 +1532,91 @@ View -> Settings Panel
 ```
 
 This keeps the main spectrogram editor area cleaner while preserving all existing controls and shortcuts.
+
+
+## Stable53 Portable project audio and ADOFAI song offset workflow
+
+Version:
+
+```text
+0.3.0
+```
+
+### Portable project audio loading
+
+Project files now save extra audio path metadata:
+
+```text
+audio_path
+audio_path_relative
+audio_filename
+```
+
+When loading a project, AdopyHzEditor resolves audio in this order:
+
+```text
+1. project-relative audio path
+2. relative audio_path from old/project files
+3. original absolute audio path
+4. audio filename next to the project
+```
+
+This makes projects more portable when the `.adopyhz` file and audio file are moved together.
+
+If the audio file still cannot be found, the app now offers:
+
+```text
+Locate audio
+Load notes only
+Cancel
+```
+
+### ADOFAI song / songOffset export workflow
+
+The ADOFAI export dialog now includes:
+
+```text
+Use project audio as ADOFAI song
+Copy song next to .adofai
+Use first note start
+Song offset
+```
+
+When enabled:
+
+```text
+settings.songFilename = current audio filename
+settings.songOffset = selected song offset in ms
+```
+
+The default automatic offset uses the first note start time.
+
+This is useful because Hz export normalizes generated notes to start at the first note, while the source audio may have silence or an intro before that point.
+
+The export can also copy the audio file into the same folder as the `.adofai` level for easier release packaging.
+
+### Git note
+
+The `releases/` output folder can stay ignored by `.gitignore`; release zip files are build artifacts and do not need to be committed.
+
+
+## Stable54 ADOFAI songFilename fix
+
+ADOFAI export now writes:
+
+```text
+settings.songFilename
+```
+
+instead of the incorrect:
+
+```text
+settings.song
+```
+
+Release artifacts are ignored by `.gitignore`:
+
+```text
+releases/*
+!releases/.gitkeep
+```

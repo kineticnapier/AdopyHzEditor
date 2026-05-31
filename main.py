@@ -6,6 +6,7 @@ import csv
 import io
 import numpy as np
 import webbrowser
+import shutil
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -118,6 +119,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._suppress_dirty = False
         self._dirty = False
         self.note_clipboard: list[Note] = []
+
+        # ADOFAI export workflow defaults. These are saved into project settings.
+        self.adofai_use_project_song = True
+        self.adofai_copy_project_song = True
+        self.adofai_song_offset_auto = True
+        self.adofai_song_offset_ms = 0.0
 
         self._make_menus()
         self._make_toolbar()
@@ -1375,6 +1382,10 @@ class MainWindow(QtWidgets.QMainWindow):
             "cmap": self.cmap.currentText() if hasattr(self, "cmap") else "wavetone",
             "curve_shape": self.curve_shape.currentText() if hasattr(self, "curve_shape") else "ease",
             "curve_interpolation": self.curve_interpolation.currentText() if hasattr(self, "curve_interpolation") else "bezier_pitch",
+            "adofai_use_project_song": bool(getattr(self, "adofai_use_project_song", True)),
+            "adofai_copy_project_song": bool(getattr(self, "adofai_copy_project_song", True)),
+            "adofai_song_offset_auto": bool(getattr(self, "adofai_song_offset_auto", True)),
+            "adofai_song_offset_ms": float(getattr(self, "adofai_song_offset_ms", 0.0)),
         }
 
     def apply_project_settings(self, settings: dict) -> None:
@@ -1459,6 +1470,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 idx = self.curve_interpolation.findText(str(settings["curve_interpolation"]))
                 if idx >= 0:
                     self.curve_interpolation.setCurrentIndex(idx)
+
+            if "adofai_use_project_song" in settings:
+                self.adofai_use_project_song = bool(settings["adofai_use_project_song"])
+            if "adofai_copy_project_song" in settings:
+                self.adofai_copy_project_song = bool(settings["adofai_copy_project_song"])
+            if "adofai_song_offset_auto" in settings:
+                self.adofai_song_offset_auto = bool(settings["adofai_song_offset_auto"])
+            if "adofai_song_offset_ms" in settings:
+                self.adofai_song_offset_ms = float(settings["adofai_song_offset_ms"])
         finally:
             for widget in blockers:
                 widget.blockSignals(False)
@@ -1589,8 +1609,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(message)
 
     def choose_project_audio_load_mode(self, audio: str | None) -> str:
-        if not audio or not Path(audio).exists():
+        if not audio:
             return "skip"
+
+        if not Path(audio).exists():
+            box = QtWidgets.QMessageBox(self)
+            box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+            box.setWindowTitle(tr("dialog.missing_audio.title"))
+            box.setText(tr("dialog.missing_audio.text"))
+            box.setInformativeText(tr("dialog.missing_audio.info", path=str(audio)))
+            locate_btn = box.addButton(tr("dialog.missing_audio.locate"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+            notes_btn = box.addButton(tr("dialog.load_audio.notes_only"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = box.addButton(tr("dialog.load_audio.cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(locate_btn)
+            box.exec()
+
+            clicked = box.clickedButton()
+            if clicked == locate_btn:
+                return "locate"
+            if clicked == notes_btn:
+                return "skip"
+            if clicked == cancel_btn:
+                return "cancel"
+            return "cancel"
 
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Question)
@@ -1611,6 +1652,24 @@ class MainWindow(QtWidgets.QMainWindow):
         if clicked == cancel_btn:
             return "cancel"
         return "cancel"
+
+    def locate_missing_project_audio(self, missing_audio: str | None = None) -> str | None:
+        start_dir = ""
+        if missing_audio:
+            try:
+                p = Path(str(missing_audio))
+                if p.parent.exists():
+                    start_dir = str(p.parent)
+            except Exception:
+                start_dir = ""
+
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            tr("dialog.locate_audio.title"),
+            start_dir,
+            "Audio Files (*.wav *.ogg *.mp3 *.flac *.m4a);;All Files (*)",
+        )
+        return path or None
 
     def load_project_from_file(self, *, notes_only: bool = False) -> None:
         if not self.confirm_discard_unsaved(tr("dialog.load_project.title")):
@@ -1641,7 +1700,17 @@ class MainWindow(QtWidgets.QMainWindow):
             mode = "skip" if notes_only else self.choose_project_audio_load_mode(audio)
             if mode == "cancel":
                 return
-            if mode == "load" and audio and Path(audio).exists():
+            if mode == "locate":
+                located = self.locate_missing_project_audio(audio)
+                if not located:
+                    self.unload_audio_to_blank_spectrogram(
+                        notes,
+                        message=tr("status.loaded_notes_only", name=Path(path).name),
+                    )
+                    return
+                audio = located
+                self.set_dirty(True)
+            if mode in ("load", "locate") and audio and Path(audio).exists():
                 self.load_audio(audio, reset_notes=False, clear_project=False)
                 self.statusBar().showMessage(tr("status.loaded_project_audio", name=Path(path).name))
             else:
@@ -1776,7 +1845,33 @@ class MainWindow(QtWidgets.QMainWindow):
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         try:
-            stats = export_adofai(self.notes_with_export_pitch_offset(), path, **dialog.options())
+            if hasattr(dialog, "store_workflow_to_parent"):
+                dialog.store_workflow_to_parent()
+
+            opts = dialog.options()
+            copy_song = bool(opts.pop("_copy_song_to_export", False))
+            song_source_path = opts.pop("_song_source_path", None)
+
+            stats = export_adofai(self.notes_with_export_pitch_offset(), path, **opts)
+
+            if copy_song and song_source_path:
+                src = Path(str(song_source_path))
+                dst = Path(path).resolve().parent / src.name
+                try:
+                    if src.exists():
+                        same_file = False
+                        try:
+                            same_file = src.resolve() == dst.resolve()
+                        except Exception:
+                            same_file = False
+                        if not same_file:
+                            shutil.copy2(src, dst)
+                        stats["song_copied"] = "already next to level" if same_file else dst.name
+                    else:
+                        stats["song_copy_warning"] = f"source missing: {src}"
+                except Exception as copy_error:
+                    stats["song_copy_warning"] = repr(copy_error)
+
             QtWidgets.QMessageBox.information(self, tr("dialog.export_complete.title"), "\n".join(f"{k}: {v}" for k, v in stats.items()))
             self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name} / {self.describe_export_pitch_shift()}")
         except Exception as e:
@@ -2021,6 +2116,37 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.final_cardinal_step.setSuffix("°")
         self.final_cardinal_step.setToolTip("cardinal modeの吸着角度。90=縦横、45=斜めも許可")
 
+        self._song_source_path = str(getattr(parent, "current_audio", "") or "")
+        self._auto_song_offset_ms = 0.0
+        if parent is not None and hasattr(parent, "editor") and getattr(parent.editor, "notes", None):
+            try:
+                self._auto_song_offset_ms = round(min(n.normalized().start for n in parent.editor.notes) * 1000.0, 3)
+            except Exception:
+                self._auto_song_offset_ms = 0.0
+
+        self.use_project_song = QtWidgets.QCheckBox("Use project audio as ADOFAI song")
+        self.use_project_song.setChecked(bool(self._song_source_path) and bool(getattr(parent, "adofai_use_project_song", True)))
+        self.use_project_song.setToolTip("settings.song に現在読み込んでいる音声ファイル名を入れます")
+
+        self.copy_project_song = QtWidgets.QCheckBox("Copy song next to .adofai")
+        self.copy_project_song.setChecked(bool(self._song_source_path) and bool(getattr(parent, "adofai_copy_project_song", True)))
+        self.copy_project_song.setToolTip("ADOFAI出力先フォルダへ音声ファイルをコピーします。Release用に便利です。")
+
+        self.song_offset_auto = QtWidgets.QCheckBox("Use first note start")
+        self.song_offset_auto.setChecked(bool(getattr(parent, "adofai_song_offset_auto", True)))
+        self.song_offset_auto.setToolTip("最初のノート開始時刻をADOFAI settings.songOffset に使います")
+
+        self.song_offset_ms = QtWidgets.QDoubleSpinBox()
+        self.song_offset_ms.setRange(-3600000.0, 3600000.0)
+        self.song_offset_ms.setDecimals(3)
+        self.song_offset_ms.setSingleStep(1.0)
+        self.song_offset_ms.setSuffix(" ms")
+        manual_offset = float(getattr(parent, "adofai_song_offset_ms", self._auto_song_offset_ms))
+        self.song_offset_ms.setValue(self._auto_song_offset_ms if self.song_offset_auto.isChecked() else manual_offset)
+        self.song_offset_ms.setToolTip("ADOFAI settings.songOffset。自動時は最初のノート開始時刻です。")
+        self.song_offset_auto.stateChanged.connect(self.update_song_offset_state)
+        self.update_song_offset_state()
+
         layout.addRow(tr("export.method"), self.method)
         layout.addRow(tr("export.base_bpm"), self.base_bpm)
         layout.addRow(tr("export.angle_only_bpm"), self.angle_only_bpm)
@@ -2035,6 +2161,10 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow(tr("export.final_tile_mode"), self.final_angle_mode)
         layout.addRow(tr("export.custom_final_angle"), self.final_custom_angle)
         layout.addRow(tr("export.cardinal_step"), self.final_cardinal_step)
+        layout.addRow(tr("export.song"), self.use_project_song)
+        layout.addRow(tr("export.copy_song"), self.copy_project_song)
+        layout.addRow(tr("export.song_offset_auto"), self.song_offset_auto)
+        layout.addRow(tr("export.song_offset_ms"), self.song_offset_ms)
 
         self.debug_preview_button = QtWidgets.QPushButton(tr("export.debug_preview"))
         self.debug_preview_button.setToolTip(tr("export.debug_preview.tooltip"))
@@ -2050,6 +2180,21 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+
+    def update_song_offset_state(self) -> None:
+        checked = bool(self.song_offset_auto.isChecked())
+        if checked:
+            self.song_offset_ms.setValue(self._auto_song_offset_ms)
+        self.song_offset_ms.setEnabled(not checked)
+
+    def store_workflow_to_parent(self) -> None:
+        parent = self.parent()
+        if parent is None:
+            return
+        parent.adofai_use_project_song = bool(self.use_project_song.isChecked())
+        parent.adofai_copy_project_song = bool(self.copy_project_song.isChecked())
+        parent.adofai_song_offset_auto = bool(self.song_offset_auto.isChecked())
+        parent.adofai_song_offset_ms = float(self.song_offset_ms.value())
 
     def show_export_help(self) -> None:
         dlg = HelpDialog(self, initial_section="adofai_export")
@@ -2089,6 +2234,10 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "final_angle_mode": self.final_angle_mode.currentText(),
             "final_custom_angle": float(self.final_custom_angle.value()),
             "final_cardinal_step": float(self.final_cardinal_step.value()),
+            "song_filename": Path(self._song_source_path).name if self.use_project_song.isChecked() and self._song_source_path else None,
+            "song_offset_ms": float(self.song_offset_ms.value()) if self.use_project_song.isChecked() else None,
+            "_copy_song_to_export": bool(self.copy_project_song.isChecked() and self.use_project_song.isChecked() and self._song_source_path),
+            "_song_source_path": self._song_source_path if self.use_project_song.isChecked() and self._song_source_path else None,
             "pretty": False,
         }
 

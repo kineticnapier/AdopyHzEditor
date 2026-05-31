@@ -14,7 +14,8 @@ def new_level() -> dict[str, Any]:
         "settings": {
             "version": 15,
             "artist": "AdopyHzEditor",
-            "song": "Hz Chart",
+            "songFilename": "Hz Chart",
+            "songOffset": 0,
             "author": "AdopyHzEditor",
             "separateCountdownTime": "Enabled",
             "previewImage": "",
@@ -1264,9 +1265,15 @@ def export_adofai(
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
+    song_filename: str | None = None,
+    song_offset_ms: float | None = None,
     pretty: bool = False,
 ) -> dict[str, int | float | str]:
     level = new_level()
+    if song_filename:
+        level.setdefault("settings", {})["songFilename"] = Path(str(song_filename)).name
+    if song_offset_ms is not None:
+        level.setdefault("settings", {})["songOffset"] = round(float(song_offset_ms), 3)
     angle_data = level["angleData"]
     actions = level["actions"]
     apply_track_visual(level, actions, track_visual)
@@ -1441,6 +1448,8 @@ def export_adofai(
         "final_custom_angle": round(float(final_custom_angle), 6),
         "final_cardinal_step": round(float(final_cardinal_step), 6),
         "final_visual_corrections": final_visual_corrections,
+        "songFilename": level.get("settings", {}).get("songFilename", ""),
+        "song_offset_ms": level.get("settings", {}).get("songOffset", 0),
         "overlaps_serialized": overlaps,
         "tiles_total": tiles,
         "floors_total": len(angle_data) - 1,
