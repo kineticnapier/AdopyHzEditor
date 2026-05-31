@@ -17,7 +17,6 @@ dist/
 *.egg-info/
 .eggs/
 scripts/build_release.ps1
-releases/*
 
 # Test / coverage
 .pytest_cache/
@@ -73,3 +72,6 @@ temp/
 # Local caches
 .audiohzeditor_cache*/
 .cache/
+# Release artifacts
+releases/*
+!releases/.gitkeep
