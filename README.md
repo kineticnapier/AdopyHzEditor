@@ -1488,3 +1488,47 @@ Help was updated with a new section:
 ```text
 Help -> Pitch / Octave Controls
 ```
+
+
+## Stable52 Right-side settings panel
+
+The editor layout was reorganized to reduce toolbar clutter.
+
+Main toolbar now contains only:
+
+```text
+playback navigation
+MIDI / ADOFAI export buttons
+display mode shortcuts
+current time label
+```
+
+Bottom toolbar now contains only viewport/navigation controls:
+
+```text
+time slider
+visible seconds
+pitch bottom
+pitch up/down
+visible notes
+fit
+```
+
+Non-essential editing settings were moved into a right-side dock:
+
+```text
+Settings
+├─ Playback
+├─ Export Pitch
+├─ Grid / Snap
+├─ View / Analysis
+└─ Curve / Angle
+```
+
+The panel can be hidden/restored from:
+
+```text
+View -> Settings Panel
+```
+
+This keeps the main spectrogram editor area cleaner while preserving all existing controls and shortcuts.

@@ -272,6 +272,7 @@ class MainWindow(QtWidgets.QMainWindow):
         analyze_menu.addAction(tr("menu.reanalyze_audio"), self.reanalyze_current_audio)
 
         view_menu = menubar.addMenu(tr("menu.view"))
+        self.view_menu = view_menu
         view_menu.addAction(tr("menu.view_spectrogram"), lambda: self.editor.set_mode(0), QtGui.QKeySequence("1"))
         view_menu.addAction(tr("menu.view_notes"), lambda: self.editor.set_mode(1), QtGui.QKeySequence("2"))
         view_menu.addAction(tr("menu.view_both"), lambda: self.editor.set_mode(2), QtGui.QKeySequence("3"))
@@ -333,7 +334,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tb.addAction(a)
             return a
 
-        # WaveToneっぽい、小さめの操作列
+        # Keep the main toolbar focused on file/export/playback/view actions only.
         action("↶", lambda: self.seek_to(0.0), tip=tr("toolbar.first"))
         action("■", self.stop_playback, "Ctrl+Space", tr("toolbar.stop"))
         action("▶", self.toggle_playback, tip=tr("toolbar.play"))
@@ -355,149 +356,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.time_label.setMaximumWidth(132)
         self.time_label.setToolTip("Current time / total length")
         tb.addWidget(self.time_label)
-        tb.addSeparator()
 
-        panel = QtWidgets.QWidget()
-        grid = QtWidgets.QGridLayout(panel)
-        grid.setContentsMargins(2, 0, 2, 0)
-        grid.setHorizontalSpacing(4)
-        grid.setVerticalSpacing(1)
-
-        self.volume = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.volume.setRange(0, 100)
-        self.volume.setValue(85)
-        self.volume.setFixedWidth(92)
-        self.volume.valueChanged.connect(lambda v: self.player.set_volume(v / 100.0))
-
-        self.playback_speed = QtWidgets.QDoubleSpinBox()
-        self.playback_speed.setRange(0.10, 4.00)
-        self.playback_speed.setDecimals(2)
-        self.playback_speed.setSingleStep(0.05)
-        self.playback_speed.setValue(1.00)
-        self.playback_speed.setSuffix("x")
-        self.playback_speed.setFixedWidth(72)
-        self.playback_speed.valueChanged.connect(self.apply_playback_speed)
-
-        self.note_sound_enabled = QtWidgets.QCheckBox()
-        self.note_sound_enabled.setChecked(True)
-        self.note_sound_enabled.setToolTip("追加したノート音を再生")
-        self.note_sound_enabled.stateChanged.connect(self.apply_note_sound_settings)
-
-        self.note_vol = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.note_vol.setRange(0, 100)
-        self.note_vol.setValue(20)
-        self.note_vol.setFixedWidth(92)
-        self.note_vol.valueChanged.connect(self.apply_note_sound_settings)
-
-        self.note_octave = QtWidgets.QSpinBox()
-        self.note_octave.setRange(-4, 4)
-        self.note_octave.setValue(0)
-        self.note_octave.setFixedWidth(62)
-        self.note_octave.setToolTip("Preview Oct: ノートプレビュー音だけをオクターブ単位で上下。画面上のノート位置や出力には影響しません。")
-        self.note_octave.valueChanged.connect(self.apply_note_sound_settings)
-
-        self.export_octave = QtWidgets.QSpinBox()
-        self.export_octave.setRange(-4, 4)
-        self.export_octave.setValue(0)
-        self.export_octave.setFixedWidth(62)
-        self.export_octave.setToolTip("Export Oct: MIDI/ADOFAI出力だけをオクターブ単位で上下。プレビュー音と画面上のノート位置には影響しません。")
-
-        self.export_semitone = QtWidgets.QSpinBox()
-        self.export_semitone.setRange(-12, 12)
-        self.export_semitone.setValue(0)
-        self.export_semitone.setFixedWidth(62)
-        self.export_semitone.setToolTip("Export Semi: MIDI/ADOFAI出力だけを半音単位で上下。Export Octと合算されます。")
-
-        self.contrast = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.contrast.setRange(0, 300)
-        self.contrast.setValue(115)
-        self.contrast.setFixedWidth(92)
-        self.contrast.valueChanged.connect(self.apply_visual)
-
-        self.gamma = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        self.gamma.setRange(5, 500)
-        self.gamma.setValue(75)
-        self.gamma.setFixedWidth(92)
-        self.gamma.valueChanged.connect(self.apply_visual)
-
-        grid.addWidget(QtWidgets.QLabel("Song Vol"), 0, 0)
-        song_box = QtWidgets.QWidget()
-        song_layout = QtWidgets.QHBoxLayout(song_box)
-        song_layout.setContentsMargins(0, 0, 0, 0)
-        song_layout.setSpacing(3)
-        song_layout.addWidget(self.volume)
-        song_layout.addWidget(QtWidgets.QLabel("Speed"))
-        song_layout.addWidget(self.playback_speed)
-        grid.addWidget(song_box, 0, 1)
-        grid.addWidget(QtWidgets.QLabel("Note Vol"), 1, 0)
-        note_box = QtWidgets.QWidget()
-        note_layout = QtWidgets.QHBoxLayout(note_box)
-        note_layout.setContentsMargins(0, 0, 0, 0)
-        note_layout.setSpacing(3)
-        note_layout.addWidget(self.note_sound_enabled)
-        note_layout.addWidget(self.note_vol)
-        note_layout.addWidget(QtWidgets.QLabel("Preview Oct"))
-        note_layout.addWidget(self.note_octave, 0)
-        note_layout.addWidget(QtWidgets.QLabel("Export Oct"))
-        note_layout.addWidget(self.export_octave, 0)
-        note_layout.addWidget(QtWidgets.QLabel("Semi"))
-        note_layout.addWidget(self.export_semitone, 0)
-        grid.addWidget(note_box, 1, 1)
-
-        grid.addWidget(QtWidgets.QLabel("Contrast"), 0, 2)
-        grid.addWidget(self.contrast, 0, 3)
-        grid.addWidget(QtWidgets.QLabel("Gamma"), 1, 2)
-        grid.addWidget(self.gamma, 1, 3)
-
-        tb.addWidget(panel)
-
-        tb.addSeparator()
-        self.enhance = QtWidgets.QCheckBox("Enhance")
-        self.enhance.setChecked(True)
-        self.enhance.stateChanged.connect(self.apply_visual)
-        tb.addWidget(self.enhance)
-
-        tb.addWidget(QtWidgets.QLabel(" Display "))
-        self.display_mode = QtWidgets.QComboBox()
-        self.display_mode.addItems(["wavetone", "ridge", "smooth"])
-        self.display_mode.setCurrentText("wavetone")
-        self.display_mode.setToolTip(
-            "wavetone: 見やすいブロック表示\n"
-            "ridge: ピッチの山だけを残す\n"
-            "smooth: 従来のなめらかなスペクトログラム"
-        )
-        self.display_mode.currentTextChanged.connect(self.apply_visual)
-        tb.addWidget(self.display_mode)
-
-
-        tb.addWidget(QtWidgets.QLabel(" Harmonics "))
-        self.harmonics = QtWidgets.QComboBox()
-        self.harmonics.addItems(["off", "soft", "strong"])
-        self.harmonics.currentTextChanged.connect(self.apply_visual)
-        tb.addWidget(self.harmonics)
-
-        self.cmap = QtWidgets.QComboBox()
-        self.cmap.addItems(["wavetone", "viridis", "magma", "inferno", "plasma", "gray"])
-        self.cmap.setCurrentText("wavetone")
-        self.cmap.currentTextChanged.connect(self.apply_visual)
-        tb.addWidget(self.cmap)
-
-        tb.addWidget(QtWidgets.QLabel(" Analysis "))
-        self.analysis_profile = QtWidgets.QComboBox()
-        self.analysis_profile.addItems(["Fast", "Normal", "Precise", "Full C0-C10"])
-        self.analysis_profile.setCurrentText("Normal")
-        self.analysis_profile.setToolTip(
-            "Fast: C1-C7 / rougher time resolution\n"
-            "Normal: balanced\n"
-            "Precise: 3 bins/semitone, better note visibility, slower\n"
-            "Full C0-C10: widest range, slower"
-        )
-        tb.addWidget(self.analysis_profile)
 
     def _make_bottom_controls(self) -> None:
+        # Bottom bar: navigation/viewport only.
         bar = QtWidgets.QWidget()
         layout = QtWidgets.QGridLayout(bar)
         layout.setContentsMargins(6, 2, 6, 2)
+        layout.setHorizontalSpacing(5)
         layout.setColumnStretch(1, 1)
 
         self.time_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
@@ -523,6 +389,131 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.fit_button = QtWidgets.QPushButton("Fit")
         self.fit_button.clicked.connect(self.fit_all)
+
+        self.pitch_down_button = QtWidgets.QPushButton("Pitch ↓")
+        self.pitch_down_button.clicked.connect(lambda: self.move_pitch(-12))
+        self.pitch_up_button = QtWidgets.QPushButton("Pitch ↑")
+        self.pitch_up_button.clicked.connect(lambda: self.move_pitch(+12))
+
+        layout.addWidget(QtWidgets.QLabel("Time"), 0, 0)
+        layout.addWidget(self.time_slider, 0, 1)
+        layout.addWidget(QtWidgets.QLabel("Visible"), 0, 2)
+        layout.addWidget(self.visible_sec, 0, 3)
+        layout.addWidget(QtWidgets.QLabel("Pitch bottom"), 0, 4)
+        layout.addWidget(self.pitch_bottom, 0, 5)
+        layout.addWidget(self.pitch_down_button, 0, 6)
+        layout.addWidget(self.pitch_up_button, 0, 7)
+        layout.addWidget(QtWidgets.QLabel("Visible notes"), 0, 8)
+        layout.addWidget(self.visible_notes, 0, 9)
+        layout.addWidget(self.fit_button, 0, 10)
+
+        bottom_tb = QtWidgets.QToolBar("Navigation")
+        bottom_tb.setMovable(False)
+        bottom_tb.addWidget(bar)
+        self.addToolBar(QtCore.Qt.ToolBarArea.BottomToolBarArea, bottom_tb)
+
+        # Right side settings panel: all non-essential editing settings.
+        self.settings_dock = QtWidgets.QDockWidget("Settings", self)
+        self.settings_dock.setObjectName("SettingsDock")
+        self.settings_dock.setAllowedAreas(
+            QtCore.Qt.DockWidgetArea.LeftDockWidgetArea
+            | QtCore.Qt.DockWidgetArea.RightDockWidgetArea
+        )
+
+        self.settings_toolbox = QtWidgets.QToolBox()
+        self.settings_toolbox.setMinimumWidth(300)
+        self.settings_dock.setWidget(self.settings_toolbox)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, self.settings_dock)
+
+        if hasattr(self, "view_menu"):
+            self.view_menu.addSeparator()
+            self.settings_dock_toggle_action = self.settings_dock.toggleViewAction()
+            self.settings_dock_toggle_action.setText("Settings Panel")
+            self.view_menu.addAction(self.settings_dock_toggle_action)
+
+        def make_page() -> tuple[QtWidgets.QWidget, QtWidgets.QFormLayout]:
+            page = QtWidgets.QWidget()
+            form = QtWidgets.QFormLayout(page)
+            form.setContentsMargins(8, 8, 8, 8)
+            form.setHorizontalSpacing(8)
+            form.setVerticalSpacing(6)
+            form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            return page, form
+
+        def hbox(*widgets: QtWidgets.QWidget) -> QtWidgets.QWidget:
+            box = QtWidgets.QWidget()
+            row = QtWidgets.QHBoxLayout(box)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(5)
+            for w in widgets:
+                row.addWidget(w)
+            row.addStretch(1)
+            return box
+
+        # Playback page
+        playback_page, playback_form = make_page()
+
+        self.volume = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.volume.setRange(0, 100)
+        self.volume.setValue(85)
+        self.volume.valueChanged.connect(lambda v: self.player.set_volume(v / 100.0))
+
+        self.playback_speed = QtWidgets.QDoubleSpinBox()
+        self.playback_speed.setRange(0.10, 4.00)
+        self.playback_speed.setDecimals(2)
+        self.playback_speed.setSingleStep(0.05)
+        self.playback_speed.setValue(1.00)
+        self.playback_speed.setSuffix("x")
+        self.playback_speed.valueChanged.connect(self.apply_playback_speed)
+
+        self.note_sound_enabled = QtWidgets.QCheckBox("Enable note preview")
+        self.note_sound_enabled.setChecked(True)
+        self.note_sound_enabled.setToolTip("追加したノート音を再生")
+        self.note_sound_enabled.stateChanged.connect(self.apply_note_sound_settings)
+
+        self.note_vol = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.note_vol.setRange(0, 100)
+        self.note_vol.setValue(20)
+        self.note_vol.valueChanged.connect(self.apply_note_sound_settings)
+
+        self.note_octave = QtWidgets.QSpinBox()
+        self.note_octave.setRange(-4, 4)
+        self.note_octave.setValue(0)
+        self.note_octave.setToolTip("Preview Oct: ノートプレビュー音だけをオクターブ単位で上下。画面上のノート位置や出力には影響しません。")
+        self.note_octave.valueChanged.connect(self.apply_note_sound_settings)
+
+        playback_form.addRow("Song Vol", self.volume)
+        playback_form.addRow("Speed", self.playback_speed)
+        playback_form.addRow("Note Preview", self.note_sound_enabled)
+        playback_form.addRow("Note Vol", self.note_vol)
+        playback_form.addRow("Preview Oct", self.note_octave)
+        self.settings_toolbox.addItem(playback_page, "Playback")
+
+        # Export pitch page
+        export_page, export_form = make_page()
+
+        self.export_octave = QtWidgets.QSpinBox()
+        self.export_octave.setRange(-4, 4)
+        self.export_octave.setValue(0)
+        self.export_octave.setToolTip("Export Oct: MIDI/ADOFAI出力だけをオクターブ単位で上下。プレビュー音と画面上のノート位置には影響しません。")
+
+        self.export_semitone = QtWidgets.QSpinBox()
+        self.export_semitone.setRange(-12, 12)
+        self.export_semitone.setValue(0)
+        self.export_semitone.setToolTip("Export Semi: MIDI/ADOFAI出力だけを半音単位で上下。Export Octと合算されます。")
+
+        export_help = QtWidgets.QLabel(
+            "Export pitch = note pitch + Export Oct × 12 + Export Semi"
+        )
+        export_help.setWordWrap(True)
+
+        export_form.addRow("Export Oct", self.export_octave)
+        export_form.addRow("Export Semi", self.export_semitone)
+        export_form.addRow("", export_help)
+        self.settings_toolbox.addItem(export_page, "Export Pitch")
+
+        # Grid / Snap page
+        grid_page, grid_form = make_page()
 
         self.grid_enabled = QtWidgets.QCheckBox("Grid")
         self.grid_enabled.setChecked(False)
@@ -550,7 +541,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.metro_vol = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.metro_vol.setRange(0, 100)
         self.metro_vol.setValue(35)
-        self.metro_vol.setFixedWidth(80)
         self.metro_vol.valueChanged.connect(self.apply_timing_helpers)
 
         self.snap_enabled = QtWidgets.QCheckBox("Snap")
@@ -562,6 +552,73 @@ class MainWindow(QtWidgets.QMainWindow):
         self.snap_div.setValue(1)
         self.snap_div.setToolTip("Snap subdivision per beat. 1 = beat, 4 = quarter-beat grid")
         self.snap_div.valueChanged.connect(self.apply_timing_helpers)
+
+        grid_form.addRow("Grid", self.grid_enabled)
+        grid_form.addRow("Metronome", self.metro_enabled)
+        grid_form.addRow("BPM", self.grid_bpm)
+        grid_form.addRow("Offset", self.grid_offset_ms)
+        grid_form.addRow("Metro Vol", self.metro_vol)
+        grid_form.addRow("Snap", self.snap_enabled)
+        grid_form.addRow("Snap div", self.snap_div)
+        self.settings_toolbox.addItem(grid_page, "Grid / Snap")
+
+        # View / Analysis page
+        view_page, view_form = make_page()
+
+        self.contrast = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.contrast.setRange(0, 300)
+        self.contrast.setValue(115)
+        self.contrast.valueChanged.connect(self.apply_visual)
+
+        self.gamma = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.gamma.setRange(5, 500)
+        self.gamma.setValue(75)
+        self.gamma.valueChanged.connect(self.apply_visual)
+
+        self.enhance = QtWidgets.QCheckBox("Enhance")
+        self.enhance.setChecked(True)
+        self.enhance.stateChanged.connect(self.apply_visual)
+
+        self.display_mode = QtWidgets.QComboBox()
+        self.display_mode.addItems(["wavetone", "ridge", "smooth"])
+        self.display_mode.setCurrentText("wavetone")
+        self.display_mode.setToolTip(
+            "wavetone: 見やすいブロック表示\n"
+            "ridge: ピッチの山だけを残す\n"
+            "smooth: 従来のなめらかなスペクトログラム"
+        )
+        self.display_mode.currentTextChanged.connect(self.apply_visual)
+
+        self.harmonics = QtWidgets.QComboBox()
+        self.harmonics.addItems(["off", "soft", "strong"])
+        self.harmonics.currentTextChanged.connect(self.apply_visual)
+
+        self.cmap = QtWidgets.QComboBox()
+        self.cmap.addItems(["wavetone", "viridis", "magma", "inferno", "plasma", "gray"])
+        self.cmap.setCurrentText("wavetone")
+        self.cmap.currentTextChanged.connect(self.apply_visual)
+
+        self.analysis_profile = QtWidgets.QComboBox()
+        self.analysis_profile.addItems(["Fast", "Normal", "Precise", "Full C0-C10"])
+        self.analysis_profile.setCurrentText("Normal")
+        self.analysis_profile.setToolTip(
+            "Fast: C1-C7 / rougher time resolution\n"
+            "Normal: balanced\n"
+            "Precise: 3 bins/semitone, better note visibility, slower\n"
+            "Full C0-C10: widest range, slower"
+        )
+
+        view_form.addRow("Contrast", self.contrast)
+        view_form.addRow("Gamma", self.gamma)
+        view_form.addRow("Enhance", self.enhance)
+        view_form.addRow("Display", self.display_mode)
+        view_form.addRow("Harmonics", self.harmonics)
+        view_form.addRow("Colormap", self.cmap)
+        view_form.addRow("Analysis", self.analysis_profile)
+        self.settings_toolbox.addItem(view_page, "View / Analysis")
+
+        # Curve / Angle page
+        curve_page, curve_form = make_page()
 
         self.curve_shape = QtWidgets.QComboBox()
         self.curve_shape.addItems(["ease", "s_curve", "linear", "ease_in", "ease_out"])
@@ -606,50 +663,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.clear_target_angle_button.setToolTip("選択中ノートのTarget Angleを解除して自動計算に戻す")
         self.clear_target_angle_button.clicked.connect(self.clear_target_angle_for_selected)
 
-        layout.addWidget(QtWidgets.QLabel("Time"), 0, 0)
-        layout.addWidget(self.time_slider, 0, 1)
-        layout.addWidget(QtWidgets.QLabel("Visible"), 0, 2)
-        layout.addWidget(self.visible_sec, 0, 3)
-        self.pitch_down_button = QtWidgets.QPushButton("Pitch ↓")
-        self.pitch_down_button.clicked.connect(lambda: self.move_pitch(-12))
-        self.pitch_up_button = QtWidgets.QPushButton("Pitch ↑")
-        self.pitch_up_button.clicked.connect(lambda: self.move_pitch(+12))
+        curve_form.addRow("Curve", self.curve_shape)
+        curve_form.addRow("Interp", self.curve_interpolation)
+        curve_form.addRow("", self.apply_interpolation_button)
+        curve_form.addRow("Target Angle", self.target_angle)
+        curve_form.addRow("", hbox(self.apply_target_angle_button, self.clear_target_angle_button))
+        self.settings_toolbox.addItem(curve_page, "Curve / Angle")
 
-        layout.addWidget(QtWidgets.QLabel("Pitch bottom"), 0, 4)
-        layout.addWidget(self.pitch_bottom, 0, 5)
-        layout.addWidget(self.pitch_down_button, 0, 6)
-        layout.addWidget(self.pitch_up_button, 0, 7)
-        layout.addWidget(QtWidgets.QLabel("Visible notes"), 0, 8)
-        layout.addWidget(self.visible_notes, 0, 9)
-        layout.addWidget(self.fit_button, 0, 10)
-
-        layout.addWidget(self.grid_enabled, 1, 0)
-        layout.addWidget(self.metro_enabled, 1, 1)
-        layout.addWidget(QtWidgets.QLabel("BPM"), 1, 2)
-        layout.addWidget(self.grid_bpm, 1, 3)
-        layout.addWidget(QtWidgets.QLabel("Offset"), 1, 4)
-        layout.addWidget(self.grid_offset_ms, 1, 5)
-        layout.addWidget(QtWidgets.QLabel("Metro Vol"), 1, 6)
-        layout.addWidget(self.metro_vol, 1, 7)
-        layout.addWidget(self.snap_enabled, 1, 8)
-        layout.addWidget(QtWidgets.QLabel("Snap div"), 1, 9)
-        layout.addWidget(self.snap_div, 1, 10)
-        layout.addWidget(QtWidgets.QLabel("Curve"), 1, 11)
-        layout.addWidget(self.curve_shape, 1, 12)
-        layout.addWidget(QtWidgets.QLabel("Interp"), 2, 4)
-        layout.addWidget(self.curve_interpolation, 2, 5)
-        layout.addWidget(self.apply_interpolation_button, 2, 6)
-
-        layout.addWidget(QtWidgets.QLabel("Target Angle"), 2, 0)
-        layout.addWidget(self.target_angle, 2, 1)
-        layout.addWidget(self.apply_target_angle_button, 2, 2)
-        layout.addWidget(self.clear_target_angle_button, 2, 3)
-
-        self.addToolBarBreak()
-        bottom_tb = QtWidgets.QToolBar("View")
-        bottom_tb.setMovable(False)
-        bottom_tb.addWidget(bar)
-        self.addToolBar(QtCore.Qt.ToolBarArea.BottomToolBarArea, bottom_tb)
 
     def _make_shortcuts(self) -> None:
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Z"), self, activated=self.editor.undo)
