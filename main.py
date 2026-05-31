@@ -15,6 +15,7 @@ from editor_view import EditorView
 from export_midi import export_midi
 from export_adofai import export_adofai, build_adofai_debug_rows
 from project_io import save_project, load_project
+from help_dialog import HelpDialog
 from note_model import Note
 from i18n import tr, current_language, set_language
 from app_info import APP_VERSION, GITHUB_RELEASES_URL
@@ -292,11 +293,17 @@ class MainWindow(QtWidgets.QMainWindow):
         options_menu.addAction(tr("menu.check_updates"), lambda: self.check_for_updates(silent=False))
 
         help_menu = menubar.addMenu(tr("menu.help"))
-        help_menu.addAction(tr("menu.operation_notes"), lambda: QtWidgets.QMessageBox.information(
-            self,
-            tr("menu.operation_notes"),
-            tr("help.operation_notes"),
-        ))
+        help_menu.addAction(tr("help.quick_start.title"), lambda: self.open_help("quick_start"), QtGui.QKeySequence("F1"))
+        help_menu.addAction(tr("help.controls.title"), lambda: self.open_help("controls"))
+        help_menu.addAction(tr("help.adofai_export.title"), lambda: self.open_help("adofai_export"))
+        help_menu.addAction(tr("help.curve_glide.title"), lambda: self.open_help("curve_glide"))
+        help_menu.addAction(tr("help.troubleshooting.title"), lambda: self.open_help("troubleshooting"))
+        help_menu.addSeparator()
+        help_menu.addAction(tr("help.about.title"), lambda: self.open_help("about"))
+
+    def open_help(self, section: str = "quick_start") -> None:
+        dlg = HelpDialog(self, initial_section=section)
+        dlg.exec()
 
     def change_language(self, lang: str) -> None:
         set_language(lang)
@@ -657,6 +664,7 @@ class MainWindow(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Shift+Up"), self, activated=lambda: self.nudge_selected_notes(0, +1))
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Shift+Down"), self, activated=lambda: self.nudge_selected_notes(0, -1))
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+Alt+A"), self, activated=self.apply_target_angle_to_selected)
+        QtGui.QShortcut(QtGui.QKeySequence("F1"), self, activated=lambda: self.open_help("quick_start"))
 
     def format_time(self, seconds: float) -> str:
         seconds = max(0.0, float(seconds))
@@ -1931,14 +1939,23 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow(tr("export.cardinal_step"), self.final_cardinal_step)
 
         self.debug_preview_button = QtWidgets.QPushButton(tr("export.debug_preview"))
-        self.debug_preview_button.setToolTip("出力前にHz/BPM/角度/Keycount/端数角度などを表で確認します")
+        self.debug_preview_button.setToolTip(tr("export.debug_preview.tooltip"))
         self.debug_preview_button.clicked.connect(self.show_debug_preview)
         layout.addRow(tr("export.debug"), self.debug_preview_button)
+
+        self.export_help_button = QtWidgets.QPushButton(tr("export.help"))
+        self.export_help_button.setToolTip(tr("export.help.tooltip"))
+        self.export_help_button.clicked.connect(self.show_export_help)
+        layout.addRow(tr("export.help_row"), self.export_help_button)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+
+    def show_export_help(self) -> None:
+        dlg = HelpDialog(self, initial_section="adofai_export")
+        dlg.exec()
 
     def show_debug_preview(self) -> None:
         parent = self.parent()

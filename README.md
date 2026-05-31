@@ -1389,3 +1389,46 @@ The app no longer:
 ```
 
 This avoids SSL/OpenSSL DLL problems and is safer for early releases.
+
+
+## Stable50 UI discoverability and help
+
+In-app help was added so users do not need to read the README before using basic features.
+
+Added:
+
+```text
+Help -> Quick Start
+Help -> Controls / Shortcuts
+Help -> ADOFAI Export Guide
+Help -> Curve / Glide Guide
+Help -> Troubleshooting
+Help -> About
+```
+
+Shortcut:
+
+```text
+F1 -> open Quick Start help
+```
+
+ADOFAI Export dialog:
+
+```text
+Export Help button
+```
+
+The startup status bar message now also mentions the basic workflow and F1 help.
+
+The help text is localized in:
+
+```text
+locales/en.json
+locales/ja.json
+```
+
+The help UI is implemented in:
+
+```text
+help_dialog.py
+```
