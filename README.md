@@ -1432,3 +1432,59 @@ The help UI is implemented in:
 ```text
 help_dialog.py
 ```
+
+
+## Stable51 Explicit export pitch/octave controls
+
+Preview pitch and export pitch were separated.
+
+Added controls:
+
+```text
+Preview Oct
+Export Oct
+Export Semi
+```
+
+Behavior:
+
+```text
+Preview Oct:
+  affects note preview playback only
+
+Export Oct:
+  affects MIDI / ADOFAI export only
+
+Export Semi:
+  affects MIDI / ADOFAI export only
+```
+
+Export pitch shift:
+
+```text
+export_pitch = note_pitch + Export Oct * 12 + Export Semi
+```
+
+This means users can make preview notes easier to hear without accidentally changing exported MIDI/ADOFAI pitch.
+
+Project settings:
+
+```text
+preview_octave
+export_octave
+export_semitone
+```
+
+Backward compatibility:
+
+```text
+Old projects with only note_octave:
+  note_octave is loaded into both Preview Oct and Export Oct
+  so old export behavior is preserved.
+```
+
+Help was updated with a new section:
+
+```text
+Help -> Pitch / Octave Controls
+```

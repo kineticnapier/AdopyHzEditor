@@ -10,6 +10,7 @@ HELP_SECTIONS: list[tuple[str, str, str]] = [
     ("quick_start", "help.quick_start.title", "help.quick_start.body"),
     ("controls", "help.controls.title", "help.controls.body"),
     ("adofai_export", "help.adofai_export.title", "help.adofai_export.body"),
+    ("pitch_export", "help.pitch_export.title", "help.pitch_export.body"),
     ("curve_glide", "help.curve_glide.title", "help.curve_glide.body"),
     ("troubleshooting", "help.troubleshooting.title", "help.troubleshooting.body"),
     ("about", "help.about.title", "help.about.body"),
