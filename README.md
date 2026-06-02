@@ -1416,7 +1416,10 @@ ADOFAI Export dialog:
 
 ```text
 Export Help button
+Tile Preview button
 ```
+
+Tile Preview shows an approximate ADOFAI tile layout before exporting. It is useful for checking angle compression, target angle overrides, final tile correction, and Angle-only output without opening ADOFAI.
 
 The startup status bar message now also mentions the basic workflow and F1 help.
 

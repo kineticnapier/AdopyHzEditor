@@ -1247,9 +1247,8 @@ def normalize_notes_to_first(notes: list[Note]) -> tuple[list[Note], float]:
     return normalized, first_start
 
 
-def export_adofai(
+def build_adofai_level(
     notes: list[Note],
-    path: str | Path,
     *,
     method: str = "rabbit_zip",
     base_bpm: float = 175.0,
@@ -1267,8 +1266,7 @@ def export_adofai(
     final_cardinal_step: float = 90.0,
     song_filename: str | None = None,
     song_offset_ms: float | None = None,
-    pretty: bool = False,
-) -> dict[str, int | float | str]:
+) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
         level.setdefault("settings", {})["songFilename"] = Path(str(song_filename)).name
@@ -1421,11 +1419,7 @@ def export_adofai(
         used += 1
 
         now = max(now, n.end)
-
-    text = json.dumps(level, ensure_ascii=False, indent=2 if pretty else None, separators=None if pretty else (",", ":"))
-    Path(path).write_text(text, encoding="utf-8")
-
-    return {
+    stats: dict[str, int | float | str] = {
         "method": method_key,
         "track_visual": track_visual,
         "curve_step_sec": round(float(curve_step_sec), 6),
@@ -1455,3 +1449,84 @@ def export_adofai(
         "floors_total": len(angle_data) - 1,
         "actions_total": len(actions),
     }
+    return level, stats
+
+
+def build_tile_preview_points(
+    angle_data: list[Any],
+    *,
+    max_preview_tiles: int = 5000,
+) -> list[tuple[float, float, float]]:
+    points: list[tuple[float, float, float]] = []
+    if max_preview_tiles <= 0:
+        return points
+
+    x = 0.0
+    y = 0.0
+    usable_angles: list[float] = []
+    for raw in angle_data:
+        try:
+            angle = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(angle):
+            usable_angles.append(angle)
+        if len(usable_angles) >= max_preview_tiles + 1:
+            break
+
+    if not usable_angles:
+        return points
+
+    points.append((x, y, usable_angles[0]))
+    for angle in usable_angles[1:]:
+        radians = math.radians(angle)
+        x += math.cos(radians)
+        y += -math.sin(radians)
+        points.append((x, y, angle))
+    return points
+
+
+def export_adofai(
+    notes: list[Note],
+    path: str | Path,
+    *,
+    method: str = "rabbit_zip",
+    base_bpm: float = 175.0,
+    angle_only_bpm: float = 1600.0,
+    rabbit_x_mode: str = "floor",
+    rabbit_fixed_x: float = 8.0,
+    max_tiles: int = 200000,
+    max_tiles_per_note: int = 5000,
+    track_visual: str = "normal",
+    curve_step_sec: float = 0.025,
+    curve_pitch_step: float = 0.25,
+    phase_continuous_glide: bool = True,
+    final_angle_mode: str = "scaled",
+    final_custom_angle: float = 180.0,
+    final_cardinal_step: float = 90.0,
+    song_filename: str | None = None,
+    song_offset_ms: float | None = None,
+    pretty: bool = False,
+) -> dict[str, int | float | str]:
+    level, stats = build_adofai_level(
+        notes,
+        method=method,
+        base_bpm=base_bpm,
+        angle_only_bpm=angle_only_bpm,
+        rabbit_x_mode=rabbit_x_mode,
+        rabbit_fixed_x=rabbit_fixed_x,
+        max_tiles=max_tiles,
+        max_tiles_per_note=max_tiles_per_note,
+        track_visual=track_visual,
+        curve_step_sec=curve_step_sec,
+        curve_pitch_step=curve_pitch_step,
+        phase_continuous_glide=phase_continuous_glide,
+        final_angle_mode=final_angle_mode,
+        final_custom_angle=final_custom_angle,
+        final_cardinal_step=final_cardinal_step,
+        song_filename=song_filename,
+        song_offset_ms=song_offset_ms,
+    )
+    text = json.dumps(level, ensure_ascii=False, indent=2 if pretty else None, separators=None if pretty else (",", ":"))
+    Path(path).write_text(text, encoding="utf-8")
+    return stats
