@@ -297,7 +297,7 @@ def build_adofai_debug_rows(
             "method": method_key,
             "target_angle": "" if n.target_angle is None else round(float(n.target_angle), 6),
             "target_angle_used": False,
-            "target_angle_ignored": bool(method_key == "angle_only" and n.target_angle is not None),
+            "target_angle_ignored": False,
             "warning": "",
         }
 
@@ -401,28 +401,32 @@ def build_adofai_debug_rows(
                 whole = int(math.floor(total_phase + EPS))
                 frac = total_phase - math.floor(total_phase)
 
-                angle_min = min(angles) if angles else ""
-                angle_max = max(angles) if angles else ""
-                scaled_final = angles[-1] if angles else ""
+                target_used = n.target_angle is not None and float(n.target_angle) > EPS
+                target_rel = clean_relative_angle(float(n.target_angle)) if target_used else None
+                visual_angles = [target_rel for _ in angles] if target_rel is not None else list(angles)
+
+                angle_min = min(visual_angles) if visual_angles else ""
+                angle_max = max(visual_angles) if visual_angles else ""
+                scaled_final = visual_angles[-1] if visual_angles else ""
                 effective_final = scaled_final
                 final_bpm = ""
-                final_visual_used = False
-                angle_sequence = list(angles)
+                final_visual_used = bool(target_used)
+                angle_sequence = list(visual_angles)
 
                 if angles:
                     prev_before_final = prev_abs
-                    for rel in angles[:-1]:
+                    for rel in angle_sequence[:-1]:
                         prev_before_final = clean_angle(prev_before_final + 180.0 - float(rel))
 
                     adjusted_final = final_visual_angle(
                         mode=final_angle_mode,
                         prev_abs=prev_before_final,
-                        scaled_final_angle=angles[-1],
+                        scaled_final_angle=angle_sequence[-1],
                         custom_final_angle=final_custom_angle,
                         cardinal_step=final_cardinal_step,
                     )
                     if adjusted_final <= 0:
-                        adjusted_final = angles[-1]
+                        adjusted_final = angle_sequence[-1]
 
                     if abs(float(adjusted_final) - float(angles[-1])) > 1e-6:
                         final_bpm = play_bpm * float(adjusted_final) / max(EPS, float(angles[-1]))
@@ -442,19 +446,23 @@ def build_adofai_debug_rows(
                     "auto_angle": "varies",
                     "final_angle_scaled": "" if scaled_final == "" else round(float(scaled_final), 6),
                     "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
-                    "effective_bpm": round(play_bpm, 6),
+                    "effective_bpm": round(effective_bpm, 6),
                     "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
                     "tiles_est": emitted,
                     "final_visual_used": bool(final_visual_used),
                     "lowest_floor_x": global_lowest_floor_x,
                     "effective_fixed_x": round(float(effective_fixed_x), 6),
+                    "target_angle_used": bool(target_used),
                     "_angle_sequence": angle_sequence,
                 })
             else:
                 keycount = freq * dur
                 whole = int(math.floor(keycount + EPS))
                 frac = keycount - math.floor(keycount)
-                angle = clean_relative_angle(play_bpm * 180.0 / max(EPS, freq * 60.0))
+                raw_angle = clean_relative_angle(play_bpm * 180.0 / max(EPS, freq * 60.0))
+                target_used = n.target_angle is not None and float(n.target_angle) > EPS
+                angle = clean_relative_angle(float(n.target_angle)) if target_used else raw_angle
+                effective_bpm = play_bpm * angle / max(EPS, raw_angle)
 
                 emitted = whole
                 if limit > 0:
@@ -483,15 +491,16 @@ def build_adofai_debug_rows(
                     "angle": round(angle, 6),
                     "angle_min": round(angle, 6),
                     "angle_max": round(angle, 6),
-                    "auto_angle": round(angle, 6),
+                    "auto_angle": round(raw_angle, 6),
                     "final_angle_scaled": "" if scaled_final == "" else round(float(scaled_final), 6),
                     "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
-                    "effective_bpm": round(play_bpm, 6),
+                    "effective_bpm": round(effective_bpm, 6),
                     "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
                     "tiles_est": emitted,
                     "final_visual_used": bool(final_visual_used),
                     "lowest_floor_x": global_lowest_floor_x,
                     "effective_fixed_x": round(float(effective_fixed_x), 6),
+                    "target_angle_used": bool(target_used),
                 })
 
         else:
@@ -798,6 +807,7 @@ def emit_angle_only_curve_continuous(
     note: Note,
     song_bpm,
     max_tiles_per_note,
+    target_angle: float | None = None,
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
@@ -815,40 +825,47 @@ def emit_angle_only_curve_continuous(
     if max_tiles_per_note > 0:
         angles = angles[:max_tiles_per_note]
 
+    target_used = target_angle is not None and float(target_angle) > EPS
+    target_rel = clean_relative_angle(float(target_angle)) if target_used else None
+
     final_visual_used = False
     emitted = 0
+    restored = False
 
     for i, rel in enumerate(angles):
         is_final = i == len(angles) - 1
-        final_rel = rel
+        raw_rel = clean_relative_angle(float(rel))
+        final_rel = target_rel if target_rel is not None else raw_rel
 
         if is_final:
             prev_abs = float(angle_data[-1])
             adjusted = final_visual_angle(
                 mode=final_angle_mode,
                 prev_abs=prev_abs,
-                scaled_final_angle=rel,
+                scaled_final_angle=final_rel,
                 custom_final_angle=final_custom_angle,
                 cardinal_step=final_cardinal_step,
             )
 
             if adjusted <= 0:
-                adjusted = rel
+                adjusted = final_rel
 
-            if abs(float(adjusted) - float(rel)) > 1e-6:
-                # Preserve the actual final interval duration represented by rel.
-                # duration(rel, song_bpm) == duration(adjusted, final_bpm)
-                final_bpm = float(song_bpm) * float(adjusted) / max(EPS, float(rel))
-                actions.append(set_bpm(floor, final_bpm))
-                final_visual_used = True
-                final_rel = adjusted
+            final_rel = adjusted
+
+        if abs(float(final_rel) - float(raw_rel)) > 1e-6:
+            # Preserve the actual interval duration represented by raw_rel.
+            # duration(raw_rel, song_bpm) == duration(final_rel, compensated_bpm)
+            compensated_bpm = float(song_bpm) * float(final_rel) / max(EPS, float(raw_rel))
+            actions.append(set_bpm(floor, compensated_bpm))
+            final_visual_used = True
 
         add_relative(angle_data, final_rel)
         floor += 1
         emitted += 1
 
-        if is_final and final_visual_used:
+        if abs(float(final_rel) - float(raw_rel)) > 1e-6:
             actions.append(set_bpm(floor, song_bpm))
+            restored = True
 
     return floor, emitted, float(song_bpm), final_visual_used, total_phase
 
@@ -1030,6 +1047,7 @@ def emit_angle_only(
     dur,
     song_bpm,
     max_tiles_per_note,
+    target_angle: float | None = None,
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
@@ -1052,8 +1070,14 @@ def emit_angle_only(
     if keycount <= EPS:
         return floor, 0, None, False
 
-    angle = float(song_bpm) * 180.0 / max(EPS, freq * 60.0)
-    angle = clean_relative_angle(angle)
+    raw_angle = clean_relative_angle(float(song_bpm) * 180.0 / max(EPS, freq * 60.0))
+
+    target_used = target_angle is not None and float(target_angle) > EPS
+    angle = clean_relative_angle(float(target_angle)) if target_used else raw_angle
+
+    # If Angle-only visual angle is overridden, preserve timing by scaling BPM:
+    #   new_bpm = old_bpm * (new_angle / old_angle)
+    angle_bpm = float(song_bpm) * angle / max(EPS, raw_angle)
 
     whole = int(math.floor(keycount + EPS))
     frac = keycount - math.floor(keycount)
@@ -1063,12 +1087,15 @@ def emit_angle_only(
     if max_tiles_per_note > 0:
         whole_to_emit = min(whole_to_emit, max_tiles_per_note)
 
+    if whole_to_emit > 0 and abs(angle_bpm - float(song_bpm)) > 1e-6:
+        actions.append(set_bpm(floor, angle_bpm))
+
     for _ in range(whole_to_emit):
         add_relative(angle_data, angle)
         floor += 1
         emitted += 1
 
-    final_visual_used = False
+    final_visual_used = bool(target_used and abs(angle - raw_angle) > 1e-6)
     if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
         scaled_final_angle = angle * frac
         prev_abs = float(angle_data[-1])
@@ -1100,6 +1127,9 @@ def emit_angle_only(
 
         if abs(final_angle - scaled_final_angle) > 1e-6:
             final_visual_used = True
+    elif whole_to_emit > 0 and abs(angle_bpm - float(song_bpm)) > 1e-6:
+        # No final fractional tile, but the main tiles used a compensated BPM.
+        actions.append(set_bpm(floor, song_bpm))
 
     return floor, emitted, float(song_bpm), final_visual_used
 
@@ -1247,6 +1277,291 @@ def normalize_notes_to_first(notes: list[Note]) -> tuple[list[Note], float]:
     return normalized, first_start
 
 
+def parse_harmony_intervals(mode: str = "off", custom_semitone: float = 7.0) -> list[float]:
+    """
+    Global Harmony Charting interval list.
+
+    The base voice is always 0 semitones. Returned values are extra voices only.
+    """
+    key = (mode or "off").lower().replace(" ", "_").replace("-", "_")
+    if key in ("off", "none", "root_only"):
+        return []
+    if key in ("octave_+12", "octave", "+12", "12"):
+        return [12.0]
+    if key in ("fifth_+7", "perfect_fifth", "fifth", "+7", "7"):
+        return [7.0]
+    if key in ("major_third_+4", "major_third", "maj3", "+4", "4"):
+        return [4.0]
+    if key in ("minor_third_+3", "minor_third", "min3", "+3", "3"):
+        return [3.0]
+    if key in ("lower_octave_-12", "lower_octave__12", "lower_octave", "-12", "_12"):
+        return [-12.0]
+    if key in ("custom", "custom_semitone"):
+        return [float(custom_semitone)]
+    return []
+
+
+def _note_impulse_events(
+    note: Note,
+    *,
+    voice_index: int,
+    semitone_offset: float,
+    max_events: int,
+    epsilon_sec: float,
+) -> list[dict[str, Any]]:
+    """
+    Build one voice's impulse train for a note.
+
+    Each event is a tile hit candidate. The final fractional cycle is represented
+    by the last event before the note end, which matches the existing Hz export
+    idea of one extra visual tile for fractional keycount.
+    """
+    n = note.normalized().with_pitch_offset(semitone_offset)
+    if n.duration <= EPS:
+        return []
+
+    events: list[dict[str, Any]] = []
+    max_events = int(max_events)
+    local_t = 0.0
+    emitted = 0
+
+    if n.is_curve:
+        intervals, _total_phase = curve_phase_dt_intervals(n)
+        t = n.start + voice_index * epsilon_sec
+        for i, dt in enumerate(intervals):
+            if max_events > 0 and emitted >= max_events:
+                break
+            dur_pos = max(0.0, min(1.0, (t - n.start) / max(EPS, n.duration)))
+            freq = max(EPS, n.freq_at(dur_pos))
+            events.append({
+                "time": t,
+                "midi": n.midi_at(dur_pos),
+                "freq": freq,
+                "voice": voice_index,
+                "interval": float(semitone_offset),
+                "note": n,
+            })
+            emitted += 1
+            t += max(EPS, float(dt))
+        return events
+
+    freq = max(EPS, n.freq)
+    period = 1.0 / freq
+    while local_t < n.duration - EPS:
+        if max_events > 0 and emitted >= max_events:
+            break
+        t = n.start + local_t + voice_index * epsilon_sec
+        events.append({
+            "time": t,
+            "midi": n.midi,
+            "freq": freq,
+            "voice": voice_index,
+            "interval": float(semitone_offset),
+            "note": n,
+        })
+        emitted += 1
+        local_t += period
+
+    return events
+
+
+def build_harmony_impulse_events(
+    notes: list[Note],
+    *,
+    harmony_mode: str = "off",
+    harmony_custom_semitone: float = 7.0,
+    harmony_epsilon_ms: float = 0.001,
+    max_tiles: int = 200000,
+    max_tiles_per_note: int = 5000,
+) -> tuple[list[dict[str, Any]], int]:
+    """
+    Merge root + harmony impulse trains into one timeline.
+
+    This is intended for visual Harmony Charting: it weaves multiple pitch
+    cycles into one ADOFAI tile path. It is not a multi-lane audio renderer.
+    """
+    extra_intervals = parse_harmony_intervals(harmony_mode, harmony_custom_semitone)
+    intervals = [0.0] + extra_intervals
+    epsilon_sec = max(0.0, float(harmony_epsilon_ms)) / 1000.0
+
+    events: list[dict[str, Any]] = []
+    for n in notes:
+        if n.duration <= EPS:
+            continue
+        for voice_index, interval in enumerate(intervals):
+            per_voice_limit = max_tiles_per_note
+            voice_events = _note_impulse_events(
+                n,
+                voice_index=voice_index,
+                semitone_offset=interval,
+                max_events=per_voice_limit,
+                epsilon_sec=epsilon_sec,
+            )
+            events.extend(voice_events)
+
+    events.sort(key=lambda e: (float(e["time"]), int(e["voice"]), float(e["midi"])))
+
+    # Enforce a deterministic tiny separation. Completely simultaneous tiles are
+    # technically possible at chord starts, but ADOFAI needs one serial path.
+    adjusted = 0
+    prev_t: float | None = None
+    min_sep = max(epsilon_sec, 1e-9)
+    for e in events:
+        t = float(e["time"])
+        if prev_t is not None and t <= prev_t + min_sep:
+            t = prev_t + min_sep
+            e["time"] = t
+            adjusted += 1
+        prev_t = t
+
+    if max_tiles > 0 and len(events) > max_tiles:
+        events = events[:max_tiles]
+
+    return events, adjusted
+
+
+def harmony_relative_angle(freq: float, play_bpm: float, *, min_angle: float = 2.0, max_angle: float = 358.0) -> float:
+    """
+    Use an Angle-only-like visual angle for a harmony impulse.
+
+        angle = bpm * 180 / (freq * 60)
+
+    This lets different harmony voices leave visibly different angle patterns.
+    """
+    angle = float(play_bpm) * 180.0 / max(EPS, float(freq) * 60.0)
+    while angle > 360.0:
+        angle *= 0.5
+    return clean_relative_angle(max(min_angle, min(max_angle, angle)))
+
+
+def remap_harmony_visual_angle(
+    old_angle: float,
+    *,
+    mode: str = "raw",
+    step: float = 45.0,
+) -> float:
+    """
+    Remap Harmony Charting visual angles while timing is later preserved by
+    SetSpeed compensation.
+
+        new_bpm = old_bpm * (new_angle / old_angle)
+
+    raw:
+        keep the pitch-derived angle.
+    round_45 / round_90:
+        snap to a readable angle grid.
+    custom_step:
+        snap to the user-provided step.
+    """
+    old = max(EPS, float(old_angle))
+    key = (mode or "raw").lower().replace(" ", "_").replace("-", "_").replace("°", "")
+
+    if key in ("raw", "off", "none", "pitch", "pitch_raw"):
+        return clean_relative_angle(old)
+
+    if key in ("round_45", "rounded_45", "snap_45", "45", "readable_45"):
+        snap = 45.0
+    elif key in ("round_90", "rounded_90", "snap_90", "90", "cardinal", "cardinal_90"):
+        snap = 90.0
+    elif key in ("custom", "custom_step", "step"):
+        snap = max(0.001, float(step))
+    else:
+        snap = 45.0
+
+    new_angle = round(old / snap) * snap
+    if new_angle <= EPS:
+        new_angle = snap
+    # Avoid exploding into many full 360 turns when a custom step is large.
+    while new_angle > 360.0:
+        new_angle -= 360.0
+    if new_angle <= EPS:
+        new_angle = 360.0
+    return clean_relative_angle(new_angle)
+
+
+def emit_harmony_polyrhythm(
+    angle_data: list[Any],
+    actions: list[dict[str, Any]],
+    floor: int,
+    events: list[dict[str, Any]],
+    *,
+    play_bpm: float,
+    max_tiles: int,
+    current_bpm: float | None = None,
+    harmony_visual_mode: str = "raw",
+    harmony_visual_step: float = 45.0,
+) -> tuple[int, int, float | None, int, int, int]:
+    """
+    Emit a single serial ADOFAI path from merged harmony impulse times.
+
+    Each impulse becomes one tile. The time until the next impulse is preserved
+    by placing a SetSpeed for that tile. The visual angle is derived from the
+    source voice pitch.
+    """
+    if not events:
+        return floor, 0, current_bpm, 0, 0, 0
+
+    emitted = 0
+    tiny_intervals = 0
+    remapped_angles = 0
+    target_angle_used = 0
+    now = 0.0
+
+    for i, e in enumerate(events):
+        if max_tiles > 0 and emitted >= max_tiles:
+            break
+
+        t = float(e["time"])
+        if i == 0 and t > now + 1e-6:
+            pause_seconds(actions, floor, t - now, current_bpm)
+            now = t
+
+        if i + 1 < len(events):
+            dt = max(EPS, float(events[i + 1]["time"]) - t)
+        else:
+            freq = max(EPS, float(e.get("freq", 1.0)))
+            dt = 1.0 / freq
+
+        if dt <= 1e-6:
+            tiny_intervals += 1
+
+        old_rel = harmony_relative_angle(float(e.get("freq", 1.0)), play_bpm)
+
+        source_note = e.get("note")
+        target = getattr(source_note, "target_angle", None)
+        target_used = target is not None and float(target) > EPS
+
+        if target_used:
+            # Explicit per-note Target Angle wins over automatic readable remap.
+            rel = clean_relative_angle(float(target))
+            target_angle_used += 1
+        else:
+            rel = remap_harmony_visual_angle(
+                old_rel,
+                mode=harmony_visual_mode,
+                step=harmony_visual_step,
+            )
+
+        # Preserve the original timing after changing the visual angle:
+        #   old_bpm = old_angle * 60 / (180 * dt)
+        #   new_bpm = old_bpm * (new_angle / old_angle)
+        old_bpm = old_rel * 60.0 / max(EPS, 180.0 * dt)
+        bpm = old_bpm * (rel / max(EPS, old_rel))
+
+        if abs(rel - old_rel) > 1e-6:
+            remapped_angles += 1
+
+        actions.append(set_bpm(floor, bpm))
+        current_bpm = bpm
+        add_relative(angle_data, rel)
+
+        floor += 1
+        emitted += 1
+        now = t + dt
+
+    return floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used
+
+
 def build_adofai_level(
     notes: list[Note],
     *,
@@ -1266,6 +1581,11 @@ def build_adofai_level(
     final_cardinal_step: float = 90.0,
     song_filename: str | None = None,
     song_offset_ms: float | None = None,
+    harmony_mode: str = "off",
+    harmony_custom_semitone: float = 7.0,
+    harmony_epsilon_ms: float = 0.001,
+    harmony_visual_mode: str = "raw",
+    harmony_visual_step: float = 45.0,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
@@ -1300,7 +1620,66 @@ def build_adofai_level(
     final_visual_corrections = 0
     phase_continuous_curves = 0
     current_bpm: float | None = None
-    play_bpm = max(1e-6, float(angle_only_bpm if method_key == "angle_only" else base_bpm))
+    play_bpm = max(1e-6, float(angle_only_bpm if method_key in ("angle_only", "harmony", "harmony_polyrhythm") else base_bpm))
+
+    if method_key in ("harmony", "harmony_polyrhythm"):
+        level.setdefault("settings", {})["bpm"] = round(play_bpm, 6)
+        current_bpm = play_bpm
+        events, simultaneous_adjusted = build_harmony_impulse_events(
+            sorted_notes,
+            harmony_mode=harmony_mode,
+            harmony_custom_semitone=harmony_custom_semitone,
+            harmony_epsilon_ms=harmony_epsilon_ms,
+            max_tiles=max_tiles,
+            max_tiles_per_note=max_tiles_per_note,
+        )
+        floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used = emit_harmony_polyrhythm(
+            angle_data,
+            actions,
+            floor,
+            events,
+            play_bpm=play_bpm,
+            max_tiles=max_tiles,
+            current_bpm=current_bpm,
+            harmony_visual_mode=harmony_visual_mode,
+            harmony_visual_step=harmony_visual_step,
+        )
+        stats: dict[str, int | float | str] = {
+            "method": method_key,
+            "track_visual": track_visual,
+            "phase_continuous_glide": bool(use_phase_continuous_glide),
+            "input_notes_total": len(notes),
+            "base_bpm": round(float(base_bpm), 6),
+            "angle_only_bpm": round(float(angle_only_bpm), 6),
+            "effective_play_bpm": round(float(play_bpm), 6),
+            "harmony_mode": harmony_mode,
+            "harmony_custom_semitone": round(float(harmony_custom_semitone), 6),
+            "harmony_epsilon_ms": round(float(harmony_epsilon_ms), 6),
+            "harmony_visual_mode": harmony_visual_mode,
+            "harmony_visual_step": round(float(harmony_visual_step), 6),
+            "harmony_angles_remapped": remapped_angles,
+            "harmony_events_total": len(events),
+            "simultaneous_adjusted": simultaneous_adjusted,
+            "tiny_intervals": tiny_intervals,
+            "first_note_offset_seconds": round(first_note_offset, 6),
+            "start_floor": 1,
+            "notes_total": len(sorted_notes),
+            "notes_used": len(sorted_notes),
+            "target_angle_ignored": 0,
+            "target_angle_used": sum(1 for n in sorted_notes if n.target_angle is not None and float(n.target_angle) > EPS),
+            "target_angle_override_events": target_angle_used,
+            "final_angle_mode": final_angle_mode,
+            "final_custom_angle": round(float(final_custom_angle), 6),
+            "final_cardinal_step": round(float(final_cardinal_step), 6),
+            "final_visual_corrections": 0,
+            "songFilename": level.get("settings", {}).get("songFilename", ""),
+            "song_offset_ms": level.get("settings", {}).get("songOffset", 0),
+            "overlaps_serialized": 0,
+            "tiles_total": emitted,
+            "floors_total": len(angle_data) - 1,
+            "actions_total": len(actions),
+        }
+        return level, stats
 
     if method_key == "angle_only":
         # One initial/global speed for the entire angle-only chart.
@@ -1352,6 +1731,7 @@ def build_adofai_level(
                     n,
                     play_bpm,
                     limit,
+                    target_angle=n.target_angle,
                     final_angle_mode=final_angle_mode,
                     final_custom_angle=final_custom_angle,
                     final_cardinal_step=final_cardinal_step,
@@ -1366,12 +1746,15 @@ def build_adofai_level(
                     audible,
                     play_bpm,
                     limit,
+                    target_angle=n.target_angle,
                     final_angle_mode=final_angle_mode,
                     final_custom_angle=final_custom_angle,
                     final_cardinal_step=final_cardinal_step,
                 )
-            # In angle-only mode, target_angle is intentionally ignored because
-            # the angle itself determines pitch.
+
+            if n.target_angle is not None and float(n.target_angle) > EPS:
+                target_angle_used += 1
+
             if final_visual_used:
                 final_visual_corrections += 1
         else:
@@ -1419,6 +1802,7 @@ def build_adofai_level(
         used += 1
 
         now = max(now, n.end)
+
     stats: dict[str, int | float | str] = {
         "method": method_key,
         "track_visual": track_visual,
@@ -1436,7 +1820,7 @@ def build_adofai_level(
         "start_floor": 1,
         "notes_total": len(sorted_notes),
         "notes_used": used,
-        "target_angle_ignored": sum(1 for n in sorted_notes if method_key == "angle_only" and n.target_angle is not None),
+        "target_angle_ignored": 0,
         "target_angle_used": target_angle_used,
         "final_angle_mode": final_angle_mode,
         "final_custom_angle": round(float(final_custom_angle), 6),
@@ -1450,7 +1834,6 @@ def build_adofai_level(
         "actions_total": len(actions),
     }
     return level, stats
-
 
 def build_tile_preview_points(
     angle_data: list[Any],
@@ -1506,6 +1889,11 @@ def export_adofai(
     final_cardinal_step: float = 90.0,
     song_filename: str | None = None,
     song_offset_ms: float | None = None,
+    harmony_mode: str = "off",
+    harmony_custom_semitone: float = 7.0,
+    harmony_epsilon_ms: float = 0.001,
+    harmony_visual_mode: str = "raw",
+    harmony_visual_step: float = 45.0,
     pretty: bool = False,
 ) -> dict[str, int | float | str]:
     level, stats = build_adofai_level(
@@ -1526,6 +1914,11 @@ def export_adofai(
         final_cardinal_step=final_cardinal_step,
         song_filename=song_filename,
         song_offset_ms=song_offset_ms,
+        harmony_mode=harmony_mode,
+        harmony_custom_semitone=harmony_custom_semitone,
+        harmony_epsilon_ms=harmony_epsilon_ms,
+        harmony_visual_mode=harmony_visual_mode,
+        harmony_visual_step=harmony_visual_step,
     )
     text = json.dumps(level, ensure_ascii=False, indent=2 if pretty else None, separators=None if pretty else (",", ":"))
     Path(path).write_text(text, encoding="utf-8")

@@ -1416,10 +1416,7 @@ ADOFAI Export dialog:
 
 ```text
 Export Help button
-Tile Preview button
 ```
-
-Tile Preview shows an approximate ADOFAI tile layout before exporting. It is useful for checking angle compression, target angle overrides, final tile correction, and Angle-only output without opening ADOFAI.
 
 The startup status bar message now also mentions the basic workflow and F1 help.
 
@@ -1623,3 +1620,188 @@ Release artifacts are ignored by `.gitignore`:
 releases/*
 !releases/.gitkeep
 ```
+
+
+## Stable55 Harmony Charting / Polyrhythm export
+
+A new ADOFAI export method was added:
+
+```text
+Harmony / Polyrhythm: merged impulse trains
+```
+
+Concept:
+
+```text
+root pitch impulse train
++ harmony pitch impulse train
+-> merge by time
+-> serialize into one ADOFAI tile path
+```
+
+This is intended as a visual Harmony Charting mode, not as a multi-lane audio renderer.
+
+New export options:
+
+```text
+Harmony
+Harmony custom
+Harmony epsilon
+```
+
+Harmony presets:
+
+```text
+octave +12
+fifth +7
+major third +4
+minor third +3
+lower octave -12
+custom
+```
+
+`Harmony epsilon` is used to slightly separate events that would otherwise be exactly simultaneous.
+
+The export remains one ADOFAI path, so tile preview can be used to inspect the resulting polyrhythmic/harmonic shape.
+
+
+## Stable56 Initial blank workspace
+
+The editor now starts with a real blank 60-second C0-C9-ish workspace.
+
+Before:
+```text
+No audio/project loaded -> spectrogram=None
+```
+
+This made initial note placement fragile.
+
+Now:
+```text
+No audio/project loaded -> black placeholder spectrogram
+```
+
+This means users can place/edit notes immediately after launch, even before opening audio or a project.
+
+
+## Stable57 Restore Tile Preview after Harmony Charting
+
+Tile Preview was accidentally dropped when Harmony Charting was implemented from the stable54 line.
+
+Restored:
+
+```text
+Export dialog -> Tile Preview
+```
+
+The preview now uses the same export generation path through:
+
+```text
+build_adofai_level(...)
+```
+
+Then it builds preview coordinates from:
+
+```text
+level["angleData"]
+```
+
+The preview draws an ADOFAI-like dark track with:
+
+```text
+outer track
+center seam
+tile seams
+start/end markers
+optional center points
+```
+
+Tile Preview does not write `.adofai` files and does not copy audio files.
+
+Harmony / Polyrhythm output can also be previewed.
+
+
+## Stable58 Harmony readability via SetSpeed-compensated angle remapping
+
+Harmony / Polyrhythm export now has visual angle remapping.
+
+New export options:
+
+```text
+Harmony visual
+Visual step
+```
+
+Modes:
+
+```text
+raw
+round 45°
+round 90°
+custom step
+```
+
+The exporter first computes the original pitch-derived angle, then remaps it to a more readable angle if requested.
+
+Timing is preserved using SetSpeed compensation:
+
+```text
+old_bpm = old_angle * 60 / (180 * dt)
+new_bpm = old_bpm * (new_angle / old_angle)
+```
+
+So the merged harmony impulse timing remains the same while the generated path can look much more readable.
+
+Default Harmony visual mode:
+
+```text
+round 45°
+```
+
+Tile Preview stats now also include:
+
+```text
+harmony_visual_mode
+harmony_visual_step
+harmony_angles_remapped
+```
+
+
+## Stable59 Target Angle support for Angle-only and Harmony
+
+Target Angle overrides now work in:
+
+```text
+Angle-only
+Harmony / Polyrhythm
+```
+
+Previously, Angle-only ignored Target Angle because angle itself represented pitch.
+Now the exporter preserves timing by compensating BPM:
+
+```text
+new_bpm = old_bpm * (new_angle / old_angle)
+```
+
+Behavior:
+
+```text
+Angle-only:
+  Target Angle overrides the note's visual angle.
+  BPM is adjusted so the original pitch timing is preserved.
+
+Harmony / Polyrhythm:
+  Target Angle overrides Harmony visual remapping.
+  BPM is adjusted per merged impulse event.
+```
+
+Stats:
+
+```text
+target_angle_used
+target_angle_override_events
+target_angle_ignored
+```
+
+Debug Preview now shows Angle-only Target Angle as used instead of ignored.
+Tile Preview also works with these overrides.
