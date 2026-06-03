@@ -2064,6 +2064,26 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_epsilon_ms.setSuffix(" ms")
         self.harmony_epsilon_ms.setToolTip("完全同時刻になったtileを微小時間ずらす量")
 
+        self.harmony_visual_mode = QtWidgets.QComboBox()
+        self.harmony_visual_mode.addItems([
+            "raw",
+            "round 45°",
+            "round 90°",
+            "custom step",
+        ])
+        self.harmony_visual_mode.setCurrentText("round 45°")
+        self.harmony_visual_mode.setToolTip(
+            "Harmonyの見た目角度を読みやすい角度へ寄せます。\n"
+            "タイミングは SetSpeed と new_angle / old_angle で補正します。"
+        )
+
+        self.harmony_visual_step = QtWidgets.QDoubleSpinBox()
+        self.harmony_visual_step.setRange(1.0, 180.0)
+        self.harmony_visual_step.setDecimals(3)
+        self.harmony_visual_step.setValue(45.0)
+        self.harmony_visual_step.setSuffix("°")
+        self.harmony_visual_step.setToolTip("Harmony visual mode が custom step のときの角度刻み")
+
         self.x_mode = QtWidgets.QComboBox()
         self.x_mode.addItems(["floor", "lowest_floor", "round", "ceil", "fixed"])
         self.x_mode.setToolTip(
@@ -2185,6 +2205,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow(tr("export.harmony_mode"), self.harmony_mode)
         layout.addRow(tr("export.harmony_custom_semitone"), self.harmony_custom_semitone)
         layout.addRow(tr("export.harmony_epsilon"), self.harmony_epsilon_ms)
+        layout.addRow(tr("export.harmony_visual_mode"), self.harmony_visual_mode)
+        layout.addRow(tr("export.harmony_visual_step"), self.harmony_visual_step)
         layout.addRow(tr("export.change_x_mode"), self.x_mode)
         layout.addRow(tr("export.fixed_change_x"), self.fixed_x)
         layout.addRow(tr("export.max_tiles"), self.max_tiles)
@@ -2287,6 +2309,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "harmony_mode": self.harmony_mode.currentText(),
             "harmony_custom_semitone": float(self.harmony_custom_semitone.value()),
             "harmony_epsilon_ms": float(self.harmony_epsilon_ms.value()),
+            "harmony_visual_mode": self.harmony_visual_mode.currentText(),
+            "harmony_visual_step": float(self.harmony_visual_step.value()),
             "rabbit_x_mode": self.x_mode.currentText(),
             "rabbit_fixed_x": float(self.fixed_x.value()),
             "max_tiles": int(self.max_tiles.value()),

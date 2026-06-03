@@ -1719,3 +1719,89 @@ optional center points
 Tile Preview does not write `.adofai` files and does not copy audio files.
 
 Harmony / Polyrhythm output can also be previewed.
+
+
+## Stable58 Harmony readability via SetSpeed-compensated angle remapping
+
+Harmony / Polyrhythm export now has visual angle remapping.
+
+New export options:
+
+```text
+Harmony visual
+Visual step
+```
+
+Modes:
+
+```text
+raw
+round 45°
+round 90°
+custom step
+```
+
+The exporter first computes the original pitch-derived angle, then remaps it to a more readable angle if requested.
+
+Timing is preserved using SetSpeed compensation:
+
+```text
+old_bpm = old_angle * 60 / (180 * dt)
+new_bpm = old_bpm * (new_angle / old_angle)
+```
+
+So the merged harmony impulse timing remains the same while the generated path can look much more readable.
+
+Default Harmony visual mode:
+
+```text
+round 45°
+```
+
+Tile Preview stats now also include:
+
+```text
+harmony_visual_mode
+harmony_visual_step
+harmony_angles_remapped
+```
+
+
+## Stable59 Target Angle support for Angle-only and Harmony
+
+Target Angle overrides now work in:
+
+```text
+Angle-only
+Harmony / Polyrhythm
+```
+
+Previously, Angle-only ignored Target Angle because angle itself represented pitch.
+Now the exporter preserves timing by compensating BPM:
+
+```text
+new_bpm = old_bpm * (new_angle / old_angle)
+```
+
+Behavior:
+
+```text
+Angle-only:
+  Target Angle overrides the note's visual angle.
+  BPM is adjusted so the original pitch timing is preserved.
+
+Harmony / Polyrhythm:
+  Target Angle overrides Harmony visual remapping.
+  BPM is adjusted per merged impulse event.
+```
+
+Stats:
+
+```text
+target_angle_used
+target_angle_override_events
+target_angle_ignored
+```
+
+Debug Preview now shows Angle-only Target Angle as used instead of ignored.
+Tile Preview also works with these overrides.

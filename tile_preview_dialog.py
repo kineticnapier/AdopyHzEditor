@@ -101,6 +101,10 @@ class TilePreviewDialog(QtWidgets.QDialog):
             "actions_total",
             "first_note_offset_seconds",
             "harmony_mode",
+            "harmony_visual_mode",
+            "harmony_visual_step",
+            "harmony_angles_remapped",
+            "target_angle_override_events",
             "songFilename",
             "song_offset_ms",
         ]
