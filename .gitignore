@@ -16,7 +16,6 @@ build/
 dist/
 *.egg-info/
 .eggs/
-scripts/build_release.ps1
 
 # Test / coverage
 .pytest_cache/

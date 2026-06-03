@@ -1416,10 +1416,7 @@ ADOFAI Export dialog:
 
 ```text
 Export Help button
-Tile Preview button
 ```
-
-Tile Preview shows an approximate ADOFAI tile layout before exporting. It is useful for checking angle compression, target angle overrides, final tile correction, and Angle-only output without opening ADOFAI.
 
 The startup status bar message now also mentions the basic workflow and F1 help.
 
@@ -1623,3 +1620,65 @@ Release artifacts are ignored by `.gitignore`:
 releases/*
 !releases/.gitkeep
 ```
+
+
+## Stable55 Harmony Charting / Polyrhythm export
+
+A new ADOFAI export method was added:
+
+```text
+Harmony / Polyrhythm: merged impulse trains
+```
+
+Concept:
+
+```text
+root pitch impulse train
++ harmony pitch impulse train
+-> merge by time
+-> serialize into one ADOFAI tile path
+```
+
+This is intended as a visual Harmony Charting mode, not as a multi-lane audio renderer.
+
+New export options:
+
+```text
+Harmony
+Harmony custom
+Harmony epsilon
+```
+
+Harmony presets:
+
+```text
+octave +12
+fifth +7
+major third +4
+minor third +3
+lower octave -12
+custom
+```
+
+`Harmony epsilon` is used to slightly separate events that would otherwise be exactly simultaneous.
+
+The export remains one ADOFAI path, so tile preview can be used to inspect the resulting polyrhythmic/harmonic shape.
+
+
+## Stable56 Initial blank workspace
+
+The editor now starts with a real blank 60-second C0-C9-ish workspace.
+
+Before:
+```text
+No audio/project loaded -> spectrogram=None
+```
+
+This made initial note placement fragile.
+
+Now:
+```text
+No audio/project loaded -> black placeholder spectrogram
+```
+
+This means users can place/edit notes immediately after launch, even before opening audio or a project.

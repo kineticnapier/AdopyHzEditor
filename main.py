@@ -14,10 +14,9 @@ from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_c
 from audio_player import AudioPlayer, decode_audio_file
 from editor_view import EditorView
 from export_midi import export_midi
-from export_adofai import export_adofai, build_adofai_debug_rows, build_adofai_level, build_tile_preview_points
+from export_adofai import export_adofai, build_adofai_debug_rows
 from project_io import save_project, load_project
 from help_dialog import HelpDialog
-from tile_preview_dialog import TilePreviewDialog
 from note_model import Note
 from i18n import tr, current_language, set_language
 from app_info import APP_VERSION, GITHUB_RELEASES_URL
@@ -2013,6 +2012,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "Angle Compression: corrected Keycount formula",
             "Direct 180°: BPM = Hz × 60",
             "Angle-only: one BPM + angle only",
+            "Harmony / Polyrhythm: merged impulse trains",
         ])
 
         self.base_bpm = QtWidgets.QDoubleSpinBox()
@@ -2032,6 +2032,36 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "このBPMをsettings.bpmに入れ、各Hzは角度だけで合わせます。\n"
             "値を大きくすると角度が大きくなり、見た目が詰まりにくくなります。"
         )
+
+        self.harmony_mode = QtWidgets.QComboBox()
+        self.harmony_mode.addItems([
+            "off",
+            "octave +12",
+            "fifth +7",
+            "major third +4",
+            "minor third +3",
+            "lower octave -12",
+            "custom",
+        ])
+        self.harmony_mode.setCurrentText("fifth +7")
+        self.harmony_mode.setToolTip(
+            "Harmony / Polyrhythmモードで追加する和声音。\n"
+            "root音の周期列と和声音の周期列をmergeして1本のタイル列にします。"
+        )
+
+        self.harmony_custom_semitone = QtWidgets.QDoubleSpinBox()
+        self.harmony_custom_semitone.setRange(-48.0, 48.0)
+        self.harmony_custom_semitone.setDecimals(3)
+        self.harmony_custom_semitone.setValue(7.0)
+        self.harmony_custom_semitone.setSuffix(" semitone")
+        self.harmony_custom_semitone.setToolTip("Harmony mode が custom のときの追加音程")
+
+        self.harmony_epsilon_ms = QtWidgets.QDoubleSpinBox()
+        self.harmony_epsilon_ms.setRange(0.000001, 10.0)
+        self.harmony_epsilon_ms.setDecimals(6)
+        self.harmony_epsilon_ms.setValue(0.001)
+        self.harmony_epsilon_ms.setSuffix(" ms")
+        self.harmony_epsilon_ms.setToolTip("完全同時刻になったtileを微小時間ずらす量")
 
         self.x_mode = QtWidgets.QComboBox()
         self.x_mode.addItems(["floor", "lowest_floor", "round", "ceil", "fixed"])
@@ -2151,6 +2181,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         layout.addRow(tr("export.method"), self.method)
         layout.addRow(tr("export.base_bpm"), self.base_bpm)
         layout.addRow(tr("export.angle_only_bpm"), self.angle_only_bpm)
+        layout.addRow(tr("export.harmony_mode"), self.harmony_mode)
+        layout.addRow(tr("export.harmony_custom_semitone"), self.harmony_custom_semitone)
+        layout.addRow(tr("export.harmony_epsilon"), self.harmony_epsilon_ms)
         layout.addRow(tr("export.change_x_mode"), self.x_mode)
         layout.addRow(tr("export.fixed_change_x"), self.fixed_x)
         layout.addRow(tr("export.max_tiles"), self.max_tiles)
@@ -2171,11 +2204,6 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.debug_preview_button.setToolTip(tr("export.debug_preview.tooltip"))
         self.debug_preview_button.clicked.connect(self.show_debug_preview)
         layout.addRow(tr("export.debug"), self.debug_preview_button)
-
-        self.tile_preview_button = QtWidgets.QPushButton(tr("export.tile_preview"))
-        self.tile_preview_button.setToolTip(tr("export.tile_preview.tooltip"))
-        self.tile_preview_button.clicked.connect(self.show_tile_preview)
-        layout.addRow(tr("export.tile_preview"), self.tile_preview_button)
 
         self.export_help_button = QtWidgets.QPushButton(tr("export.help"))
         self.export_help_button.setToolTip(tr("export.help.tooltip"))
@@ -2220,35 +2248,19 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("debug.title"), str(e))
 
-    def show_tile_preview(self) -> None:
-        parent = self.parent()
-        if parent is None or not hasattr(parent, "notes_with_output_octave"):
-            QtWidgets.QMessageBox.warning(self, tr("tile_preview.title"), "Could not access editor notes.")
-            return
-
-        try:
-            note_source = parent.notes_with_export_pitch_offset() if hasattr(parent, "notes_with_export_pitch_offset") else parent.notes_with_output_octave()
-            opts = self.options()
-            opts.pop("_copy_song_to_export", None)
-            opts.pop("_song_source_path", None)
-            opts.pop("pretty", None)
-            level, stats = build_adofai_level(note_source, **opts)
-            preview_limit = 5000
-            points = build_tile_preview_points(level.get("angleData", []), max_preview_tiles=preview_limit)
-            dlg = TilePreviewDialog(points, stats, preview_limit=preview_limit, parent=self)
-            dlg.exec()
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, tr("tile_preview.title"), str(e))
-
     def options(self) -> dict:
         return {
             "method": (
                 "direct_180" if self.method.currentIndex() == 1
                 else "angle_only" if self.method.currentIndex() == 2
+                else "harmony" if self.method.currentIndex() == 3
                 else "rabbit_zip"
             ),
             "base_bpm": float(self.base_bpm.value()),
             "angle_only_bpm": float(self.angle_only_bpm.value()),
+            "harmony_mode": self.harmony_mode.currentText(),
+            "harmony_custom_semitone": float(self.harmony_custom_semitone.value()),
+            "harmony_epsilon_ms": float(self.harmony_epsilon_ms.value()),
             "rabbit_x_mode": self.x_mode.currentText(),
             "rabbit_fixed_x": float(self.fixed_x.value()),
             "max_tiles": int(self.max_tiles.value()),

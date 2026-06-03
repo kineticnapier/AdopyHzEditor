@@ -250,6 +250,46 @@ class EditorView(QtWidgets.QWidget):
         self.plot.note_move_finished.connect(self.finish_move_selected)
         self.plot.cursor_moved.connect(self.on_cursor_moved)
 
+        # Start with a real blank workspace so notes can be placed before any
+        # audio/project is opened. Previously spectrogram=None made the initial
+        # editor state fragile for clicks/drags, view changes, and redraws.
+        self.set_initial_blank_workspace()
+
+    def make_blank_workspace_spectrogram(
+        self,
+        *,
+        duration: float = 60.0,
+        midi_min: int = 12,
+        midi_max: int = 120,
+    ) -> Spectrogram:
+        duration = max(1.0, float(duration))
+        midi_min = int(max(0, min(127, midi_min)))
+        midi_max = int(max(midi_min + 12, min(127, midi_max)))
+        hop = 0.05
+        frames = max(2, int(duration / hop) + 1)
+        rows = int(midi_max - midi_min + 1)
+        db = np.zeros((rows, frames), dtype=np.float32)
+        frame_times = np.linspace(0.0, duration, frames, dtype=np.float32)
+        return Spectrogram(
+            audio_path="",
+            db=db,
+            duration=float(duration),
+            midi_min=int(midi_min),
+            midi_max=int(midi_max),
+            frame_times=frame_times,
+            sr=22050,
+        )
+
+    def set_initial_blank_workspace(self) -> None:
+        self.spectrogram = self.make_blank_workspace_spectrogram()
+        self.refresh_image()
+        spec = self.spectrogram
+        self.image.setRect(QtCore.QRectF(0, spec.midi_min - 0.5, spec.duration, spec.midi_max - spec.midi_min + 1))
+        self.set_view(0.0, min(12.0, spec.duration), spec.midi_min, min(60, spec.midi_max - spec.midi_min + 1))
+        self.redraw_pitch_grid()
+        self.redraw_beat_grid()
+        self.set_playhead(0.0)
+
     def snapshot_state(self) -> list[dict]:
         return [n.normalized().to_dict() for n in self.notes]
 
