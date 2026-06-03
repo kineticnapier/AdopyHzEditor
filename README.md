@@ -1682,3 +1682,40 @@ No audio/project loaded -> black placeholder spectrogram
 ```
 
 This means users can place/edit notes immediately after launch, even before opening audio or a project.
+
+
+## Stable57 Restore Tile Preview after Harmony Charting
+
+Tile Preview was accidentally dropped when Harmony Charting was implemented from the stable54 line.
+
+Restored:
+
+```text
+Export dialog -> Tile Preview
+```
+
+The preview now uses the same export generation path through:
+
+```text
+build_adofai_level(...)
+```
+
+Then it builds preview coordinates from:
+
+```text
+level["angleData"]
+```
+
+The preview draws an ADOFAI-like dark track with:
+
+```text
+outer track
+center seam
+tile seams
+start/end markers
+optional center points
+```
+
+Tile Preview does not write `.adofai` files and does not copy audio files.
+
+Harmony / Polyrhythm output can also be previewed.

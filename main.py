@@ -14,9 +14,10 @@ from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_c
 from audio_player import AudioPlayer, decode_audio_file
 from editor_view import EditorView
 from export_midi import export_midi
-from export_adofai import export_adofai, build_adofai_debug_rows
+from export_adofai import export_adofai, build_adofai_debug_rows, build_adofai_level, build_tile_preview_points
 from project_io import save_project, load_project
 from help_dialog import HelpDialog
+from tile_preview_dialog import TilePreviewDialog
 from note_model import Note
 from i18n import tr, current_language, set_language
 from app_info import APP_VERSION, GITHUB_RELEASES_URL
@@ -2205,6 +2206,11 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.debug_preview_button.clicked.connect(self.show_debug_preview)
         layout.addRow(tr("export.debug"), self.debug_preview_button)
 
+        self.tile_preview_button = QtWidgets.QPushButton(tr("export.tile_preview"))
+        self.tile_preview_button.setToolTip(tr("export.tile_preview.tooltip"))
+        self.tile_preview_button.clicked.connect(self.show_tile_preview)
+        layout.addRow(tr("export.tile_preview_row"), self.tile_preview_button)
+
         self.export_help_button = QtWidgets.QPushButton(tr("export.help"))
         self.export_help_button.setToolTip(tr("export.help.tooltip"))
         self.export_help_button.clicked.connect(self.show_export_help)
@@ -2233,6 +2239,26 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
     def show_export_help(self) -> None:
         dlg = HelpDialog(self, initial_section="adofai_export")
         dlg.exec()
+
+    def show_tile_preview(self) -> None:
+        parent = self.parent()
+        if parent is None or not hasattr(parent, "notes_with_output_octave"):
+            QtWidgets.QMessageBox.warning(self, tr("tile_preview.title"), "Could not access editor notes.")
+            return
+
+        try:
+            note_source = parent.notes_with_export_pitch_offset() if hasattr(parent, "notes_with_export_pitch_offset") else parent.notes_with_output_octave()
+            opts = dict(self.options())
+            opts.pop("_copy_song_to_export", None)
+            opts.pop("_song_source_path", None)
+            opts.pop("pretty", None)
+
+            level, stats = build_adofai_level(note_source, **opts)
+            points = build_tile_preview_points(level.get("angleData", []), max_preview_tiles=5000)
+            dlg = TilePreviewDialog(points, stats, preview_limit=5000, parent=self)
+            dlg.exec()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, tr("tile_preview.title"), str(e))
 
     def show_debug_preview(self) -> None:
         parent = self.parent()
