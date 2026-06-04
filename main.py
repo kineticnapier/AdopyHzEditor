@@ -2006,12 +2006,15 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("export.title"))
-        layout = QtWidgets.QFormLayout(self)
+        self.resize(780, 560)
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
 
         self.method = QtWidgets.QComboBox()
         self.method.addItems([
             "Angle Compression: corrected Keycount formula",
-            "Direct 180°: BPM = Hz × 60",
             "Angle-only: one BPM + angle only",
             "Harmony / Polyrhythm: merged impulse trains",
         ])
@@ -2113,29 +2116,6 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.max_tiles_per_note.setSingleStep(500)
         self.max_tiles_per_note.setSpecialValueText("Unlimited")
 
-        self.curve_step_ms = QtWidgets.QDoubleSpinBox()
-        self.curve_step_ms.setRange(1.0, 200.0)
-        self.curve_step_ms.setDecimals(1)
-        self.curve_step_ms.setValue(25.0)
-        self.curve_step_ms.setSuffix(" ms")
-        self.curve_step_ms.setToolTip("Bezier/GlideノートをADOFAI出力時に分割する時間幅")
-
-        self.curve_pitch_step = QtWidgets.QDoubleSpinBox()
-        self.curve_pitch_step.setRange(0.01, 2.0)
-        self.curve_pitch_step.setDecimals(3)
-        self.curve_pitch_step.setValue(0.25)
-        self.curve_pitch_step.setSuffix(" semitone")
-        self.curve_pitch_step.setToolTip("Bezier/Glideノートを分割するときの最大ピッチ変化量。0.25=25cent")
-
-        self.phase_continuous_glide = QtWidgets.QCheckBox("Phase-continuous glide")
-        self.phase_continuous_glide.setChecked(True)
-        self.phase_continuous_glide.setToolTip(
-            "Curve/Glideを短い固定Hzノートに分割せず、\n"
-            "周波数曲線を積分してタイルを配置します。\n"
-            "Angle-only / Direct 180° / Angle Compression で有効です。\n"
-            "Direct/Angle CompressionではタイルごとにSetSpeedが増えます。"
-        )
-
         self.track_visual = QtWidgets.QComboBox()
         self.track_visual.addItems(["normal", "faint", "very faint", "hidden"])
         self.track_visual.setCurrentText("normal")
@@ -2178,7 +2158,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
 
         self.use_project_song = QtWidgets.QCheckBox("Use project audio as ADOFAI song")
         self.use_project_song.setChecked(bool(self._song_source_path) and bool(getattr(parent, "adofai_use_project_song", True)))
-        self.use_project_song.setToolTip("settings.song に現在読み込んでいる音声ファイル名を入れます")
+        self.use_project_song.setToolTip("settings.songFilename に現在読み込んでいる音声ファイル名を入れます")
 
         self.copy_project_song = QtWidgets.QCheckBox("Copy song next to .adofai")
         self.copy_project_song.setChecked(bool(self._song_source_path) and bool(getattr(parent, "adofai_copy_project_song", True)))
@@ -2199,49 +2179,83 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.song_offset_auto.stateChanged.connect(self.update_song_offset_state)
         self.update_song_offset_state()
 
-        layout.addRow(tr("export.method"), self.method)
-        layout.addRow(tr("export.base_bpm"), self.base_bpm)
-        layout.addRow(tr("export.angle_only_bpm"), self.angle_only_bpm)
-        layout.addRow(tr("export.harmony_mode"), self.harmony_mode)
-        layout.addRow(tr("export.harmony_custom_semitone"), self.harmony_custom_semitone)
-        layout.addRow(tr("export.harmony_epsilon"), self.harmony_epsilon_ms)
-        layout.addRow(tr("export.harmony_visual_mode"), self.harmony_visual_mode)
-        layout.addRow(tr("export.harmony_visual_step"), self.harmony_visual_step)
-        layout.addRow(tr("export.change_x_mode"), self.x_mode)
-        layout.addRow(tr("export.fixed_change_x"), self.fixed_x)
-        layout.addRow(tr("export.max_tiles"), self.max_tiles)
-        layout.addRow(tr("export.max_tiles_per_note"), self.max_tiles_per_note)
-        layout.addRow(tr("export.curve_step"), self.curve_step_ms)
-        layout.addRow(tr("export.curve_pitch_step"), self.curve_pitch_step)
-        layout.addRow(tr("export.phase_continuous_glide"), self.phase_continuous_glide)
-        layout.addRow(tr("export.track_visual"), self.track_visual)
-        layout.addRow(tr("export.final_tile_mode"), self.final_angle_mode)
-        layout.addRow(tr("export.custom_final_angle"), self.final_custom_angle)
-        layout.addRow(tr("export.cardinal_step"), self.final_cardinal_step)
-        layout.addRow(tr("export.song"), self.use_project_song)
-        layout.addRow(tr("export.copy_song"), self.copy_project_song)
-        layout.addRow(tr("export.song_offset_auto"), self.song_offset_auto)
-        layout.addRow(tr("export.song_offset_ms"), self.song_offset_ms)
-
         self.debug_preview_button = QtWidgets.QPushButton(tr("export.debug_preview"))
         self.debug_preview_button.setToolTip(tr("export.debug_preview.tooltip"))
         self.debug_preview_button.clicked.connect(self.show_debug_preview)
-        layout.addRow(tr("export.debug"), self.debug_preview_button)
 
         self.tile_preview_button = QtWidgets.QPushButton(tr("export.tile_preview"))
         self.tile_preview_button.setToolTip(tr("export.tile_preview.tooltip"))
         self.tile_preview_button.clicked.connect(self.show_tile_preview)
-        layout.addRow(tr("export.tile_preview_row"), self.tile_preview_button)
 
         self.export_help_button = QtWidgets.QPushButton(tr("export.help"))
         self.export_help_button.setToolTip(tr("export.help.tooltip"))
         self.export_help_button.clicked.connect(self.show_export_help)
-        layout.addRow(tr("export.help_row"), self.export_help_button)
+
+        tabs = QtWidgets.QTabWidget()
+        tabs.setDocumentMode(True)
+        main_layout.addWidget(tabs, 1)
+
+        def add_export_tab(title: str, rows: list[tuple[str, QtWidgets.QWidget]]) -> None:
+            page = QtWidgets.QWidget()
+            form = QtWidgets.QFormLayout(page)
+            form.setContentsMargins(12, 12, 12, 12)
+            form.setHorizontalSpacing(10)
+            form.setVerticalSpacing(7)
+            form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            for label, widget in rows:
+                form.addRow(label, widget)
+
+            scroll = QtWidgets.QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            scroll.setWidget(page)
+            tabs.addTab(scroll, title)
+
+        add_export_tab(tr("export.tab_basic"), [
+            (tr("export.method"), self.method),
+            (tr("export.base_bpm"), self.base_bpm),
+            (tr("export.angle_only_bpm"), self.angle_only_bpm),
+            (tr("export.track_visual"), self.track_visual),
+        ])
+
+        add_export_tab(tr("export.tab_harmony"), [
+            (tr("export.harmony_mode"), self.harmony_mode),
+            (tr("export.harmony_custom_semitone"), self.harmony_custom_semitone),
+            (tr("export.harmony_epsilon"), self.harmony_epsilon_ms),
+            (tr("export.harmony_visual_mode"), self.harmony_visual_mode),
+            (tr("export.harmony_visual_step"), self.harmony_visual_step),
+        ])
+
+        add_export_tab(tr("export.tab_advanced"), [
+            (tr("export.change_x_mode"), self.x_mode),
+            (tr("export.fixed_change_x"), self.fixed_x),
+            (tr("export.max_tiles"), self.max_tiles),
+            (tr("export.max_tiles_per_note"), self.max_tiles_per_note),
+        ])
+
+        add_export_tab(tr("export.tab_final_tile"), [
+            (tr("export.final_tile_mode"), self.final_angle_mode),
+            (tr("export.custom_final_angle"), self.final_custom_angle),
+            (tr("export.cardinal_step"), self.final_cardinal_step),
+        ])
+
+        add_export_tab(tr("export.tab_song"), [
+            (tr("export.song"), self.use_project_song),
+            (tr("export.copy_song"), self.copy_project_song),
+            (tr("export.song_offset_auto"), self.song_offset_auto),
+            (tr("export.song_offset_ms"), self.song_offset_ms),
+        ])
+
+        add_export_tab(tr("export.tab_preview_help"), [
+            (tr("export.debug"), self.debug_preview_button),
+            (tr("export.tile_preview_row"), self.tile_preview_button),
+            (tr("export.help_row"), self.export_help_button),
+        ])
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        main_layout.addWidget(buttons)
 
     def update_song_offset_state(self) -> None:
         checked = bool(self.song_offset_auto.isChecked())
@@ -2299,9 +2313,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
     def options(self) -> dict:
         return {
             "method": (
-                "direct_180" if self.method.currentIndex() == 1
-                else "angle_only" if self.method.currentIndex() == 2
-                else "harmony" if self.method.currentIndex() == 3
+                "angle_only" if self.method.currentIndex() == 1
+                else "harmony" if self.method.currentIndex() == 2
                 else "rabbit_zip"
             ),
             "base_bpm": float(self.base_bpm.value()),
@@ -2316,9 +2329,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
             "track_visual": self.track_visual.currentText(),
-            "curve_step_sec": float(self.curve_step_ms.value()) / 1000.0,
-            "curve_pitch_step": float(self.curve_pitch_step.value()),
-            "phase_continuous_glide": bool(self.phase_continuous_glide.isChecked()),
+            # Phase-continuous glide is now the standard behavior.
+            "phase_continuous_glide": True,
             "final_angle_mode": self.final_angle_mode.currentText(),
             "final_custom_angle": float(self.final_custom_angle.value()),
             "final_cardinal_step": float(self.final_cardinal_step.value()),

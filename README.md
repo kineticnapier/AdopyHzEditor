@@ -1805,3 +1805,55 @@ target_angle_ignored
 
 Debug Preview now shows Angle-only Target Angle as used instead of ignored.
 Tile Preview also works with these overrides.
+
+
+## Stable60 Export dialog UI cleanup
+
+The ADOFAI export dialog was reorganized from one long vertical `QFormLayout` into a tabbed layout.
+
+Tabs:
+
+```text
+Basic
+Harmony
+Advanced
+Final Tile
+Song
+Preview / Help
+```
+
+This keeps the modal shorter while preserving all existing controls:
+
+```text
+Debug Preview
+Tile Preview
+Export Help
+```
+
+remain available from the Preview / Help tab.
+
+Also fixed the song option tooltip wording from `settings.song` to `settings.songFilename`.
+
+
+## Stable61 Export dialog simplification
+
+Export UI cleanup:
+
+```text
+Removed Direct 180° from the export method list.
+```
+
+Reason:
+
+```text
+Direct 180° can be represented by using Target Angle = 180°.
+```
+
+Curve/Glide export was also simplified:
+
+```text
+Phase-continuous glide is now always enabled from the export dialog.
+Curve step / Curve pitch step / Phase-continuous glide checkbox were removed.
+```
+
+The underlying exporter still keeps compatibility parameters, but the UI now exposes only the standard phase-continuous workflow.
