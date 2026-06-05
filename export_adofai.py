@@ -1633,6 +1633,22 @@ def remap_harmony_visual_angle(
     return clean_relative_angle(new_angle)
 
 
+def _harmony_timing_key(value: str) -> str:
+    return (value or "setspeed").lower().replace(" ", "_").replace("-", "_").replace("°", "")
+
+
+def harmony_timing_angle(dt: float, play_bpm: float) -> float:
+    """
+    Convert a time interval directly into a relative angle at one global BPM.
+
+        dt = 60 / BPM * angle / 180
+        angle = dt * BPM * 180 / 60
+
+    This is Harmony Charting's Angle-only timing mode.
+    """
+    return clean_relative_angle(max(EPS, float(dt)) * max(EPS, float(play_bpm)) * 180.0 / 60.0)
+
+
 def emit_harmony_polyrhythm(
     angle_data: list[Any],
     actions: list[dict[str, Any]],
@@ -1642,23 +1658,35 @@ def emit_harmony_polyrhythm(
     play_bpm: float,
     max_tiles: int,
     current_bpm: float | None = None,
+    harmony_timing_mode: str = "setspeed",
     harmony_visual_mode: str = "raw",
     harmony_visual_step: float = 45.0,
-) -> tuple[int, int, float | None, int, int, int]:
+) -> tuple[int, int, float | None, int, int, int, int]:
     """
     Emit a single serial ADOFAI path from merged harmony impulse times.
 
-    Each impulse becomes one tile. The time until the next impulse is preserved
-    by placing a SetSpeed for that tile. The visual angle is derived from the
-    source voice pitch.
+    Each impulse becomes one tile.
+
+    SetSpeed mode:
+        visual angle is pitch-derived, and SetSpeed preserves the merged
+        impulse timing.
+
+    Angle-only mode:
+        one global BPM is used, and each time gap is encoded directly as an
+        angle. This avoids per-tile SetSpeed unless target/remap changes the
+        visual angle.
     """
     if not events:
-        return floor, 0, current_bpm, 0, 0, 0
+        return floor, 0, current_bpm, 0, 0, 0, 0
+
+    timing_key = _harmony_timing_key(harmony_timing_mode)
+    angle_only_timing = timing_key in ("angle_only", "angleonly", "angle", "global_bpm", "one_bpm")
 
     emitted = 0
     tiny_intervals = 0
     remapped_angles = 0
     target_angle_used = 0
+    setspeed_events = 0
     now = 0.0
 
     for i, e in enumerate(events):
@@ -1679,7 +1707,16 @@ def emit_harmony_polyrhythm(
         if dt <= 1e-6:
             tiny_intervals += 1
 
-        old_rel = harmony_relative_angle(float(e.get("freq", 1.0)), play_bpm)
+        if angle_only_timing:
+            # In Harmony Angle-only mode, the raw angle itself represents the
+            # exact time until the next merged impulse at the global BPM.
+            old_rel = harmony_timing_angle(dt, play_bpm)
+            base_bpm_for_tile = float(play_bpm)
+        else:
+            # In SetSpeed mode, the visual angle is pitch-derived. The actual
+            # time until the next impulse is then preserved with SetSpeed.
+            old_rel = harmony_relative_angle(float(e.get("freq", 1.0)), play_bpm)
+            base_bpm_for_tile = old_rel * 60.0 / max(EPS, 180.0 * dt)
 
         source_note = e.get("note")
         target = getattr(source_note, "target_angle", None)
@@ -1696,24 +1733,37 @@ def emit_harmony_polyrhythm(
                 step=harmony_visual_step,
             )
 
-        # Preserve the original timing after changing the visual angle:
-        #   old_bpm = old_angle * 60 / (180 * dt)
+        # Preserve timing after changing the visual angle:
         #   new_bpm = old_bpm * (new_angle / old_angle)
-        old_bpm = old_rel * 60.0 / max(EPS, 180.0 * dt)
-        bpm = old_bpm * (rel / max(EPS, old_rel))
+        #
+        # For Angle-only timing, old_bpm is the one global BPM. If rel == old_rel,
+        # no SetSpeed is needed at all.
+        bpm = base_bpm_for_tile * (rel / max(EPS, old_rel))
 
         if abs(rel - old_rel) > 1e-6:
             remapped_angles += 1
 
-        actions.append(set_bpm(floor, bpm))
-        current_bpm = bpm
+        need_setspeed = (not angle_only_timing) or abs(bpm - float(play_bpm)) > 1e-6
+        if need_setspeed:
+            actions.append(set_bpm(floor, bpm))
+            setspeed_events += 1
+            current_bpm = bpm
+        else:
+            current_bpm = float(play_bpm)
+
         add_relative(angle_data, rel)
+
+        if angle_only_timing and need_setspeed:
+            # Return to the global Harmony BPM for the next raw Angle-only tile.
+            actions.append(set_bpm(floor + 1, play_bpm))
+            setspeed_events += 1
+            current_bpm = float(play_bpm)
 
         floor += 1
         emitted += 1
         now = t + dt
 
-    return floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used
+    return floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events
 
 
 def build_adofai_level(
@@ -1740,6 +1790,7 @@ def build_adofai_level(
     harmony_epsilon_ms: float = 0.001,
     harmony_tuning: str = "equal temperament",
     harmony_root_mode: str = "fixed root",
+    harmony_timing_mode: str = "setspeed",
     harmony_visual_mode: str = "raw",
     harmony_visual_step: float = 45.0,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
@@ -1791,7 +1842,7 @@ def build_adofai_level(
             max_tiles=max_tiles,
             max_tiles_per_note=max_tiles_per_note,
         )
-        floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used = emit_harmony_polyrhythm(
+        floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events = emit_harmony_polyrhythm(
             angle_data,
             actions,
             floor,
@@ -1799,6 +1850,7 @@ def build_adofai_level(
             play_bpm=play_bpm,
             max_tiles=max_tiles,
             current_bpm=current_bpm,
+            harmony_timing_mode=harmony_timing_mode,
             harmony_visual_mode=harmony_visual_mode,
             harmony_visual_step=harmony_visual_step,
         )
@@ -1815,6 +1867,7 @@ def build_adofai_level(
             "harmony_epsilon_ms": round(float(harmony_epsilon_ms), 6),
             "harmony_tuning": harmony_tuning,
             "harmony_root_mode": harmony_root_mode,
+            "harmony_timing_mode": harmony_timing_mode,
             "harmony_voice_count": len(voice_specs),
             "harmony_root_factor": round(float(voice_specs[0].get("root_factor", 1.0)), 9) if voice_specs else 1.0,
             "harmony_voice_ratios": ",".join(str(round(float(v.get("ratio", 1.0)), 9)) for v in voice_specs),
@@ -1822,6 +1875,7 @@ def build_adofai_level(
             "harmony_visual_mode": harmony_visual_mode,
             "harmony_visual_step": round(float(harmony_visual_step), 6),
             "harmony_angles_remapped": remapped_angles,
+            "harmony_setspeed_events": setspeed_events,
             "harmony_events_total": len(events),
             "simultaneous_adjusted": simultaneous_adjusted,
             "tiny_intervals": tiny_intervals,
@@ -2058,6 +2112,7 @@ def export_adofai(
     harmony_epsilon_ms: float = 0.001,
     harmony_tuning: str = "equal temperament",
     harmony_root_mode: str = "fixed root",
+    harmony_timing_mode: str = "setspeed",
     harmony_visual_mode: str = "raw",
     harmony_visual_step: float = 45.0,
     pretty: bool = False,
@@ -2085,6 +2140,7 @@ def export_adofai(
         harmony_epsilon_ms=harmony_epsilon_ms,
         harmony_tuning=harmony_tuning,
         harmony_root_mode=harmony_root_mode,
+        harmony_timing_mode=harmony_timing_mode,
         harmony_visual_mode=harmony_visual_mode,
         harmony_visual_step=harmony_visual_step,
     )

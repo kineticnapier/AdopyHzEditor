@@ -2276,6 +2276,18 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "minimax cents: 最大cents誤差を最小化"
         )
 
+        self.harmony_timing_mode = QtWidgets.QComboBox()
+        self.harmony_timing_mode.addItems([
+            "setspeed",
+            "angle-only",
+        ])
+        self.harmony_timing_mode.setCurrentText("angle-only")
+        self.harmony_timing_mode.setToolTip(
+            "Harmonyのtiming変換方法。\n"
+            "setspeed: pitch由来の角度 + SetSpeedでtiming補正。\n"
+            "angle-only: 1つのグローバルBPMで、次のzipまでの時間を角度に直接変換します。"
+        )
+
         self.harmony_visual_mode = QtWidgets.QComboBox()
         self.harmony_visual_mode.addItems([
             "raw",
@@ -2433,6 +2445,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.harmony_epsilon"), self.harmony_epsilon_ms),
             (tr("export.harmony_tuning"), self.harmony_tuning),
             (tr("export.harmony_root_mode"), self.harmony_root_mode),
+            (tr("export.harmony_timing_mode"), self.harmony_timing_mode),
             (tr("export.harmony_visual_mode"), self.harmony_visual_mode),
             (tr("export.harmony_visual_step"), self.harmony_visual_step),
         ])
@@ -2535,6 +2548,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "harmony_epsilon_ms": float(self.harmony_epsilon_ms.value()),
             "harmony_tuning": self.harmony_tuning.currentText(),
             "harmony_root_mode": self.harmony_root_mode.currentText(),
+            "harmony_timing_mode": self.harmony_timing_mode.currentText(),
             "harmony_visual_mode": self.harmony_visual_mode.currentText(),
             "harmony_visual_step": float(self.harmony_visual_step.value()),
             "rabbit_x_mode": self.x_mode.currentText(),

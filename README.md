@@ -1949,3 +1949,44 @@ blank_workspace_midi_max
 ```
 
 This is mainly useful for experimenting with Harmony Charting without loading audio.
+
+
+## Stable64 Harmony Angle-only timing
+
+Harmony / Polyrhythm export now supports two timing modes:
+
+```text
+setspeed
+angle-only
+```
+
+`setspeed` is the previous behavior:
+
+```text
+pitch-derived visual angle
++ SetSpeed per tile
+-> preserve merged impulse timing
+```
+
+`angle-only` uses one global BPM and encodes the time until the next merged impulse directly into the tile angle:
+
+```text
+angle = dt * BPM * 180 / 60
+```
+
+This can greatly reduce SetSpeed events.
+
+If Target Angle or Harmony visual remapping changes a tile's angle, the exporter still inserts SetSpeed for that tile and restores the global BPM after it, so timing stays correct.
+
+New export option:
+
+```text
+Harmony timing
+```
+
+Tile Preview stats now include:
+
+```text
+harmony_timing_mode
+harmony_setspeed_events
+```

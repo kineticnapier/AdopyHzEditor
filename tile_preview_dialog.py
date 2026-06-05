@@ -105,6 +105,8 @@ class TilePreviewDialog(QtWidgets.QDialog):
             "harmony_root_mode",
             "harmony_root_factor",
             "harmony_voice_count",
+            "harmony_timing_mode",
+            "harmony_setspeed_events",
             "harmony_visual_mode",
             "harmony_visual_step",
             "harmony_angles_remapped",
