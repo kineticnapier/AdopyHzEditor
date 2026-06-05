@@ -1857,3 +1857,66 @@ Curve step / Curve pitch step / Phase-continuous glide checkbox were removed.
 ```
 
 The underlying exporter still keeps compatibility parameters, but the UI now exposes only the standard phase-continuous workflow.
+
+
+## Stable62 Just Intonation and optimized root for Harmony Charting
+
+Harmony Charting now supports chord presets and tuning modes for cleaner 3-note patterns.
+
+New Harmony presets:
+
+```text
+major triad
+minor triad
+sus4
+dominant 7
+```
+
+New options:
+
+```text
+Harmony tuning
+Root optimization
+```
+
+Harmony tuning:
+
+```text
+equal temperament
+just intonation
+```
+
+Just Intonation uses simple ratios for chord presets:
+
+```text
+major triad: C:E:G = 4:5:6
+minor triad: C:Eb:G = 10:12:15
+sus4:        C:F:G = 6:8:9
+dominant 7: 4:5:6:7
+```
+
+Root optimization modes:
+
+```text
+fixed root
+least squares Hz
+least squares cents
+minimax cents
+```
+
+The optimized root modes slightly move the root frequency so the Just Intonation chord stays closer to the original equal-temperament chord overall.
+
+Example for a major triad:
+
+```text
+equal temperament:
+  1 : 1.259921 : 1.498307
+
+just intonation fixed root:
+  1 : 1.25 : 1.5
+
+just intonation minimax cents:
+  root is slightly shifted so the largest cents error is reduced
+```
+
+This is intended to make 3-note Harmony Charting cleaner and more periodic, at the cost of exact 12-TET frequency matching.

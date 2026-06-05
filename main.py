@@ -2045,6 +2045,10 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "major third +4",
             "minor third +3",
             "lower octave -12",
+            "major triad",
+            "minor triad",
+            "sus4",
+            "dominant 7",
             "custom",
         ])
         self.harmony_mode.setCurrentText("fifth +7")
@@ -2066,6 +2070,34 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_epsilon_ms.setValue(0.001)
         self.harmony_epsilon_ms.setSuffix(" ms")
         self.harmony_epsilon_ms.setToolTip("完全同時刻になったtileを微小時間ずらす量")
+
+        self.harmony_tuning = QtWidgets.QComboBox()
+        self.harmony_tuning.addItems([
+            "equal temperament",
+            "just intonation",
+        ])
+        self.harmony_tuning.setCurrentText("equal temperament")
+        self.harmony_tuning.setToolTip(
+            "3音以上のHarmonyで使うチューニング。\n"
+            "equal temperamentは元音程に正確。\n"
+            "just intonationは4:5:6などの単純比に寄せてパターンを安定させます。"
+        )
+
+        self.harmony_root_mode = QtWidgets.QComboBox()
+        self.harmony_root_mode.addItems([
+            "fixed root",
+            "least squares Hz",
+            "least squares cents",
+            "minimax cents",
+        ])
+        self.harmony_root_mode.setCurrentText("minimax cents")
+        self.harmony_root_mode.setToolTip(
+            "Just Intonation時のroot周波数調整。\n"
+            "fixed root: rootを元音程に固定\n"
+            "least squares Hz: Hz誤差の二乗和を最小化\n"
+            "least squares cents: cents誤差の二乗和を最小化\n"
+            "minimax cents: 最大cents誤差を最小化"
+        )
 
         self.harmony_visual_mode = QtWidgets.QComboBox()
         self.harmony_visual_mode.addItems([
@@ -2222,6 +2254,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.harmony_mode"), self.harmony_mode),
             (tr("export.harmony_custom_semitone"), self.harmony_custom_semitone),
             (tr("export.harmony_epsilon"), self.harmony_epsilon_ms),
+            (tr("export.harmony_tuning"), self.harmony_tuning),
+            (tr("export.harmony_root_mode"), self.harmony_root_mode),
             (tr("export.harmony_visual_mode"), self.harmony_visual_mode),
             (tr("export.harmony_visual_step"), self.harmony_visual_step),
         ])
@@ -2322,6 +2356,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "harmony_mode": self.harmony_mode.currentText(),
             "harmony_custom_semitone": float(self.harmony_custom_semitone.value()),
             "harmony_epsilon_ms": float(self.harmony_epsilon_ms.value()),
+            "harmony_tuning": self.harmony_tuning.currentText(),
+            "harmony_root_mode": self.harmony_root_mode.currentText(),
             "harmony_visual_mode": self.harmony_visual_mode.currentText(),
             "harmony_visual_step": float(self.harmony_visual_step.value()),
             "rabbit_x_mode": self.x_mode.currentText(),

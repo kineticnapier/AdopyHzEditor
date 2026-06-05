@@ -1277,46 +1277,186 @@ def normalize_notes_to_first(notes: list[Note]) -> tuple[list[Note], float]:
     return normalized, first_start
 
 
+def _harmony_key(value: str) -> str:
+    return (value or "").lower().replace(" ", "_").replace("-", "_").replace("°", "")
+
+
 def parse_harmony_intervals(mode: str = "off", custom_semitone: float = 7.0) -> list[float]:
     """
-    Global Harmony Charting interval list.
+    Backward-compatible helper.
 
-    The base voice is always 0 semitones. Returned values are extra voices only.
+    Returns extra equal-temperament semitone offsets only. Newer harmony code
+    uses build_harmony_voice_specs(), which can also return Just Intonation
+    ratios for triads.
     """
-    key = (mode or "off").lower().replace(" ", "_").replace("-", "_")
+    specs = build_harmony_voice_specs(
+        mode,
+        custom_semitone,
+        harmony_tuning="equal temperament",
+        harmony_root_mode="fixed root",
+    )
+    return [float(s["semitone"]) for s in specs[1:]]
+
+
+def build_harmony_voice_specs(
+    mode: str = "off",
+    custom_semitone: float = 7.0,
+    *,
+    harmony_tuning: str = "equal temperament",
+    harmony_root_mode: str = "fixed root",
+) -> list[dict[str, Any]]:
+    """
+    Build voice specs for Harmony Charting.
+
+    Equal temperament:
+        voice ratios are 2 ** (semitone / 12)
+
+    Just Intonation:
+        supported presets use simple ratios such as major triad 4:5:6.
+        The root frequency can be kept fixed, or slightly optimized to reduce
+        the total deviation from equal temperament.
+    """
+    key = _harmony_key(mode)
+    custom = float(custom_semitone)
+
+    # List of (label, equal temperament semitone, just-intonation ratio).
+    voices: list[tuple[str, float, float]]
+
     if key in ("off", "none", "root_only"):
-        return []
-    if key in ("octave_+12", "octave", "+12", "12"):
-        return [12.0]
-    if key in ("fifth_+7", "perfect_fifth", "fifth", "+7", "7"):
-        return [7.0]
-    if key in ("major_third_+4", "major_third", "maj3", "+4", "4"):
-        return [4.0]
-    if key in ("minor_third_+3", "minor_third", "min3", "+3", "3"):
-        return [3.0]
-    if key in ("lower_octave_-12", "lower_octave__12", "lower_octave", "-12", "_12"):
-        return [-12.0]
-    if key in ("custom", "custom_semitone"):
-        return [float(custom_semitone)]
-    return []
+        voices = [("root", 0.0, 1.0)]
+    elif key in ("octave_+12", "octave", "+12", "12"):
+        voices = [("root", 0.0, 1.0), ("octave", 12.0, 2.0)]
+    elif key in ("fifth_+7", "perfect_fifth", "fifth", "+7", "7"):
+        voices = [("root", 0.0, 1.0), ("fifth", 7.0, 3.0 / 2.0)]
+    elif key in ("major_third_+4", "major_third", "maj3", "+4", "4"):
+        voices = [("root", 0.0, 1.0), ("major third", 4.0, 5.0 / 4.0)]
+    elif key in ("minor_third_+3", "minor_third", "min3", "+3", "3"):
+        voices = [("root", 0.0, 1.0), ("minor third", 3.0, 6.0 / 5.0)]
+    elif key in ("lower_octave_-12", "lower_octave__12", "lower_octave", "-12", "_12"):
+        voices = [("root", 0.0, 1.0), ("lower octave", -12.0, 1.0 / 2.0)]
+    elif key in ("major_triad", "major_chord", "maj", "major"):
+        # 4:5:6
+        voices = [("root", 0.0, 1.0), ("major third", 4.0, 5.0 / 4.0), ("fifth", 7.0, 3.0 / 2.0)]
+    elif key in ("minor_triad", "minor_chord", "min", "minor"):
+        # 10:12:15
+        voices = [("root", 0.0, 1.0), ("minor third", 3.0, 6.0 / 5.0), ("fifth", 7.0, 3.0 / 2.0)]
+    elif key in ("sus4", "suspended_4", "suspended_fourth"):
+        # 6:8:9
+        voices = [("root", 0.0, 1.0), ("fourth", 5.0, 4.0 / 3.0), ("fifth", 7.0, 3.0 / 2.0)]
+    elif key in ("dominant_7", "dominant7", "dom7", "7th", "4_5_6_7"):
+        # 4:5:6:7. Useful visually, but dense.
+        voices = [("root", 0.0, 1.0), ("major third", 4.0, 5.0 / 4.0), ("fifth", 7.0, 3.0 / 2.0), ("harmonic seventh", 10.0, 7.0 / 4.0)]
+    elif key in ("custom", "custom_semitone"):
+        ratio = 2.0 ** (custom / 12.0)
+        voices = [("root", 0.0, 1.0), ("custom", custom, ratio)]
+    else:
+        voices = [("root", 0.0, 1.0)]
+
+    tuning_key = _harmony_key(harmony_tuning)
+    use_just = tuning_key in ("just_intonation", "just", "ji", "pure")
+
+    eq_ratios = [2.0 ** (semi / 12.0) for _label, semi, _ji_ratio in voices]
+    ji_ratios = [float(ji_ratio) for _label, _semi, ji_ratio in voices]
+
+    if use_just:
+        root_factor = optimized_just_root_factor(eq_ratios, ji_ratios, harmony_root_mode)
+        ratios = [root_factor * r for r in ji_ratios]
+        tuning = "just intonation"
+    else:
+        root_factor = 1.0
+        ratios = eq_ratios
+        tuning = "equal temperament"
+
+    out: list[dict[str, Any]] = []
+    for i, ((label, semi, ji_ratio), eq_ratio, ratio) in enumerate(zip(voices, eq_ratios, ratios)):
+        out.append({
+            "voice": i,
+            "label": label,
+            "semitone": float(semi),
+            "equal_ratio": float(eq_ratio),
+            "ji_ratio": float(ji_ratio),
+            "ratio": float(ratio),
+            "root_factor": float(root_factor),
+            "tuning": tuning,
+            "root_mode": harmony_root_mode,
+        })
+    return out
+
+
+def optimized_just_root_factor(eq_ratios: list[float], ji_ratios: list[float], mode: str = "fixed root") -> float:
+    """
+    Choose a scalar root factor for Just Intonation voices.
+
+    We approximate equal temperament targets:
+
+        target_i = root_freq * eq_ratio_i
+
+    using Just Intonation voices:
+
+        generated_i = root_freq * factor * ji_ratio_i
+
+    fixed root:
+        factor = 1
+
+    least squares Hz:
+        minimize sum((factor * ji_ratio_i - eq_ratio_i)^2)
+
+    least squares cents:
+        minimize sum(log(factor * ji_ratio_i / eq_ratio_i)^2)
+
+    minimax cents:
+        minimize the maximum absolute cents error.
+    """
+    if not eq_ratios or not ji_ratios or len(eq_ratios) != len(ji_ratios):
+        return 1.0
+
+    key = _harmony_key(mode)
+    if key in ("fixed_root", "fixed", "root", "none", "raw"):
+        return 1.0
+
+    safe_eq = [max(EPS, float(x)) for x in eq_ratios]
+    safe_ji = [max(EPS, float(x)) for x in ji_ratios]
+
+    if key in ("least_squares_hz", "ls_hz", "hz"):
+        numerator = sum(j * e for e, j in zip(safe_eq, safe_ji))
+        denominator = sum(j * j for j in safe_ji)
+        return max(EPS, numerator / max(EPS, denominator))
+
+    logs = [math.log(e / j) for e, j in zip(safe_eq, safe_ji)]
+
+    if key in ("least_squares_cents", "ls_cents", "cents"):
+        return max(EPS, math.exp(sum(logs) / len(logs)))
+
+    if key in ("minimax_cents", "minimax", "min_max_cents", "max_error"):
+        return max(EPS, math.exp((min(logs) + max(logs)) / 2.0))
+
+    return 1.0
+
+
+def ratio_to_semitones(ratio: float) -> float:
+    return 12.0 * math.log2(max(EPS, float(ratio)))
 
 
 def _note_impulse_events(
     note: Note,
     *,
     voice_index: int,
-    semitone_offset: float,
+    voice_spec: dict[str, Any],
     max_events: int,
     epsilon_sec: float,
 ) -> list[dict[str, Any]]:
     """
     Build one voice's impulse train for a note.
 
-    Each event is a tile hit candidate. The final fractional cycle is represented
-    by the last event before the note end, which matches the existing Hz export
-    idea of one extra visual tile for fractional keycount.
+    For equal temperament, voice_spec["ratio"] is 2^(semitone/12).
+    For Just Intonation, voice_spec["ratio"] may be a simple ratio like
+    5/4 or 3/2, optionally multiplied by an optimized root factor.
     """
-    n = note.normalized().with_pitch_offset(semitone_offset)
+    n0 = note.normalized()
+    ratio = max(EPS, float(voice_spec.get("ratio", 1.0)))
+    pitch_offset = ratio_to_semitones(ratio)
+    n = n0.with_pitch_offset(pitch_offset)
+
     if n.duration <= EPS:
         return []
 
@@ -1328,7 +1468,7 @@ def _note_impulse_events(
     if n.is_curve:
         intervals, _total_phase = curve_phase_dt_intervals(n)
         t = n.start + voice_index * epsilon_sec
-        for i, dt in enumerate(intervals):
+        for _i, dt in enumerate(intervals):
             if max_events > 0 and emitted >= max_events:
                 break
             dur_pos = max(0.0, min(1.0, (t - n.start) / max(EPS, n.duration)))
@@ -1338,8 +1478,12 @@ def _note_impulse_events(
                 "midi": n.midi_at(dur_pos),
                 "freq": freq,
                 "voice": voice_index,
-                "interval": float(semitone_offset),
-                "note": n,
+                "interval": float(voice_spec.get("semitone", pitch_offset)),
+                "ratio": ratio,
+                "voice_label": str(voice_spec.get("label", voice_index)),
+                "tuning": str(voice_spec.get("tuning", "")),
+                "root_factor": float(voice_spec.get("root_factor", 1.0)),
+                "note": n0,
             })
             emitted += 1
             t += max(EPS, float(dt))
@@ -1356,8 +1500,12 @@ def _note_impulse_events(
             "midi": n.midi,
             "freq": freq,
             "voice": voice_index,
-            "interval": float(semitone_offset),
-            "note": n,
+            "interval": float(voice_spec.get("semitone", pitch_offset)),
+            "ratio": ratio,
+            "voice_label": str(voice_spec.get("label", voice_index)),
+            "tuning": str(voice_spec.get("tuning", "")),
+            "root_factor": float(voice_spec.get("root_factor", 1.0)),
+            "note": n0,
         })
         emitted += 1
         local_t += period
@@ -1371,29 +1519,35 @@ def build_harmony_impulse_events(
     harmony_mode: str = "off",
     harmony_custom_semitone: float = 7.0,
     harmony_epsilon_ms: float = 0.001,
+    harmony_tuning: str = "equal temperament",
+    harmony_root_mode: str = "fixed root",
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
     """
     Merge root + harmony impulse trains into one timeline.
 
     This is intended for visual Harmony Charting: it weaves multiple pitch
     cycles into one ADOFAI tile path. It is not a multi-lane audio renderer.
     """
-    extra_intervals = parse_harmony_intervals(harmony_mode, harmony_custom_semitone)
-    intervals = [0.0] + extra_intervals
+    voice_specs = build_harmony_voice_specs(
+        harmony_mode,
+        harmony_custom_semitone,
+        harmony_tuning=harmony_tuning,
+        harmony_root_mode=harmony_root_mode,
+    )
     epsilon_sec = max(0.0, float(harmony_epsilon_ms)) / 1000.0
 
     events: list[dict[str, Any]] = []
     for n in notes:
         if n.duration <= EPS:
             continue
-        for voice_index, interval in enumerate(intervals):
+        for voice_index, voice_spec in enumerate(voice_specs):
             per_voice_limit = max_tiles_per_note
             voice_events = _note_impulse_events(
                 n,
                 voice_index=voice_index,
-                semitone_offset=interval,
+                voice_spec=voice_spec,
                 max_events=per_voice_limit,
                 epsilon_sec=epsilon_sec,
             )
@@ -1417,7 +1571,7 @@ def build_harmony_impulse_events(
     if max_tiles > 0 and len(events) > max_tiles:
         events = events[:max_tiles]
 
-    return events, adjusted
+    return events, adjusted, voice_specs
 
 
 def harmony_relative_angle(freq: float, play_bpm: float, *, min_angle: float = 2.0, max_angle: float = 358.0) -> float:
@@ -1584,6 +1738,8 @@ def build_adofai_level(
     harmony_mode: str = "off",
     harmony_custom_semitone: float = 7.0,
     harmony_epsilon_ms: float = 0.001,
+    harmony_tuning: str = "equal temperament",
+    harmony_root_mode: str = "fixed root",
     harmony_visual_mode: str = "raw",
     harmony_visual_step: float = 45.0,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
@@ -1625,11 +1781,13 @@ def build_adofai_level(
     if method_key in ("harmony", "harmony_polyrhythm"):
         level.setdefault("settings", {})["bpm"] = round(play_bpm, 6)
         current_bpm = play_bpm
-        events, simultaneous_adjusted = build_harmony_impulse_events(
+        events, simultaneous_adjusted, voice_specs = build_harmony_impulse_events(
             sorted_notes,
             harmony_mode=harmony_mode,
             harmony_custom_semitone=harmony_custom_semitone,
             harmony_epsilon_ms=harmony_epsilon_ms,
+            harmony_tuning=harmony_tuning,
+            harmony_root_mode=harmony_root_mode,
             max_tiles=max_tiles,
             max_tiles_per_note=max_tiles_per_note,
         )
@@ -1655,6 +1813,12 @@ def build_adofai_level(
             "harmony_mode": harmony_mode,
             "harmony_custom_semitone": round(float(harmony_custom_semitone), 6),
             "harmony_epsilon_ms": round(float(harmony_epsilon_ms), 6),
+            "harmony_tuning": harmony_tuning,
+            "harmony_root_mode": harmony_root_mode,
+            "harmony_voice_count": len(voice_specs),
+            "harmony_root_factor": round(float(voice_specs[0].get("root_factor", 1.0)), 9) if voice_specs else 1.0,
+            "harmony_voice_ratios": ",".join(str(round(float(v.get("ratio", 1.0)), 9)) for v in voice_specs),
+            "harmony_voice_labels": ",".join(str(v.get("label", "")) for v in voice_specs),
             "harmony_visual_mode": harmony_visual_mode,
             "harmony_visual_step": round(float(harmony_visual_step), 6),
             "harmony_angles_remapped": remapped_angles,
@@ -1892,6 +2056,8 @@ def export_adofai(
     harmony_mode: str = "off",
     harmony_custom_semitone: float = 7.0,
     harmony_epsilon_ms: float = 0.001,
+    harmony_tuning: str = "equal temperament",
+    harmony_root_mode: str = "fixed root",
     harmony_visual_mode: str = "raw",
     harmony_visual_step: float = 45.0,
     pretty: bool = False,
@@ -1917,6 +2083,8 @@ def export_adofai(
         harmony_mode=harmony_mode,
         harmony_custom_semitone=harmony_custom_semitone,
         harmony_epsilon_ms=harmony_epsilon_ms,
+        harmony_tuning=harmony_tuning,
+        harmony_root_mode=harmony_root_mode,
         harmony_visual_mode=harmony_visual_mode,
         harmony_visual_step=harmony_visual_step,
     )
