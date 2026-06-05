@@ -1857,3 +1857,136 @@ Curve step / Curve pitch step / Phase-continuous glide checkbox were removed.
 ```
 
 The underlying exporter still keeps compatibility parameters, but the UI now exposes only the standard phase-continuous workflow.
+
+
+## Stable62 Just Intonation and optimized root for Harmony Charting
+
+Harmony Charting now supports chord presets and tuning modes for cleaner 3-note patterns.
+
+New Harmony presets:
+
+```text
+major triad
+minor triad
+sus4
+dominant 7
+```
+
+New options:
+
+```text
+Harmony tuning
+Root optimization
+```
+
+Harmony tuning:
+
+```text
+equal temperament
+just intonation
+```
+
+Just Intonation uses simple ratios for chord presets:
+
+```text
+major triad: C:E:G = 4:5:6
+minor triad: C:Eb:G = 10:12:15
+sus4:        C:F:G = 6:8:9
+dominant 7: 4:5:6:7
+```
+
+Root optimization modes:
+
+```text
+fixed root
+least squares Hz
+least squares cents
+minimax cents
+```
+
+The optimized root modes slightly move the root frequency so the Just Intonation chord stays closer to the original equal-temperament chord overall.
+
+Example for a major triad:
+
+```text
+equal temperament:
+  1 : 1.259921 : 1.498307
+
+just intonation fixed root:
+  1 : 1.25 : 1.5
+
+just intonation minimax cents:
+  root is slightly shifted so the largest cents error is reduced
+```
+
+This is intended to make 3-note Harmony Charting cleaner and more periodic, at the cost of exact 12-TET frequency matching.
+
+
+## Stable63 Configurable blank workspace
+
+The no-audio editor workspace is now configurable from:
+
+```text
+File -> Set Blank Workspace...
+```
+
+Users can choose:
+
+```text
+Duration
+Lowest MIDI
+Highest MIDI
+```
+
+Existing notes are preserved, but playback audio is cleared because the editor is switched to a black no-audio workspace.
+
+The selected blank workspace size is saved in project settings:
+
+```text
+blank_workspace_duration
+blank_workspace_midi_min
+blank_workspace_midi_max
+```
+
+This is mainly useful for experimenting with Harmony Charting without loading audio.
+
+
+## Stable64 Harmony Angle-only timing
+
+Harmony / Polyrhythm export now supports two timing modes:
+
+```text
+setspeed
+angle-only
+```
+
+`setspeed` is the previous behavior:
+
+```text
+pitch-derived visual angle
++ SetSpeed per tile
+-> preserve merged impulse timing
+```
+
+`angle-only` uses one global BPM and encodes the time until the next merged impulse directly into the tile angle:
+
+```text
+angle = dt * BPM * 180 / 60
+```
+
+This can greatly reduce SetSpeed events.
+
+If Target Angle or Harmony visual remapping changes a tile's angle, the exporter still inserts SetSpeed for that tile and restores the global BPM after it, so timing stays correct.
+
+New export option:
+
+```text
+Harmony timing
+```
+
+Tile Preview stats now include:
+
+```text
+harmony_timing_mode
+harmony_setspeed_events
+```

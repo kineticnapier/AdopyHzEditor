@@ -127,6 +127,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.adofai_song_offset_auto = True
         self.adofai_song_offset_ms = 0.0
 
+        # Editable blank workspace defaults used when no audio is loaded.
+        self.blank_workspace_duration = 60.0
+        self.blank_workspace_midi_min = 12
+        self.blank_workspace_midi_max = 120
+
         self._make_menus()
         self._make_toolbar()
         self._make_bottom_controls()
@@ -250,6 +255,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         file_menu = menubar.addMenu(tr("menu.file"))
         file_menu.addAction(tr("menu.open_audio"), self.open_audio, QtGui.QKeySequence("Ctrl+O"))
+        file_menu.addAction(tr("menu.blank_workspace"), self.configure_blank_workspace)
         file_menu.addAction(tr("menu.save_project"), self.save_project_as, QtGui.QKeySequence("Ctrl+S"))
         file_menu.addAction(tr("menu.load_project"), self.load_project_from_file, QtGui.QKeySequence("Ctrl+L"))
         file_menu.addAction(tr("menu.load_project_notes_only"), self.load_project_notes_only)
@@ -1387,6 +1393,9 @@ class MainWindow(QtWidgets.QMainWindow):
             "adofai_copy_project_song": bool(getattr(self, "adofai_copy_project_song", True)),
             "adofai_song_offset_auto": bool(getattr(self, "adofai_song_offset_auto", True)),
             "adofai_song_offset_ms": float(getattr(self, "adofai_song_offset_ms", 0.0)),
+            "blank_workspace_duration": float(getattr(self, "blank_workspace_duration", 60.0)),
+            "blank_workspace_midi_min": int(getattr(self, "blank_workspace_midi_min", 12)),
+            "blank_workspace_midi_max": int(getattr(self, "blank_workspace_midi_max", 120)),
         }
 
     def apply_project_settings(self, settings: dict) -> None:
@@ -1480,6 +1489,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.adofai_song_offset_auto = bool(settings["adofai_song_offset_auto"])
             if "adofai_song_offset_ms" in settings:
                 self.adofai_song_offset_ms = float(settings["adofai_song_offset_ms"])
+
+            if "blank_workspace_duration" in settings:
+                self.blank_workspace_duration = max(1.0, float(settings["blank_workspace_duration"]))
+            if "blank_workspace_midi_min" in settings:
+                self.blank_workspace_midi_min = int(max(0, min(127, int(settings["blank_workspace_midi_min"]))))
+            if "blank_workspace_midi_max" in settings:
+                self.blank_workspace_midi_max = int(max(0, min(127, int(settings["blank_workspace_midi_max"]))))
+            if self.blank_workspace_midi_max <= self.blank_workspace_midi_min:
+                self.blank_workspace_midi_max = min(127, self.blank_workspace_midi_min + 12)
         finally:
             for widget in blockers:
                 widget.blockSignals(False)
@@ -1525,9 +1543,9 @@ class MainWindow(QtWidgets.QMainWindow):
         Pitch range defaults to C0-C10, but expands if notes are outside it.
         """
         src = notes if notes is not None else self.editor.notes
-        duration = 60.0
-        midi_min = 12
-        midi_max = 120
+        duration = float(getattr(self, "blank_workspace_duration", 60.0))
+        midi_min = int(getattr(self, "blank_workspace_midi_min", 12))
+        midi_max = int(getattr(self, "blank_workspace_midi_max", 120))
 
         if src:
             duration = max(12.0, max(float(n.end) for n in src) + 2.0)
@@ -1551,14 +1569,26 @@ class MainWindow(QtWidgets.QMainWindow):
         midi_max = int(max(midi_min + 12, min(127, midi_max)))
         return duration, midi_min, midi_max
 
-    def make_blank_spectrogram(self, notes: list[Note] | None = None) -> Spectrogram:
+    def make_blank_spectrogram(
+        self,
+        notes: list[Note] | None = None,
+        *,
+        duration: float | None = None,
+        midi_min: int | None = None,
+        midi_max: int | None = None,
+    ) -> Spectrogram:
         """
         Create a black placeholder spectrogram.
 
         This is used when a project is loaded without loading/analyzing audio,
         so stale spectrogram/audio from the previous project cannot remain.
         """
-        duration, midi_min, midi_max = self.estimate_blank_spectrogram_bounds(notes)
+        auto_duration, auto_midi_min, auto_midi_max = self.estimate_blank_spectrogram_bounds(notes)
+        duration = auto_duration if duration is None else max(1.0, float(duration))
+        midi_min = auto_midi_min if midi_min is None else int(max(0, min(127, int(midi_min))))
+        midi_max = auto_midi_max if midi_max is None else int(max(0, min(127, int(midi_max))))
+        if midi_max <= midi_min:
+            midi_max = min(127, midi_min + 12)
         hop = 0.05
         frames = max(2, int(duration / hop) + 1)
         rows = int(midi_max - midi_min + 1)
@@ -1589,6 +1619,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.player.audio = None
 
         spec = self.make_blank_spectrogram(notes)
+        self.blank_workspace_duration = float(spec.duration)
+        self.blank_workspace_midi_min = int(spec.midi_min)
+        self.blank_workspace_midi_max = int(spec.midi_max)
         self.editor.set_spectrogram(spec)
 
         self._ignore_scroll_signal = True
@@ -1608,6 +1641,150 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_timing_helpers()
         self.sync_notes_to_player()
         self.statusBar().showMessage(message)
+
+    def apply_blank_workspace(
+        self,
+        *,
+        duration: float,
+        midi_min: int,
+        midi_max: int,
+        message: str | None = None,
+        mark_dirty: bool = True,
+    ) -> None:
+        """
+        Replace the current spectrogram/audio with an editable black workspace.
+
+        Existing notes are preserved. This is mainly for experiments without
+        loading an audio file.
+        """
+        duration = max(1.0, float(duration))
+        midi_min = int(max(0, min(127, int(midi_min))))
+        midi_max = int(max(0, min(127, int(midi_max))))
+        if midi_max <= midi_min:
+            midi_max = min(127, midi_min + 12)
+
+        self.blank_workspace_duration = duration
+        self.blank_workspace_midi_min = midi_min
+        self.blank_workspace_midi_max = midi_max
+
+        self._analysis_request_id += 1
+        self._playback_request_id += 1
+        self.current_audio = None
+        self._current_analysis_signature = None
+
+        if hasattr(self.player, "clear_audio"):
+            self.player.clear_audio()
+        else:
+            self.player.stop()
+            self.player.audio = None
+
+        spec = self.make_blank_spectrogram(
+            self.editor.notes,
+            duration=duration,
+            midi_min=midi_min,
+            midi_max=midi_max,
+        )
+        self.editor.set_spectrogram(spec)
+
+        self._ignore_scroll_signal = True
+        try:
+            self.time_slider.setValue(0)
+            self.visible_sec.setValue(min(12.0, max(0.5, spec.duration)))
+            self.pitch_bottom.setRange(spec.midi_min, spec.midi_max)
+            self.pitch_bottom.setValue(spec.midi_min)
+            self.visible_notes.setRange(6, spec.midi_max - spec.midi_min + 1)
+            self.visible_notes.setValue(min(60, spec.midi_max - spec.midi_min + 1))
+        finally:
+            self._ignore_scroll_signal = False
+
+        self.editor.set_playhead(0.0)
+        self.update_time_labels()
+        self.update_view_from_controls()
+        self.apply_timing_helpers()
+        self.sync_notes_to_player()
+
+        if mark_dirty:
+            self.mark_dirty()
+        self.statusBar().showMessage(
+            message or tr(
+                "status.blank_workspace_set",
+                duration=round(duration, 3),
+                midi_min=midi_min,
+                midi_max=midi_max,
+            )
+        )
+
+    def configure_blank_workspace(self) -> None:
+        spec = getattr(self.editor, "spectrogram", None)
+        duration_default = float(
+            getattr(spec, "duration", None)
+            if spec is not None
+            else getattr(self, "blank_workspace_duration", 60.0)
+        )
+        midi_min_default = int(
+            getattr(spec, "midi_min", None)
+            if spec is not None
+            else getattr(self, "blank_workspace_midi_min", 12)
+        )
+        midi_max_default = int(
+            getattr(spec, "midi_max", None)
+            if spec is not None
+            else getattr(self, "blank_workspace_midi_max", 120)
+        )
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(tr("dialog.blank_workspace.title"))
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        info = QtWidgets.QLabel(tr("dialog.blank_workspace.info"))
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        form = QtWidgets.QFormLayout()
+        layout.addLayout(form)
+
+        duration_box = QtWidgets.QDoubleSpinBox()
+        duration_box.setRange(1.0, 36000.0)
+        duration_box.setDecimals(3)
+        duration_box.setSingleStep(10.0)
+        duration_box.setSuffix(" s")
+        duration_box.setValue(max(1.0, duration_default))
+
+        midi_min_box = QtWidgets.QSpinBox()
+        midi_min_box.setRange(0, 127)
+        midi_min_box.setValue(max(0, min(127, midi_min_default)))
+
+        midi_max_box = QtWidgets.QSpinBox()
+        midi_max_box.setRange(0, 127)
+        midi_max_box.setValue(max(0, min(127, midi_max_default)))
+
+        def keep_order() -> None:
+            if midi_max_box.value() <= midi_min_box.value():
+                midi_max_box.setValue(min(127, midi_min_box.value() + 12))
+
+        midi_min_box.valueChanged.connect(lambda *_: keep_order())
+        midi_max_box.valueChanged.connect(lambda *_: keep_order())
+
+        form.addRow(tr("dialog.blank_workspace.duration"), duration_box)
+        form.addRow(tr("dialog.blank_workspace.midi_min"), midi_min_box)
+        form.addRow(tr("dialog.blank_workspace.midi_max"), midi_max_box)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        self.apply_blank_workspace(
+            duration=float(duration_box.value()),
+            midi_min=int(midi_min_box.value()),
+            midi_max=int(midi_max_box.value()),
+        )
 
     def choose_project_audio_load_mode(self, audio: str | None) -> str:
         if not audio:
@@ -2045,6 +2222,10 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "major third +4",
             "minor third +3",
             "lower octave -12",
+            "major triad",
+            "minor triad",
+            "sus4",
+            "dominant 7",
             "custom",
         ])
         self.harmony_mode.setCurrentText("fifth +7")
@@ -2066,6 +2247,46 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_epsilon_ms.setValue(0.001)
         self.harmony_epsilon_ms.setSuffix(" ms")
         self.harmony_epsilon_ms.setToolTip("完全同時刻になったtileを微小時間ずらす量")
+
+        self.harmony_tuning = QtWidgets.QComboBox()
+        self.harmony_tuning.addItems([
+            "equal temperament",
+            "just intonation",
+        ])
+        self.harmony_tuning.setCurrentText("equal temperament")
+        self.harmony_tuning.setToolTip(
+            "3音以上のHarmonyで使うチューニング。\n"
+            "equal temperamentは元音程に正確。\n"
+            "just intonationは4:5:6などの単純比に寄せてパターンを安定させます。"
+        )
+
+        self.harmony_root_mode = QtWidgets.QComboBox()
+        self.harmony_root_mode.addItems([
+            "fixed root",
+            "least squares Hz",
+            "least squares cents",
+            "minimax cents",
+        ])
+        self.harmony_root_mode.setCurrentText("minimax cents")
+        self.harmony_root_mode.setToolTip(
+            "Just Intonation時のroot周波数調整。\n"
+            "fixed root: rootを元音程に固定\n"
+            "least squares Hz: Hz誤差の二乗和を最小化\n"
+            "least squares cents: cents誤差の二乗和を最小化\n"
+            "minimax cents: 最大cents誤差を最小化"
+        )
+
+        self.harmony_timing_mode = QtWidgets.QComboBox()
+        self.harmony_timing_mode.addItems([
+            "setspeed",
+            "angle-only",
+        ])
+        self.harmony_timing_mode.setCurrentText("angle-only")
+        self.harmony_timing_mode.setToolTip(
+            "Harmonyのtiming変換方法。\n"
+            "setspeed: pitch由来の角度 + SetSpeedでtiming補正。\n"
+            "angle-only: 1つのグローバルBPMで、次のzipまでの時間を角度に直接変換します。"
+        )
 
         self.harmony_visual_mode = QtWidgets.QComboBox()
         self.harmony_visual_mode.addItems([
@@ -2222,6 +2443,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.harmony_mode"), self.harmony_mode),
             (tr("export.harmony_custom_semitone"), self.harmony_custom_semitone),
             (tr("export.harmony_epsilon"), self.harmony_epsilon_ms),
+            (tr("export.harmony_tuning"), self.harmony_tuning),
+            (tr("export.harmony_root_mode"), self.harmony_root_mode),
+            (tr("export.harmony_timing_mode"), self.harmony_timing_mode),
             (tr("export.harmony_visual_mode"), self.harmony_visual_mode),
             (tr("export.harmony_visual_step"), self.harmony_visual_step),
         ])
@@ -2322,6 +2546,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "harmony_mode": self.harmony_mode.currentText(),
             "harmony_custom_semitone": float(self.harmony_custom_semitone.value()),
             "harmony_epsilon_ms": float(self.harmony_epsilon_ms.value()),
+            "harmony_tuning": self.harmony_tuning.currentText(),
+            "harmony_root_mode": self.harmony_root_mode.currentText(),
+            "harmony_timing_mode": self.harmony_timing_mode.currentText(),
             "harmony_visual_mode": self.harmony_visual_mode.currentText(),
             "harmony_visual_step": float(self.harmony_visual_step.value()),
             "rabbit_x_mode": self.x_mode.currentText(),
