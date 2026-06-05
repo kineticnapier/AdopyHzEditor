@@ -1920,3 +1920,32 @@ just intonation minimax cents:
 ```
 
 This is intended to make 3-note Harmony Charting cleaner and more periodic, at the cost of exact 12-TET frequency matching.
+
+
+## Stable63 Configurable blank workspace
+
+The no-audio editor workspace is now configurable from:
+
+```text
+File -> Set Blank Workspace...
+```
+
+Users can choose:
+
+```text
+Duration
+Lowest MIDI
+Highest MIDI
+```
+
+Existing notes are preserved, but playback audio is cleared because the editor is switched to a black no-audio workspace.
+
+The selected blank workspace size is saved in project settings:
+
+```text
+blank_workspace_duration
+blank_workspace_midi_min
+blank_workspace_midi_max
+```
+
+This is mainly useful for experimenting with Harmony Charting without loading audio.

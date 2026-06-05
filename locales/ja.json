@@ -140,7 +140,7 @@
   "help.window_title": "AdopyHzEditor ヘルプ",
   "help.header": "現在のエディタ用の簡易ヘルプです。F1でいつでも開けます。",
   "help.quick_start.title": "Quick Start",
-  "help.quick_start.body": "Quick Start\n\n1. 音声ファイルを開く:\n   File -> Open Audio\n\n2. CQTスペクトログラムの読み込みを待つ。\n   長い音声では時間がかかります。キャッシュがある場合は速く読み込まれます。\n\n3. ノートを作る:\n   - スペクトログラム上で左ドラッグ: 通常ノート\n   - Alt + 左ドラッグ: Curve/Glideノート\n\n4. 再生確認:\n   - Space: 再生/一時停止\n   - Ctrl + Space: 停止\n   - Song Vol: 元音声の音量\n   - Note Vol: ノートプレビュー音量\n\n5. 出力:\n   - File -> Export MIDI\n   - File -> Export ADOFAI Hz\n\n基本:\nAdopyHzEditorは完全自動採譜ツールではありません。\nスペクトログラムから音程を読み取り、手動でノートを置き、MIDIやADOFAI Hz Chartへ変換するための補助ツールです。\n\nヒント:\n画面が読みにくい場合は Analysis profile、Harmonics、Contrast、Gamma、Display mode を調整してください。\n\nPitch controls:\n- Preview Oct はプレビュー音だけを変えます。\n- Export Oct / Export Semi はMIDIとADOFAI出力だけを変えます。\n\nBlank workspace:\n音声を開く前でもノートを置けます。初期画面は黒いプレースホルダーの作業スペースです。",
+  "help.quick_start.body": "Quick Start\n\n1. 音声ファイルを開く:\n   File -> Open Audio\n\n2. CQTスペクトログラムの読み込みを待つ。\n   長い音声では時間がかかります。キャッシュがある場合は速く読み込まれます。\n\n3. ノートを作る:\n   - スペクトログラム上で左ドラッグ: 通常ノート\n   - Alt + 左ドラッグ: Curve/Glideノート\n\n4. 再生確認:\n   - Space: 再生/一時停止\n   - Ctrl + Space: 停止\n   - Song Vol: 元音声の音量\n   - Note Vol: ノートプレビュー音量\n\n5. 出力:\n   - File -> Export MIDI\n   - File -> Export ADOFAI Hz\n\n基本:\nAdopyHzEditorは完全自動採譜ツールではありません。\nスペクトログラムから音程を読み取り、手動でノートを置き、MIDIやADOFAI Hz Chartへ変換するための補助ツールです。\n\nヒント:\n画面が読みにくい場合は Analysis profile、Harmonics、Contrast、Gamma、Display mode を調整してください。\n\nPitch controls:\n- Preview Oct はプレビュー音だけを変えます。\n- Export Oct / Export Semi はMIDIとADOFAI出力だけを変えます。\n\nBlank workspace:\n音声を開く前でもノートを置けます。初期画面は黒いプレースホルダーの作業スペースです。\n\nBlank workspace size:\n音声を読み込んでいないときは、File -> Blank Workspaceを設定 から編集可能な長さとMIDI範囲を指定できます。音声無しでHarmony Chartingを実験するときに便利です。",
   "help.controls.title": "Controls / Shortcuts",
   "help.controls.body": "Controls / Shortcuts\n\nマウス:\n- 左ドラッグ:\n  ノート作成\n\n- Alt + 左ドラッグ:\n  Curve/Glideノート作成\n\n- ノートを左クリック:\n  ノート選択\n\n- 空白を左クリック:\n  再生位置を移動\n\n- Ctrl + 左クリック:\n  複数選択に追加/解除\n\n- Shift + 左クリック:\n  範囲選択\n\n- 右クリック:\n  近いノートを削除\n\n編集:\n- Delete:\n  選択ノート削除\n\n- Ctrl + A:\n  全選択\n\n- Esc:\n  選択解除\n\n- Ctrl + C / X / V:\n  コピー / 切り取り / 貼り付け\n\n- Ctrl + Z:\n  元に戻す\n\n- Ctrl + Y または Ctrl + Shift + Z:\n  やり直し\n\n再生:\n- Space:\n  再生/一時停止\n\n- Ctrl + Space:\n  停止\n\n- Left / Right:\n  1秒移動\n\n- Shift + Left / Right:\n  5秒移動\n\n表示:\n- 1:\n  スペクトログラム重視\n\n- 2:\n  ノート重視\n\n- 3:\n  両方表示\n\n- Tab:\n  表示モード切り替え\n\n音程表示の移動:\n- Up / Down:\n  1半音移動\n\n- W / S または Ctrl + Up / Down:\n  1オクターブ移動\n\n選択ノート移動:\n- Ctrl + Shift + Left / Right:\n  選択ノートを左右へ移動\n\n- Ctrl + Shift + Up / Down:\n  選択ノートを半音単位で移動\n\nTarget Angle:\n- Ctrl + Alt + A:\n  選択ノートにTarget Angleを適用",
   "help.adofai_export.title": "ADOFAI Export Guide",
@@ -195,5 +195,12 @@
   "export.tab_song": "Song",
   "export.tab_preview_help": "Preview / Help",
   "export.harmony_tuning": "Harmony tuning",
-  "export.harmony_root_mode": "Root optimization"
+  "export.harmony_root_mode": "Root optimization",
+  "menu.blank_workspace": "Blank Workspaceを設定...",
+  "dialog.blank_workspace.title": "Blank Workspaceを設定",
+  "dialog.blank_workspace.info": "音声未読込時に使う黒い編集領域の長さとMIDI範囲を変更します。既存ノートは保持されますが、再生用音声は解除されます。",
+  "dialog.blank_workspace.duration": "長さ",
+  "dialog.blank_workspace.midi_min": "最低MIDI",
+  "dialog.blank_workspace.midi_max": "最高MIDI",
+  "status.blank_workspace_set": "Blank workspace: {duration}s / MIDI {midi_min}-{midi_max}"
 }
