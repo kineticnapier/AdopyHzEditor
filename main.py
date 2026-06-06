@@ -7,6 +7,8 @@ import io
 import numpy as np
 import webbrowser
 import shutil
+import math
+from fractions import Fraction
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -191,6 +193,7 @@ class MainWindow(QtWidgets.QMainWindow):
             getattr(self, "volume", None),
             getattr(self, "playback_speed", None),
             getattr(self, "analysis_profile", None),
+            getattr(self, "cqt_resolution", None),
         ]
 
         for w in widgets:
@@ -270,6 +273,8 @@ class MainWindow(QtWidgets.QMainWindow):
         edit_menu.addAction(tr("menu.copy"), self.copy_selected_notes)
         edit_menu.addAction(tr("menu.cut"), self.cut_selected_notes)
         edit_menu.addAction(tr("menu.paste"), self.paste_notes)
+        edit_menu.addSeparator()
+        edit_menu.addAction(tr("menu.insert_harmonic_diagram"), self.insert_harmonic_diagram)
         edit_menu.addSeparator()
         edit_menu.addAction(tr("menu.select_all"), self.editor.select_all_notes, QtGui.QKeySequence("Ctrl+A"))
         edit_menu.addAction(tr("menu.clear_selection"), self.editor.clear_selection, QtGui.QKeySequence("Esc"))
@@ -622,6 +627,23 @@ class MainWindow(QtWidgets.QMainWindow):
             "Full C0-C10: widest range, slower"
         )
 
+        self.cqt_resolution = QtWidgets.QComboBox()
+        self.cqt_resolution.addItems([
+            "profile default",
+            "100 cents",
+            "50 cents",
+            "25 cents",
+            "12.5 cents",
+            "41 EDO",
+            "53 EDO",
+        ])
+        self.cqt_resolution.setCurrentText("profile default")
+        self.cqt_resolution.setToolTip(
+            "Microtonal CQT display resolution.\n"
+            "profile default keeps the old behavior.\n"
+            "50/25/12.5 cents keeps sub-semitone CQT bins visible instead of folding them into semitone rows."
+        )
+
         view_form.addRow("Contrast", self.contrast)
         view_form.addRow("Gamma", self.gamma)
         view_form.addRow("Enhance", self.enhance)
@@ -629,6 +651,7 @@ class MainWindow(QtWidgets.QMainWindow):
         view_form.addRow("Harmonics", self.harmonics)
         view_form.addRow("Colormap", self.cmap)
         view_form.addRow("Analysis", self.analysis_profile)
+        view_form.addRow("CQT Resolution", self.cqt_resolution)
         self.settings_toolbox.addItem(view_page, "View / Analysis")
 
         # Curve / Angle page
@@ -933,7 +956,30 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def analysis_options(self) -> dict:
         profile = self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal"
-        return analysis_profile_options(profile)
+        opts = analysis_profile_options(profile)
+
+        resolution = self.cqt_resolution.currentText() if hasattr(self, "cqt_resolution") else "profile default"
+        res_key = (resolution or "profile default").lower().replace(" ", "_")
+        microtonal_map = {
+            "100_cents": 12,
+            "50_cents": 24,
+            "25_cents": 48,
+            "12.5_cents": 96,
+            "12_5_cents": 96,
+            "41_edo": 41,
+            "53_edo": 53,
+        }
+        if res_key in microtonal_map:
+            bpo = int(microtonal_map[res_key])
+            opts["cqt_bins_per_octave"] = bpo
+            opts["bins_per_semitone"] = max(1, int(round(bpo / 12.0)))
+            opts["fold_to_semitone"] = bpo == 12
+            # Keep high-resolution / non-12 CQT stable; hybrid_cqt can be rough
+            # with many bins per octave in some librosa versions.
+            if bpo != 12:
+                opts["engine"] = "cqt"
+
+        return opts
 
     def analysis_signature(self, path: str, opts: dict | None = None) -> str:
         """Signature for the currently displayed spectrogram analysis."""
@@ -1385,6 +1431,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "song_volume": int(self.volume.value()) if hasattr(self, "volume") else 85,
             "playback_speed": float(self.playback_speed.value()) if hasattr(self, "playback_speed") else 1.0,
             "analysis_profile": self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal",
+            "cqt_resolution": self.cqt_resolution.currentText() if hasattr(self, "cqt_resolution") else "profile default",
             "display_mode": self.display_mode.currentText() if hasattr(self, "display_mode") else "wavetone",
             "cmap": self.cmap.currentText() if hasattr(self, "cmap") else "wavetone",
             "curve_shape": self.curve_shape.currentText() if hasattr(self, "curve_shape") else "ease",
@@ -1406,7 +1453,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for name in (
             "grid_bpm", "grid_offset_ms", "grid_enabled", "metro_enabled", "metro_vol",
             "snap_enabled", "snap_div", "note_octave", "export_octave", "export_semitone", "note_vol", "note_sound_enabled",
-            "volume", "playback_speed", "analysis_profile", "display_mode", "cmap", "curve_shape", "curve_interpolation",
+            "volume", "playback_speed", "analysis_profile", "cqt_resolution", "display_mode", "cmap", "curve_shape", "curve_interpolation",
         ):
             widget = getattr(self, name, None)
             if widget is not None and hasattr(widget, "blockSignals"):
@@ -1464,6 +1511,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 idx = self.analysis_profile.findText(str(settings["analysis_profile"]))
                 if idx >= 0:
                     self.analysis_profile.setCurrentIndex(idx)
+            if hasattr(self, "cqt_resolution") and "cqt_resolution" in settings:
+                idx = self.cqt_resolution.findText(str(settings["cqt_resolution"]))
+                if idx >= 0:
+                    self.cqt_resolution.setCurrentIndex(idx)
             if hasattr(self, "display_mode") and "display_mode" in settings:
                 idx = self.display_mode.findText(str(settings["display_mode"]))
                 if idx >= 0:
@@ -1898,6 +1949,155 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.load_failed"), str(e))
+
+    def parse_ratio_text(self, text: str) -> float:
+        s = str(text).strip()
+        if not s:
+            raise ValueError("empty ratio")
+        # Accept 7/3, 1.25, 5:4, and simple whitespace.
+        if ":" in s:
+            a, b = s.split(":", 1)
+            return float(Fraction(a.strip()) / Fraction(b.strip()))
+        return float(Fraction(s))
+
+    def caftaphata_pitch_number(self, ratio: float, *, edo: int = 41, offset: int = 2) -> int:
+        edo = max(1, int(edo))
+        n = int(offset) + int(round(edo * math.log2(max(1e-12, float(ratio)))))
+        return n % edo
+
+    def insert_harmonic_diagram(self) -> None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(tr("dialog.harmonic_diagram.title"))
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        info = QtWidgets.QLabel(tr("dialog.harmonic_diagram.info"))
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        form = QtWidgets.QFormLayout()
+        layout.addLayout(form)
+
+        root_midi = QtWidgets.QDoubleSpinBox()
+        root_midi.setRange(-128.0, 256.0)
+        root_midi.setDecimals(6)
+        root_midi.setSingleStep(0.5)
+        root_midi.setValue(60.0)
+
+        try:
+            if self.editor.selected_indices:
+                idx = next(iter(self.editor.selected_indices))
+                if 0 <= idx < len(self.editor.notes):
+                    root_midi.setValue(float(self.editor.notes[idx].midi))
+        except Exception:
+            pass
+
+        root_shift = QtWidgets.QLineEdit("1")
+        root_shift.setToolTip("例: 1, 1/3, 7/3, 5/3")
+
+        harmonics = QtWidgets.QLineEdit("1/3,1,3,7,9")
+        harmonics.setToolTip("例: 1/3,1,3,7,9 または 1,3,7,9,21")
+
+        start_box = QtWidgets.QDoubleSpinBox()
+        start_box.setRange(0.0, 36000.0)
+        start_box.setDecimals(6)
+        start_box.setSingleStep(0.25)
+        start_box.setSuffix(" s")
+        start_box.setValue(float(self.editor.playhead_time()) if hasattr(self.editor, "playhead_time") else 0.0)
+
+        duration_box = QtWidgets.QDoubleSpinBox()
+        duration_box.setRange(0.001, 36000.0)
+        duration_box.setDecimals(6)
+        duration_box.setSingleStep(0.25)
+        duration_box.setSuffix(" s")
+        duration_box.setValue(1.0)
+
+        edo_box = QtWidgets.QSpinBox()
+        edo_box.setRange(1, 999)
+        edo_box.setValue(41)
+
+        offset_box = QtWidgets.QSpinBox()
+        offset_box.setRange(-999, 999)
+        offset_box.setValue(2)
+
+        preview = QtWidgets.QLabel()
+        preview.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        preview.setWordWrap(True)
+
+        form.addRow(tr("dialog.harmonic_diagram.root_midi"), root_midi)
+        form.addRow(tr("dialog.harmonic_diagram.root_shift"), root_shift)
+        form.addRow(tr("dialog.harmonic_diagram.harmonics"), harmonics)
+        form.addRow(tr("dialog.harmonic_diagram.start"), start_box)
+        form.addRow(tr("dialog.harmonic_diagram.duration"), duration_box)
+        form.addRow(tr("dialog.harmonic_diagram.edo"), edo_box)
+        form.addRow(tr("dialog.harmonic_diagram.offset"), offset_box)
+        form.addRow(tr("dialog.harmonic_diagram.preview"), preview)
+
+        def update_preview() -> None:
+            try:
+                shift = self.parse_ratio_text(root_shift.text())
+                vals = [self.parse_ratio_text(x) for x in harmonics.text().replace(";", ",").split(",") if x.strip()]
+                if not vals:
+                    preview.setText("No harmonics")
+                    return
+                lines = []
+                for v in vals:
+                    ratio = shift * v
+                    midi = float(root_midi.value()) + 12.0 * math.log2(max(1e-12, ratio))
+                    pc = self.caftaphata_pitch_number(ratio, edo=edo_box.value(), offset=offset_box.value())
+                    lines.append(f"{v:g}x -> ratio {ratio:g}, MIDI {midi:.6f}, #{pc}")
+                preview.setText("\n".join(lines))
+            except Exception as e:
+                preview.setText(f"Invalid ratio: {e}")
+
+        for w in (root_midi, start_box, duration_box, edo_box, offset_box):
+            w.valueChanged.connect(lambda *_: update_preview())
+        root_shift.textChanged.connect(lambda *_: update_preview())
+        harmonics.textChanged.connect(lambda *_: update_preview())
+        update_preview()
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            shift = self.parse_ratio_text(root_shift.text())
+            vals = [self.parse_ratio_text(x) for x in harmonics.text().replace(";", ",").split(",") if x.strip()]
+            if not vals:
+                raise ValueError("harmonics list is empty")
+
+            start = float(start_box.value())
+            end = start + float(duration_box.value())
+            root = float(root_midi.value())
+
+            self.editor.push_undo()
+            inserted = []
+            for v in vals:
+                ratio = shift * v
+                midi = root + 12.0 * math.log2(max(1e-12, ratio))
+                self.editor.notes.append(Note(start, end, midi).normalized())
+                inserted.append(self.caftaphata_pitch_number(ratio, edo=edo_box.value(), offset=offset_box.value()))
+
+            self.editor.selected_indices = set(range(len(self.editor.notes) - len(vals), len(self.editor.notes)))
+            self.editor.selected_index = min(self.editor.selected_indices) if self.editor.selected_indices else None
+            self.editor.redraw_notes()
+            self.editor.notes_changed.emit()
+            self.mark_dirty()
+            self.statusBar().showMessage(
+                tr(
+                    "status.harmonic_diagram_inserted",
+                    count=len(vals),
+                    numbers=", ".join(str(x) for x in inserted),
+                )
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, tr("dialog.harmonic_diagram.title"), str(e))
 
     def check_for_updates(self, *, silent: bool = False) -> None:
         """
