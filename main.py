@@ -715,8 +715,6 @@ class MainWindow(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, activated=self.copy_selected_notes)
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+X"), self, activated=self.cut_selected_notes)
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, activated=self.paste_notes)
-        QtGui.QShortcut(QtGui.QKeySequence("Delete"), self, activated=self.editor.delete_selected)
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+A"), self, activated=self.editor.select_all_notes)
         QtGui.QShortcut(QtGui.QKeySequence("Esc"), self, activated=self.editor.clear_selection)
         QtGui.QShortcut(QtGui.QKeySequence("Tab"), self, activated=self.editor.cycle_mode)
         QtGui.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.toggle_playback)
@@ -770,6 +768,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def sync_notes_to_player(self) -> None:
         if hasattr(self.player, "set_preview_notes"):
             self.player.set_preview_notes(self.editor.notes)
+
+        if hasattr(self.player, "set_virtual_duration"):
+            spec = self.editor.spectrogram
+            duration = float(spec.duration) if spec is not None else 0.0
+            if self.editor.notes:
+                duration = max(duration, max(float(n.end) for n in self.editor.notes))
+            self.player.set_virtual_duration(duration)
+
         self.apply_note_sound_settings()
 
     def nudge_selected_notes(self, time_steps: int, pitch_steps: int) -> None:
@@ -1366,20 +1372,30 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.player.available:
             self.statusBar().showMessage(tr("status.playback_unavailable", error=self.player.error))
             return
-        if getattr(self.player, "audio", None) is None:
-            if self.current_audio:
-                self.statusBar().showMessage(tr("status.playback_loading"))
-                QtCore.QTimer.singleShot(1, lambda p=self.current_audio: self.load_audio_for_playback(p))
-            else:
-                self.statusBar().showMessage(tr("status.no_audio_loaded"))
-            return
 
         if not self.player.playing:
             self.sync_notes_to_player()
             self.apply_playback_speed()
+
+            if getattr(self.player, "audio", None) is None and self.current_audio:
+                self.statusBar().showMessage(tr("status.playback_loading"))
+                QtCore.QTimer.singleShot(1, lambda p=self.current_audio: self.load_audio_for_playback(p))
+                return
+
+            if getattr(self.player, "audio", None) is None:
+                has_notes = bool(getattr(self.editor, "notes", []))
+                metro_on = bool(self.metro_enabled.isChecked()) if hasattr(self, "metro_enabled") else False
+                if not has_notes and not metro_on:
+                    self.statusBar().showMessage(tr("status.no_audio_or_notes"))
+                    return
+
             self.player.seek(self.editor.playhead_time())
+
         self.player.toggle()
-        self.statusBar().showMessage(tr("status.playing") if self.player.playing else tr("status.paused", time=self.editor.playhead_time()))
+        if self.player.playing and getattr(self.player, "audio", None) is None:
+            self.statusBar().showMessage(tr("status.playing_notes_only"))
+        else:
+            self.statusBar().showMessage(tr("status.playing") if self.player.playing else tr("status.paused", time=self.editor.playhead_time()))
 
     def stop_playback(self) -> None:
         self.player.stop()
@@ -1960,6 +1976,25 @@ class MainWindow(QtWidgets.QMainWindow):
             return float(Fraction(a.strip()) / Fraction(b.strip()))
         return float(Fraction(s))
 
+    def octave_fold_ratio(self, ratio: float, *, low: float = 1.0, high: float = 2.0) -> float:
+        """
+        Fold a frequency ratio into one octave.
+
+        Caftaphata-style just-intonation diagrams identify the 2F / octave
+        dimension, so ratios that differ by powers of 2 should be placed in
+        the same octave band for editor input.
+        """
+        r = float(ratio)
+        if r <= 0:
+            raise ValueError("ratio must be positive")
+        low = max(1e-12, float(low))
+        high = max(low * 1.000001, float(high))
+        while r < low:
+            r *= 2.0
+        while r >= high:
+            r /= 2.0
+        return r
+
     def caftaphata_pitch_number(self, ratio: float, *, edo: int = 41, offset: int = 2) -> int:
         edo = max(1, int(edo))
         n = int(offset) + int(round(edo * math.log2(max(1e-12, float(ratio)))))
@@ -1968,6 +2003,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def insert_harmonic_diagram(self) -> None:
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle(tr("dialog.harmonic_diagram.title"))
+        dialog.setMinimumWidth(520)
+        dialog.resize(560, 720)
         layout = QtWidgets.QVBoxLayout(dialog)
 
         info = QtWidgets.QLabel(tr("dialog.harmonic_diagram.info"))
@@ -1977,17 +2014,18 @@ class MainWindow(QtWidgets.QMainWindow):
         form = QtWidgets.QFormLayout()
         layout.addLayout(form)
 
-        root_midi = QtWidgets.QDoubleSpinBox()
-        root_midi.setRange(-128.0, 256.0)
-        root_midi.setDecimals(6)
-        root_midi.setSingleStep(0.5)
-        root_midi.setValue(60.0)
+        root_hz = QtWidgets.QDoubleSpinBox()
+        root_hz.setRange(0.001, 100000.0)
+        root_hz.setDecimals(6)
+        root_hz.setSingleStep(1.0)
+        root_hz.setSuffix(" Hz")
+        root_hz.setValue(261.625565)
 
         try:
             if self.editor.selected_indices:
                 idx = next(iter(self.editor.selected_indices))
                 if 0 <= idx < len(self.editor.notes):
-                    root_midi.setValue(float(self.editor.notes[idx].midi))
+                    root_hz.setValue(440.0 * (2.0 ** ((float(self.editor.notes[idx].midi) - 69.0) / 12.0)))
         except Exception:
             pass
 
@@ -1996,6 +2034,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
         harmonics = QtWidgets.QLineEdit("1/3,1,3,7,9")
         harmonics.setToolTip("例: 1/3,1,3,7,9 または 1,3,7,9,21")
+
+        octave_handling = QtWidgets.QComboBox()
+        octave_handling.addItems([
+            "fold 1x-2x",
+            "raw frequency",
+        ])
+        octave_handling.setCurrentText("fold 1x-2x")
+        octave_handling.setToolTip(
+            "fold 1x-2x: 2F/オクターブ方向を同一視し、比率を1〜2倍へ折り返して配置します。\n"
+            "raw frequency: 倍音をそのまま周波数に掛けます。高音に飛びやすいです。"
+        )
 
         start_box = QtWidgets.QDoubleSpinBox()
         start_box.setRange(0.0, 36000.0)
@@ -2011,6 +2060,22 @@ class MainWindow(QtWidgets.QMainWindow):
         duration_box.setSuffix(" s")
         duration_box.setValue(1.0)
 
+        time_unit = QtWidgets.QComboBox()
+        time_unit.addItems([
+            "seconds",
+            "beats",
+        ])
+        time_unit.setCurrentText("seconds")
+        time_unit.setToolTip("Start/Durationを秒で入力するか、拍で入力するかを切り替えます。")
+
+        bpm_box = QtWidgets.QDoubleSpinBox()
+        bpm_box.setRange(1.0, 2000.0)
+        bpm_box.setDecimals(6)
+        bpm_box.setSingleStep(1.0)
+        bpm_box.setSuffix(" BPM")
+        bpm_box.setValue(float(self.grid_bpm.value()) if hasattr(self, "grid_bpm") else 120.0)
+        bpm_box.setToolTip("Time unit = beats のときに、拍数を秒へ変換するBPMです。")
+
         edo_box = QtWidgets.QSpinBox()
         edo_box.setRange(1, 999)
         edo_box.setValue(41)
@@ -2023,14 +2088,45 @@ class MainWindow(QtWidgets.QMainWindow):
         preview.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
         preview.setWordWrap(True)
 
-        form.addRow(tr("dialog.harmonic_diagram.root_midi"), root_midi)
+        form.addRow(tr("dialog.harmonic_diagram.root_hz"), root_hz)
         form.addRow(tr("dialog.harmonic_diagram.root_shift"), root_shift)
         form.addRow(tr("dialog.harmonic_diagram.harmonics"), harmonics)
+        form.addRow(tr("dialog.harmonic_diagram.octave_handling"), octave_handling)
+        form.addRow(tr("dialog.harmonic_diagram.time_unit"), time_unit)
+        form.addRow(tr("dialog.harmonic_diagram.bpm"), bpm_box)
         form.addRow(tr("dialog.harmonic_diagram.start"), start_box)
         form.addRow(tr("dialog.harmonic_diagram.duration"), duration_box)
         form.addRow(tr("dialog.harmonic_diagram.edo"), edo_box)
         form.addRow(tr("dialog.harmonic_diagram.offset"), offset_box)
         form.addRow(tr("dialog.harmonic_diagram.preview"), preview)
+
+        def harmonic_time_values() -> tuple[float, float]:
+            start_value = float(start_box.value())
+            duration_value = float(duration_box.value())
+            if time_unit.currentText() == "beats":
+                beat_sec = 60.0 / max(1e-9, float(bpm_box.value()))
+                return start_value * beat_sec, duration_value * beat_sec
+            return start_value, duration_value
+
+        def diagram_ratio(raw_ratio: float) -> float:
+            if octave_handling.currentText() == "fold 1x-2x":
+                return self.octave_fold_ratio(raw_ratio)
+            return raw_ratio
+
+        def update_time_unit_ui() -> None:
+            beat_mode = time_unit.currentText() == "beats"
+            bpm_box.setEnabled(beat_mode)
+            if beat_mode:
+                start_box.setSuffix(" beat")
+                duration_box.setSuffix(" beat")
+                start_box.setSingleStep(1.0)
+                duration_box.setSingleStep(1.0)
+            else:
+                start_box.setSuffix(" s")
+                duration_box.setSuffix(" s")
+                start_box.setSingleStep(0.25)
+                duration_box.setSingleStep(0.25)
+            update_preview()
 
         def update_preview() -> None:
             try:
@@ -2039,21 +2135,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 if not vals:
                     preview.setText("No harmonics")
                     return
-                lines = []
+                start_sec, duration_sec = harmonic_time_values()
+                if time_unit.currentText() == "beats":
+                    lines = [f"time: {start_box.value():g} beat + {duration_box.value():g} beat @ {bpm_box.value():g} BPM = {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
+                else:
+                    lines = [f"time: {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
                 for v in vals:
-                    ratio = shift * v
-                    midi = float(root_midi.value()) + 12.0 * math.log2(max(1e-12, ratio))
-                    pc = self.caftaphata_pitch_number(ratio, edo=edo_box.value(), offset=offset_box.value())
-                    lines.append(f"{v:g}x -> ratio {ratio:g}, MIDI {midi:.6f}, #{pc}")
+                    raw_ratio = shift * v
+                    ratio = diagram_ratio(raw_ratio)
+                    hz = float(root_hz.value()) * ratio
+                    midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
+                    pc = self.caftaphata_pitch_number(raw_ratio, edo=edo_box.value(), offset=offset_box.value())
+                    fold_note = "" if abs(raw_ratio - ratio) <= 1e-10 else f" folded {ratio:g}"
+                    lines.append(f"{v:g}x -> raw {raw_ratio:g}{fold_note}, {hz:.6f} Hz, MIDI {midi:.6f}, #{pc}")
                 preview.setText("\n".join(lines))
             except Exception as e:
                 preview.setText(f"Invalid ratio: {e}")
 
-        for w in (root_midi, start_box, duration_box, edo_box, offset_box):
+        for w in (root_hz, start_box, duration_box, bpm_box, edo_box, offset_box):
             w.valueChanged.connect(lambda *_: update_preview())
+        time_unit.currentTextChanged.connect(lambda *_: update_time_unit_ui())
+        octave_handling.currentTextChanged.connect(lambda *_: update_preview())
         root_shift.textChanged.connect(lambda *_: update_preview())
         harmonics.textChanged.connect(lambda *_: update_preview())
-        update_preview()
+        update_time_unit_ui()
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -2072,17 +2177,19 @@ class MainWindow(QtWidgets.QMainWindow):
             if not vals:
                 raise ValueError("harmonics list is empty")
 
-            start = float(start_box.value())
-            end = start + float(duration_box.value())
-            root = float(root_midi.value())
+            start, duration = harmonic_time_values()
+            end = start + duration
+            root_hz_value = float(root_hz.value())
 
             self.editor.push_undo()
             inserted = []
             for v in vals:
-                ratio = shift * v
-                midi = root + 12.0 * math.log2(max(1e-12, ratio))
+                raw_ratio = shift * v
+                ratio = diagram_ratio(raw_ratio)
+                hz = root_hz_value * ratio
+                midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
                 self.editor.notes.append(Note(start, end, midi).normalized())
-                inserted.append(self.caftaphata_pitch_number(ratio, edo=edo_box.value(), offset=offset_box.value()))
+                inserted.append(self.caftaphata_pitch_number(raw_ratio, edo=edo_box.value(), offset=offset_box.value()))
 
             self.editor.selected_indices = set(range(len(self.editor.notes) - len(vals), len(self.editor.notes)))
             self.editor.selected_index = min(self.editor.selected_indices) if self.editor.selected_indices else None

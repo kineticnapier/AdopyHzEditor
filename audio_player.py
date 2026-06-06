@@ -44,6 +44,7 @@ class AudioPlayer:
         self.volume = 0.85
         self.playback_speed = 1.0
         self._pos_float = 0.0
+        self.virtual_duration_samples = 0  # Used when no main audio is loaded.
 
         # Metronome
         self.metronome_enabled = False
@@ -86,6 +87,7 @@ class AudioPlayer:
             self.sr = int(sr)
             self.pos = 0
             self._pos_float = 0.0
+            self.virtual_duration_samples = len(self.audio)
             # srが確定したので、ノートサンプル位置は再設定が必要。
             # main側の sync_notes_to_player が後で呼ばれる。
 
@@ -100,13 +102,17 @@ class AudioPlayer:
             self.audio = None
             self.pos = 0
             self._pos_float = 0.0
-            self.preview_notes = []
+            # Keep preview_notes; MainWindow.sync_notes_to_player() will refresh
+            # them after project/workspace changes. This allows note-only
+            # playback in a blank workspace.
 
     @property
     def duration(self) -> float:
-        if self.audio is None or self.sr <= 0:
+        if self.sr <= 0:
             return 0.0
-        return float(len(self.audio) / self.sr)
+        if self.audio is not None:
+            return float(len(self.audio) / self.sr)
+        return float(max(0, int(self.virtual_duration_samples)) / self.sr)
 
     @property
     def time(self) -> float:
@@ -158,6 +164,18 @@ class AudioPlayer:
         with self.lock:
             self.preview_notes = prepared
 
+    def set_virtual_duration(self, seconds: float) -> None:
+        """
+        Set the playback length used when no decoded audio buffer is loaded.
+        Note preview and metronome can still play over this silent timeline.
+        """
+        samples = max(0, int(float(seconds) * max(1, int(self.sr))))
+        with self.lock:
+            self.virtual_duration_samples = samples
+            if self.audio is None:
+                self.pos = max(0, min(self.pos, max(0, samples - 1)))
+                self._pos_float = max(0.0, min(float(self._pos_float), float(max(0, samples - 1))))
+
     def set_metronome(self, *, enabled: bool, bpm: float, offset_sec: float, volume: float = 0.35) -> None:
         with self.lock:
             self.metronome_enabled = bool(enabled)
@@ -168,8 +186,9 @@ class AudioPlayer:
     def seek(self, seconds: float) -> None:
         with self.lock:
             if self.audio is None:
-                self.pos = 0
-                self._pos_float = 0.0
+                n = max(1, int(self.virtual_duration_samples))
+                self.pos = max(0, min(n - 1, int(seconds * self.sr)))
+                self._pos_float = float(self.pos)
             else:
                 self.pos = max(0, min(len(self.audio) - 1, int(seconds * self.sr)))
                 self._pos_float = float(self.pos)
@@ -252,9 +271,13 @@ class AudioPlayer:
             outdata[out_s:out_e, 0] += wave * env * self.note_volume
 
     def play(self) -> None:
-        if not self.available or self.audio is None:
+        if not self.available:
             return
         with self.lock:
+            has_audio = self.audio is not None and len(self.audio) > 0
+            has_virtual = int(self.virtual_duration_samples) > 0
+            if not has_audio and not has_virtual:
+                return
             if self.stream is None:
                 self.stream = self.sd.OutputStream(
                     samplerate=self.sr,
@@ -318,28 +341,37 @@ class AudioPlayer:
 
     def _callback(self, outdata, frames, time, status) -> None:
         with self.lock:
-            if self.audio is None or not self.playing:
+            if not self.playing:
                 outdata.fill(0)
                 return
 
             speed = max(0.10, min(4.0, float(getattr(self, "playback_speed", 1.0))))
             start_pos_float = float(getattr(self, "_pos_float", float(self.pos)))
             start_pos = int(start_pos_float)
-            chunk = self._read_audio_block_speed(start_pos_float, frames, speed)
 
             outdata.fill(0)
-            if len(chunk) > 0:
-                outdata[:len(chunk), :] = chunk * self.volume
 
-            self._mix_preview_notes(outdata, start_pos, frames)
-            self._mix_metronome(outdata, start_pos, frames)
-            np.clip(outdata, -1.0, 1.0, out=outdata)
+            if self.audio is not None:
+                chunk = self._read_audio_block_speed(start_pos_float, frames, speed)
+                if len(chunk) > 0:
+                    outdata[:len(chunk), :] = chunk * self.volume
+                playback_end = len(self.audio)
+                chunk_len = len(chunk)
+            else:
+                playback_end = max(0, int(self.virtual_duration_samples))
+                remaining = max(0, playback_end - start_pos)
+                chunk_len = min(frames, remaining)
 
-            if len(chunk) < frames:
-                self.pos = len(self.audio)
+            if chunk_len > 0:
+                self._mix_preview_notes(outdata, start_pos, frames)
+                self._mix_metronome(outdata, start_pos, frames)
+                np.clip(outdata, -1.0, 1.0, out=outdata)
+
+            if chunk_len < frames:
+                self.pos = playback_end
                 self._pos_float = float(self.pos)
                 self.playing = False
                 raise self.sd.CallbackStop
 
             self._pos_float = start_pos_float + frames * speed
-            self.pos = min(len(self.audio) - 1, int(self._pos_float))
+            self.pos = min(max(0, playback_end - 1), int(self._pos_float))

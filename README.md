@@ -2063,3 +2063,31 @@ local harmonics = 1/3,1,3,7,9
 ```
 
 This is an input helper rather than a full visual reconstruction of the MV diagrams, but it makes the same just-intonation ratio structures playable/editable as notes in the editor.
+
+
+## Stable66 Note-only playback without loaded audio
+
+Playback now works even when no song/audio file is loaded.
+
+Behavior:
+
+```text
+Blank workspace + placed notes + Play
+-> plays the editor note preview synth only
+```
+
+The AudioPlayer now keeps a virtual silent timeline when no decoded audio buffer exists.
+
+Main changes:
+
+```text
+AudioPlayer.set_virtual_duration(seconds)
+AudioPlayer.duration uses virtual duration when audio is None
+AudioPlayer.play() can start without main audio if virtual duration exists
+AudioPlayer._callback() mixes preview notes/metronome over silence
+MainWindow.sync_notes_to_player() sets virtual duration from the spectrogram workspace or note end time
+```
+
+If neither audio nor notes/metronome are available, playback is blocked with a status message.
+
+This makes Harmony Charting / microtonal experiments possible in a blank workspace without loading an audio file.
