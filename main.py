@@ -2037,12 +2037,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         octave_handling = QtWidgets.QComboBox()
         octave_handling.addItems([
+            "fold 1x-3x",
             "fold 1x-2x",
             "raw frequency",
         ])
-        octave_handling.setCurrentText("fold 1x-2x")
+        octave_handling.setCurrentText("fold 1x-3x")
         octave_handling.setToolTip(
-            "fold 1x-2x: 2F/オクターブ方向を同一視し、比率を1〜2倍へ折り返して配置します。\n"
+            "fold 1x-3x: Caftaphata風。2F/オクターブ方向を同一視し、比率を1〜3倍へ折り返して配置します。\n"
+            "fold 1x-2x: 一般的な1オクターブ内へ折り返します。\n"
             "raw frequency: 倍音をそのまま周波数に掛けます。高音に飛びやすいです。"
         )
 
@@ -2109,8 +2111,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return start_value, duration_value
 
         def diagram_ratio(raw_ratio: float) -> float:
-            if octave_handling.currentText() == "fold 1x-2x":
-                return self.octave_fold_ratio(raw_ratio)
+            mode = octave_handling.currentText()
+            if mode == "fold 1x-3x":
+                return self.octave_fold_ratio(raw_ratio, low=1.0, high=3.0)
+            if mode == "fold 1x-2x":
+                return self.octave_fold_ratio(raw_ratio, low=1.0, high=2.0)
             return raw_ratio
 
         def update_time_unit_ui() -> None:
