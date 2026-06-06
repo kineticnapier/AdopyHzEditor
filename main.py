@@ -2030,7 +2030,7 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
 
         root_shift = QtWidgets.QLineEdit("1")
-        root_shift.setToolTip("Root Hzに掛ける倍率です。例: 1, 1/3, 7/3, 5/3")
+        root_shift.setToolTip("ローカル倍音比に掛ける基準倍率です。例: 1, 1/3, 7/3, 5/3")
 
         harmonics = QtWidgets.QLineEdit("1/3,1,3,7,9")
         harmonics.setToolTip("例: 1/3,1,3,7,9 または 1,3,7,9,21")
@@ -2145,19 +2145,16 @@ class MainWindow(QtWidgets.QMainWindow):
                     lines = [f"time: {start_box.value():g} beat + {duration_box.value():g} beat @ {bpm_box.value():g} BPM = {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
                 else:
                     lines = [f"time: {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
-                shifted_root_hz = float(root_hz.value()) * shift
-                lines.append(f"root: {root_hz.value():.6f} Hz × {shift:g} = {shifted_root_hz:.6f} Hz")
+                lines.append(f"root: {root_hz.value():.6f} Hz")
+                lines.append(f"ratio multiplier: {shift:g}x")
                 for v in vals:
-                    raw_ratio = v
+                    raw_ratio = shift * v
                     ratio = diagram_ratio(raw_ratio)
-                    hz = shifted_root_hz * ratio
+                    hz = float(root_hz.value()) * ratio
                     midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
-                    # Pitch number still uses the global ratio from the original
-                    # root, but octave folding is local to the harmonic only.
-                    global_ratio = shift * v
-                    pc = self.caftaphata_pitch_number(global_ratio, edo=edo_box.value(), offset=offset_box.value())
+                    pc = self.caftaphata_pitch_number(raw_ratio, edo=edo_box.value(), offset=offset_box.value())
                     fold_note = "" if abs(raw_ratio - ratio) <= 1e-10 else f" folded {ratio:g}"
-                    lines.append(f"{v:g}x -> local raw {raw_ratio:g}{fold_note}, {hz:.6f} Hz, MIDI {midi:.6f}, #{pc}")
+                    lines.append(f"{v:g}x -> raw {raw_ratio:g}{fold_note}, {hz:.6f} Hz, MIDI {midi:.6f}, #{pc}")
                 preview.setText("\n".join(lines))
             except Exception as e:
                 preview.setText(f"Invalid ratio: {e}")
@@ -2190,17 +2187,16 @@ class MainWindow(QtWidgets.QMainWindow):
             start, duration = harmonic_time_values()
             end = start + duration
             root_hz_value = float(root_hz.value())
-            shifted_root_hz = root_hz_value * shift
 
             self.editor.push_undo()
             inserted = []
             for v in vals:
-                raw_ratio = v
+                raw_ratio = shift * v
                 ratio = diagram_ratio(raw_ratio)
-                hz = shifted_root_hz * ratio
+                hz = root_hz_value * ratio
                 midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
                 self.editor.notes.append(Note(start, end, midi).normalized())
-                inserted.append(self.caftaphata_pitch_number(shift * v, edo=edo_box.value(), offset=offset_box.value()))
+                inserted.append(self.caftaphata_pitch_number(raw_ratio, edo=edo_box.value(), offset=offset_box.value()))
 
             self.editor.selected_indices = set(range(len(self.editor.notes) - len(vals), len(self.editor.notes)))
             self.editor.selected_index = min(self.editor.selected_indices) if self.editor.selected_indices else None
