@@ -1966,34 +1966,100 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.load_failed"), str(e))
 
-    def parse_ratio_text(self, text: str) -> float:
+    def parse_ratio_fraction(self, text: str) -> Fraction:
         s = str(text).strip()
         if not s:
             raise ValueError("empty ratio")
         # Accept 7/3, 1.25, 5:4, and simple whitespace.
         if ":" in s:
             a, b = s.split(":", 1)
-            return float(Fraction(a.strip()) / Fraction(b.strip()))
-        return float(Fraction(s))
+            value = Fraction(a.strip()) / Fraction(b.strip())
+        else:
+            value = Fraction(s)
+        if value <= 0:
+            raise ValueError("ratio must be positive")
+        return value
+
+    def parse_ratio_text(self, text: str) -> float:
+        return float(self.parse_ratio_fraction(text))
 
     def octave_fold_ratio(self, ratio: float, *, low: float = 1.0, high: float = 2.0) -> float:
         """
-        Fold a frequency ratio into one octave.
-
-        Caftaphata-style just-intonation diagrams identify the 2F / octave
-        dimension, so ratios that differ by powers of 2 should be placed in
-        the same octave band for editor input.
+        Fold a frequency ratio by powers of 2.
         """
-        r = float(ratio)
+        return float(self.octave_fold_fraction(Fraction(float(ratio)), low=low, high=high))
+
+    def octave_fold_fraction(self, ratio: Fraction, *, low: float = 1.0, high: float = 2.0) -> Fraction:
+        """
+        Fold a frequency ratio by powers of 2 while keeping exact rational values
+        where possible.
+        """
+        r = Fraction(ratio)
         if r <= 0:
             raise ValueError("ratio must be positive")
-        low = max(1e-12, float(low))
-        high = max(low * 1.000001, float(high))
-        while r < low:
-            r *= 2.0
-        while r >= high:
-            r /= 2.0
+        low_f = max(1e-12, float(low))
+        high_f = max(low_f * 1.000001, float(high))
+        while float(r) < low_f:
+            r *= 2
+        while float(r) >= high_f:
+            r /= 2
         return r
+
+    def _factor_int(self, value: int) -> dict[int, int]:
+        n = abs(int(value))
+        factors: dict[int, int] = {}
+        d = 2
+        while d * d <= n:
+            while n % d == 0:
+                factors[d] = factors.get(d, 0) + 1
+                n //= d
+            d += 1 if d == 2 else 2
+        if n > 1:
+            factors[n] = factors.get(n, 0) + 1
+        return factors
+
+    def dimension_ratio_fraction(self, ratio: Fraction) -> Fraction:
+        """
+        Convert a rational ratio into the Caftaphata-style dimension
+        representative.
+
+        Prime dimensions:
+          2d = 3F -> 3/2
+          3d = 5F -> 5/4
+          4d = 7F -> 7/4
+          5d = 11F -> 11/8
+          ...
+
+        The 2F / octave dimension is ignored here and can be folded separately.
+        """
+        r = Fraction(ratio)
+        if r <= 0:
+            raise ValueError("ratio must be positive")
+
+        exponents: dict[int, int] = {}
+        for p, e in self._factor_int(r.numerator).items():
+            if p != 2:
+                exponents[p] = exponents.get(p, 0) + e
+        for p, e in self._factor_int(r.denominator).items():
+            if p != 2:
+                exponents[p] = exponents.get(p, 0) - e
+
+        out = Fraction(1, 1)
+        for p, e in sorted(exponents.items()):
+            octave_den = 1 << (int(p).bit_length() - 1)
+            gen = Fraction(p, octave_den)
+            if e >= 0:
+                out *= gen ** e
+            else:
+                out /= gen ** (-e)
+        return out
+
+    def format_ratio_value(self, ratio: Fraction | float, *, decimals: int = 6) -> str:
+        frac = ratio if isinstance(ratio, Fraction) else Fraction(float(ratio)).limit_denominator(1000000)
+        value = float(frac)
+        if frac.denominator <= 100000 and abs(value) < 100000:
+            return f"{frac.numerator}/{frac.denominator} ({value:.{decimals}f})"
+        return f"{value:.{decimals}f}"
 
     def caftaphata_pitch_number(self, ratio: float, *, edo: int = 41, offset: int = 2) -> int:
         edo = max(1, int(edo))
@@ -2037,14 +2103,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
         octave_handling = QtWidgets.QComboBox()
         octave_handling.addItems([
-            "fold 1x-3x",
-            "fold 1x-2x",
+            "dimension diagram",
+            "fold total 1x-3x",
+            "fold total 1x-2x",
             "raw frequency",
         ])
-        octave_handling.setCurrentText("fold 1x-3x")
+        octave_handling.setCurrentText("dimension diagram")
         octave_handling.setToolTip(
-            "fold 1x-3x: Caftaphata風。2F/オクターブ方向を同一視し、比率を1〜3倍へ折り返して配置します。\n"
-            "fold 1x-2x: 一般的な1オクターブ内へ折り返します。\n"
+            "dimension diagram: Caftaphata風。倍率とローカル倍音を別々に次元代表値へ変換してから掛けます。\n"
+            "fold total 1x-3x: 倍率×ローカル倍音をそのまま1〜3倍へ折り返します。\n"
+            "fold total 1x-2x: 倍率×ローカル倍音をそのまま1〜2倍へ折り返します。\n"
             "raw frequency: 倍音をそのまま周波数に掛けます。高音に飛びやすいです。"
         )
 
@@ -2110,13 +2178,39 @@ class MainWindow(QtWidgets.QMainWindow):
                 return start_value * beat_sec, duration_value * beat_sec
             return start_value, duration_value
 
-        def diagram_ratio(raw_ratio: float) -> float:
+        def diagram_components(multiplier: Fraction, local: Fraction) -> tuple[Fraction, Fraction, Fraction, Fraction]:
+            """
+            Return:
+              raw_global_ratio, placed_ratio, multiplier_representative, local_representative
+            """
+            raw_global = multiplier * local
             mode = octave_handling.currentText()
-            if mode == "fold 1x-3x":
-                return self.octave_fold_ratio(raw_ratio, low=1.0, high=3.0)
-            if mode == "fold 1x-2x":
-                return self.octave_fold_ratio(raw_ratio, low=1.0, high=2.0)
-            return raw_ratio
+
+            if mode == "dimension diagram":
+                # The base/multiplier and the local point have separate 2F
+                # coordinates in the diagram. Convert each to a dimension
+                # representative independently, then multiply them.
+                multiplier_rep = self.octave_fold_fraction(
+                    self.dimension_ratio_fraction(multiplier),
+                    low=0.5,
+                    high=3.0,
+                )
+                local_rep = self.octave_fold_fraction(
+                    self.dimension_ratio_fraction(local),
+                    low=1.0,
+                    high=3.0,
+                )
+                return raw_global, multiplier_rep * local_rep, multiplier_rep, local_rep
+
+            if mode == "fold total 1x-3x":
+                ratio = self.octave_fold_fraction(raw_global, low=1.0, high=3.0)
+                return raw_global, ratio, Fraction(1, 1), ratio
+
+            if mode == "fold total 1x-2x":
+                ratio = self.octave_fold_fraction(raw_global, low=1.0, high=2.0)
+                return raw_global, ratio, Fraction(1, 1), ratio
+
+            return raw_global, raw_global, Fraction(1, 1), raw_global
 
         def update_time_unit_ui() -> None:
             beat_mode = time_unit.currentText() == "beats"
@@ -2135,8 +2229,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         def update_preview() -> None:
             try:
-                shift = self.parse_ratio_text(root_shift.text())
-                vals = [self.parse_ratio_text(x) for x in harmonics.text().replace(";", ",").split(",") if x.strip()]
+                shift = self.parse_ratio_fraction(root_shift.text())
+                vals = [self.parse_ratio_fraction(x) for x in harmonics.text().replace(";", ",").split(",") if x.strip()]
                 if not vals:
                     preview.setText("No harmonics")
                     return
@@ -2145,16 +2239,35 @@ class MainWindow(QtWidgets.QMainWindow):
                     lines = [f"time: {start_box.value():g} beat + {duration_box.value():g} beat @ {bpm_box.value():g} BPM = {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
                 else:
                     lines = [f"time: {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
-                lines.append(f"root: {root_hz.value():.6f} Hz")
-                lines.append(f"ratio multiplier: {shift:g}x")
+
+                if octave_handling.currentText() == "dimension diagram":
+                    multiplier_rep = self.octave_fold_fraction(
+                        self.dimension_ratio_fraction(shift),
+                        low=0.5,
+                        high=3.0,
+                    )
+                    lines.append(
+                        "multiplier: "
+                        f"{self.format_ratio_value(shift)} -> rep {self.format_ratio_value(multiplier_rep)}"
+                    )
+                else:
+                    lines.append(f"ratio multiplier: {self.format_ratio_value(shift)}")
+
                 for v in vals:
-                    raw_ratio = shift * v
-                    ratio = diagram_ratio(raw_ratio)
-                    hz = float(root_hz.value()) * ratio
+                    raw_ratio, ratio, multiplier_rep, local_rep = diagram_components(shift, v)
+                    hz = float(root_hz.value()) * float(ratio)
                     midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
-                    pc = self.caftaphata_pitch_number(raw_ratio, edo=edo_box.value(), offset=offset_box.value())
-                    fold_note = "" if abs(raw_ratio - ratio) <= 1e-10 else f" folded {ratio:g}"
-                    lines.append(f"{v:g}x -> raw {raw_ratio:g}{fold_note}, {hz:.6f} Hz, MIDI {midi:.6f}, #{pc}")
+                    pc = self.caftaphata_pitch_number(float(raw_ratio), edo=edo_box.value(), offset=offset_box.value())
+
+                    if octave_handling.currentText() == "dimension diagram":
+                        detail = (
+                            f"local {self.format_ratio_value(v)} -> rep {self.format_ratio_value(local_rep)}, "
+                            f"placed {self.format_ratio_value(ratio)}"
+                        )
+                    else:
+                        detail = f"raw {self.format_ratio_value(raw_ratio)} -> placed {self.format_ratio_value(ratio)}"
+
+                    lines.append(f"{detail}, {hz:.6f} Hz, MIDI {midi:.6f}, #{pc}")
                 preview.setText("\n".join(lines))
             except Exception as e:
                 preview.setText(f"Invalid ratio: {e}")
@@ -2179,8 +2292,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            shift = self.parse_ratio_text(root_shift.text())
-            vals = [self.parse_ratio_text(x) for x in harmonics.text().replace(";", ",").split(",") if x.strip()]
+            shift = self.parse_ratio_fraction(root_shift.text())
+            vals = [self.parse_ratio_fraction(x) for x in harmonics.text().replace(";", ",").split(",") if x.strip()]
             if not vals:
                 raise ValueError("harmonics list is empty")
 
@@ -2191,12 +2304,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.editor.push_undo()
             inserted = []
             for v in vals:
-                raw_ratio = shift * v
-                ratio = diagram_ratio(raw_ratio)
-                hz = root_hz_value * ratio
+                raw_ratio, ratio, _multiplier_rep, _local_rep = diagram_components(shift, v)
+                hz = root_hz_value * float(ratio)
                 midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
                 self.editor.notes.append(Note(start, end, midi).normalized())
-                inserted.append(self.caftaphata_pitch_number(raw_ratio, edo=edo_box.value(), offset=offset_box.value()))
+                inserted.append(self.caftaphata_pitch_number(float(raw_ratio), edo=edo_box.value(), offset=offset_box.value()))
 
             self.editor.selected_indices = set(range(len(self.editor.notes) - len(vals), len(self.editor.notes)))
             self.editor.selected_index = min(self.editor.selected_indices) if self.editor.selected_indices else None
