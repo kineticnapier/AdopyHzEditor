@@ -2023,31 +2023,40 @@ class MainWindow(QtWidgets.QMainWindow):
         Convert a rational ratio into the Caftaphata-style dimension
         representative.
 
-        Prime dimensions:
-          2d = 3F -> 3/2
-          3d = 5F -> 5/4
-          4d = 7F -> 7/4
-          5d = 11F -> 11/8
-          ...
+        Supported dimension generators:
 
-        The 2F / octave dimension is ignored here and can be folded separately.
+            1d -> (2/1)^n
+            2d -> (3/2)^n
+            3d -> (5/4)^n
+            4d -> (7/4)^n
+            5d -> (11/4)^n
+
+        Example:
+            2d^m * 3d^n -> (3^m * 5^n) / (2^m * 4^n)
         """
         r = Fraction(ratio)
         if r <= 0:
             raise ValueError("ratio must be positive")
 
+        generators = {
+            2: Fraction(2, 1),
+            3: Fraction(3, 2),
+            5: Fraction(5, 4),
+            7: Fraction(7, 4),
+            11: Fraction(11, 4),
+        }
+
         exponents: dict[int, int] = {}
         for p, e in self._factor_int(r.numerator).items():
-            if p != 2:
-                exponents[p] = exponents.get(p, 0) + e
+            exponents[p] = exponents.get(p, 0) + e
         for p, e in self._factor_int(r.denominator).items():
-            if p != 2:
-                exponents[p] = exponents.get(p, 0) - e
+            exponents[p] = exponents.get(p, 0) - e
 
         out = Fraction(1, 1)
         for p, e in sorted(exponents.items()):
-            octave_den = 1 << (int(p).bit_length() - 1)
-            gen = Fraction(p, octave_den)
+            gen = generators.get(p)
+            if gen is None:
+                raise ValueError(f"unsupported dimension prime: {p}")
             if e >= 0:
                 out *= gen ** e
             else:
@@ -2255,6 +2264,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 for v in vals:
                     raw_ratio, ratio, multiplier_rep, local_rep = diagram_components(shift, v)
+
                     hz = float(root_hz.value()) * float(ratio)
                     midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
                     pc = self.caftaphata_pitch_number(float(raw_ratio), edo=edo_box.value(), offset=offset_box.value())
