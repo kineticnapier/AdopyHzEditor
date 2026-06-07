@@ -2762,7 +2762,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "raw: 角度をそのまま使う\n"
             "upward: 各タイルの絶対方向を指定角度へ寄せ、SetSpeedでtimingを補正する\n"
             "upward avoid: 通常方向が既存タイルに近づきそうな時だけ、上方向候補へ逃がす\n"
-            "twirl upward: 下向きになりそうな時だけTwirlを挟む。relは変えず、そのtileから即反転式で置く"
+            "twirl upward: 下向きになりそうな時だけそのfloorにTwirlを挟む。relは変えず、そのtileから即反転式で置く"
         )
 
         self.visual_path_angle = QtWidgets.QDoubleSpinBox()

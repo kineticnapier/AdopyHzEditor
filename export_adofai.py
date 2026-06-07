@@ -10,6 +10,7 @@ EPS = 1e-9
 
 CURRENT_VISUAL_ROUTE_STATE: dict[str, Any] | None = None
 CURRENT_TWIRL_ACTIVE = False
+CURRENT_GENERATED_RELATIVES: list[float] = []
 
 
 def new_level() -> dict[str, Any]:
@@ -110,16 +111,77 @@ def final_visual_angle(
     return float(scaled_final_angle)
 
 
-def add_relative(angle_data: list[Any], rel: float) -> None:
+def add_relative(angle_data: list[Any], rel: float, *, twirled: bool | None = None) -> None:
+    # Record the requested relative angle. For twirl upward exports, angleData is
+    # rebuilt from this list and the actual Twirl action floors at the end of
+    # build_adofai_level(), so floor/index timing cannot drift.
+    CURRENT_GENERATED_RELATIVES.append(clean_relative_angle(rel))
+
     prev = float(angle_data[-1])
-    if CURRENT_TWIRL_ACTIVE:
-        # Twirl applies immediately to the tile being generated after the event.
-        # Keep the requested relative angle, but use the reversed relative-angle
-        # formula for the stored absolute angle.
+    active = CURRENT_TWIRL_ACTIVE if twirled is None else bool(twirled)
+    if active:
+        # Twirl applies to this tile's relative-angle formula.
         cur = prev - 180.0 + float(rel)
     else:
         cur = prev + 180.0 - float(rel)
     angle_data.append(clean_angle(cur))
+
+
+def rebuild_angle_data_from_relatives(
+    relatives: list[float],
+    actions: list[dict[str, Any]],
+) -> list[Any]:
+    """
+    Rebuild angleData from requested relative angles and actual Twirl floors.
+
+    floor N Twirl must affect floor N's generated relative formula immediately.
+    This post-pass avoids all generation-time ordering drift between event
+    insertion, floor increments, and angleData appends.
+    """
+    rebuilt: list[Any] = [0, 0]
+    twirl_counts: dict[int, int] = {}
+    for action in actions:
+        if action.get("eventType") != "Twirl":
+            continue
+        try:
+            floor = int(action.get("floor", -1))
+        except (TypeError, ValueError):
+            continue
+        if floor >= 1:
+            twirl_counts[floor] = twirl_counts.get(floor, 0) + 1
+
+    twirl_active = False
+    for relative_index, rel in enumerate(relatives, start=1):
+        # angleData starts with floors 0 and 1 already present. The first
+        # generated relative appends floor 2, so an action on floor N must affect
+        # the relative that appends angleData[N], i.e. relative_index = N - 1.
+        # This shifts only the formula-application point; the Twirl event floor
+        # itself is not moved.
+        generated_tile_floor = relative_index + 1
+        if twirl_counts.get(generated_tile_floor, 0) % 2:
+            twirl_active = not twirl_active
+
+        prev = float(rebuilt[-1])
+        if twirl_active:
+            cur = prev - 180.0 + float(rel)
+        else:
+            cur = prev + 180.0 - float(rel)
+        rebuilt.append(clean_angle(cur))
+
+    return rebuilt
+
+
+def apply_twirl_angledata_rebuild(
+    angle_data: list[Any],
+    actions: list[dict[str, Any]],
+    visual_path_mode: str,
+) -> None:
+    if not visual_path_twirl_enabled(visual_path_mode):
+        return
+    if not CURRENT_GENERATED_RELATIVES:
+        return
+    rebuilt = rebuild_angle_data_from_relatives(CURRENT_GENERATED_RELATIVES, actions)
+    angle_data[:] = rebuilt
 
 
 def visual_path_key(mode: str) -> str:
@@ -160,6 +222,10 @@ def consume_pending_visual_twirl(actions: list[dict[str, Any]], floor: int) -> N
     state = CURRENT_VISUAL_ROUTE_STATE
     if state is None or not state.get("pending_twirl"):
         return
+
+    # Keep the Twirl event on the generated tile's floor. The timing of the
+    # reversed relative-angle formula is handled by toggling CURRENT_TWIRL_ACTIVE
+    # before add_relative() for this same tile; do not shift the event floor.
     actions.append(twirl_event(floor))
     state["pending_twirl"] = False
 
@@ -206,6 +272,7 @@ def make_visual_route_state(angle_data: list[Any]) -> dict[str, Any]:
         "base_safe_tiles": 0,
         "pending_twirl": False,
         "twirl_turns": 0,
+        "twirl_armed": True,
     }
     _route_add_point(state, 0.0, 0.0)
     sync_visual_route_state(angle_data, state)
@@ -406,9 +473,12 @@ def shape_visual_relative(
     *,
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
-) -> tuple[float, bool]:
+) -> tuple[float, bool, bool]:
     """
     Convert a timing/pitch relative angle into a visual-path relative angle.
+
+    Returns:
+      relative_angle, changed_or_twirled, twirled_for_this_tile
 
     upward:
       force the next absolute tile direction to visual_path_angle.
@@ -418,46 +488,62 @@ def shape_visual_relative(
       overlap with already placed tiles, choose an upward-biased safe heading.
 
     twirl upward:
-      keep the requested relative angles unchanged. When the next tile would
-      flow downward, insert a pending Twirl and immediately use the reversed
-      relative-angle formula for that same tile.
+      keep the requested relative angle unchanged. When the current orbit state
+      would make this tile flow downward, put Twirl on this tile's floor and
+      explicitly make this same tile use the post-Twirl relative-angle formula.
     """
     global CURRENT_TWIRL_ACTIVE
 
     base_rel = clean_relative_angle(rel)
+    current_twirl = bool(CURRENT_TWIRL_ACTIVE)
+
     if not visual_path_enabled(visual_path_mode):
-        return base_rel, False
+        return base_rel, False, current_twirl
 
     if visual_path_twirl_enabled(visual_path_mode):
         prev_abs = float(angle_data[-1])
-        base_heading = heading_from_timing_relative(prev_abs, base_rel, CURRENT_TWIRL_ACTIVE)
-        # In the editor preview, 90° moves upward and 270° moves downward.
-        if math.sin(math.radians(base_heading)) >= -0.08:
-            return base_rel, False
-
-        CURRENT_TWIRL_ACTIVE = not CURRENT_TWIRL_ACTIVE
         state = CURRENT_VISUAL_ROUTE_STATE
-        if state is not None:
-            state["pending_twirl"] = True
-            state["twirl_turns"] = int(state.get("twirl_turns", 0)) + 1
 
-        # Do not alter the relative angle. The Twirl event toggles the orbit
-        # direction immediately, and add_relative() will use the reversed formula
-        # for this same tile.
-        return base_rel, True
+        current_heading = heading_from_timing_relative(prev_abs, base_rel, current_twirl)
+        sin_current = math.sin(math.radians(current_heading))
+        downward = sin_current < -0.08
+
+        if state is None:
+            return base_rel, False, current_twirl
+
+        if not downward:
+            # Re-arm only after the path has clearly returned upward, otherwise
+            # a long nearly-horizontal/downward section can spam Twirl events.
+            if sin_current > 0.08:
+                state["twirl_armed"] = True
+            return base_rel, False, current_twirl
+
+        if not state.get("twirl_armed", True):
+            return base_rel, False, current_twirl
+
+        next_twirl = not current_twirl
+        CURRENT_TWIRL_ACTIVE = next_twirl
+
+        state["pending_twirl"] = True
+        state["twirl_turns"] = int(state.get("twirl_turns", 0)) + 1
+        state["twirl_armed"] = False
+
+        # rel is unchanged; only the formula used for this tile changes.
+        return base_rel, True, next_twirl
 
     if visual_path_avoid_enabled(visual_path_mode):
-        return choose_upward_avoid_relative(
+        shaped, changed = choose_upward_avoid_relative(
             angle_data,
             base_rel,
             preferred_heading=visual_path_angle,
             route_state=CURRENT_VISUAL_ROUTE_STATE,
         )
+        return shaped, changed, current_twirl
 
     prev_abs = float(angle_data[-1])
     desired_abs = float(visual_path_angle) % 360.0
-    shaped = relative_for_heading(prev_abs, desired_abs, CURRENT_TWIRL_ACTIVE)
-    return shaped, abs(float(shaped) - float(base_rel)) > 1e-6
+    shaped = relative_for_heading(prev_abs, desired_abs, current_twirl)
+    return shaped, abs(float(shaped) - float(base_rel)) > 1e-6, current_twirl
 
 
 def speed_event_floor(floor: int) -> int:
@@ -1211,7 +1297,7 @@ def emit_angle_only_curve_continuous(
 
             final_rel = adjusted
 
-        final_rel, shaped = shape_visual_relative(
+        final_rel, shaped, twirled_for_this_tile = shape_visual_relative(
             angle_data,
             final_rel,
             visual_path_mode=visual_path_mode,
@@ -1230,7 +1316,7 @@ def emit_angle_only_curve_continuous(
         if shaped:
             final_visual_used = True
 
-        add_relative(angle_data, final_rel)
+        add_relative(angle_data, final_rel, twirled=twirled_for_this_tile)
         floor += 1
         emitted += 1
 
@@ -1287,7 +1373,7 @@ def emit_direct_curve_continuous(
             if adjusted > 0:
                 rel = adjusted
 
-        rel, shaped = shape_visual_relative(
+        rel, shaped, twirled_for_this_tile = shape_visual_relative(
             angle_data,
             rel,
             visual_path_mode=visual_path_mode,
@@ -1302,7 +1388,7 @@ def emit_direct_curve_continuous(
         if (is_final and abs(rel - 180.0) > 1e-6) or shaped:
             final_visual_used = True
 
-        add_relative(angle_data, rel)
+        add_relative(angle_data, rel, twirled=twirled_for_this_tile)
         floor += 1
         emitted += 1
 
@@ -1377,7 +1463,7 @@ def emit_angle_compression_curve_continuous(
             if abs(rel - main_angle * frac) > 1e-6:
                 final_visual_used = True
 
-        rel, shaped = shape_visual_relative(
+        rel, shaped, twirled_for_this_tile = shape_visual_relative(
             angle_data,
             rel,
             visual_path_mode=visual_path_mode,
@@ -1391,7 +1477,7 @@ def emit_angle_compression_curve_continuous(
         actions.append(set_bpm(floor, bpm))
         current_bpm = bpm
 
-        add_relative(angle_data, rel)
+        add_relative(angle_data, rel, twirled=twirled_for_this_tile)
         floor += 1
         emitted += 1
 
@@ -1427,14 +1513,14 @@ def emit_direct(
             actions.append(set_bpm(floor, bpm))
             current_bpm = bpm
             for _ in range(whole):
-                rel, _twirled = shape_visual_relative(
+                rel, _twirled, twirled_for_this_tile = shape_visual_relative(
                     angle_data,
                     180.0,
                     visual_path_mode=visual_path_mode,
                     visual_path_angle=visual_path_angle,
                 )
                 consume_pending_visual_twirl(actions, floor)
-                add_relative(angle_data, rel)
+                add_relative(angle_data, rel, twirled=twirled_for_this_tile)
                 floor += 1
                 emitted += 1
 
@@ -1442,14 +1528,14 @@ def emit_direct(
             frac_bpm = bpm / frac
             actions.append(set_bpm(floor, frac_bpm))
             current_bpm = frac_bpm
-            rel, _twirled = shape_visual_relative(
+            rel, _twirled, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 180.0,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
             )
             consume_pending_visual_twirl(actions, floor)
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
 
@@ -1457,7 +1543,7 @@ def emit_direct(
 
     if visual_path_enabled(visual_path_mode):
         for _ in range(whole):
-            rel, _shaped = shape_visual_relative(
+            rel, _shaped, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 180.0,
                 visual_path_mode=visual_path_mode,
@@ -1467,12 +1553,12 @@ def emit_direct(
             tile_bpm = freq * 60.0 * rel / 180.0
             actions.append(set_bpm(floor, tile_bpm))
             current_bpm = tile_bpm
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
 
         if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
-            rel, _shaped = shape_visual_relative(
+            rel, _shaped, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 180.0,
                 visual_path_mode=visual_path_mode,
@@ -1482,7 +1568,7 @@ def emit_direct(
             frac_bpm = freq * 60.0 * rel / max(EPS, 180.0 * frac)
             actions.append(set_bpm(floor, frac_bpm))
             current_bpm = frac_bpm
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
 
@@ -1564,7 +1650,7 @@ def emit_angle_only(
 
         final_visual_used = bool(target_used and abs(angle - raw_angle) > 1e-6)
         for _ in range(whole_to_emit):
-            rel, twirled = shape_visual_relative(
+            rel, twirled, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 angle,
                 visual_path_mode=visual_path_mode,
@@ -1572,7 +1658,7 @@ def emit_angle_only(
             )
             consume_pending_visual_twirl(actions, floor)
             final_visual_used = final_visual_used or twirled
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
 
@@ -1596,7 +1682,7 @@ def emit_angle_only(
                 actions.append(set_bpm(floor, final_bpm))
                 final_visual_used = True
 
-            rel, twirled = shape_visual_relative(
+            rel, twirled, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 final_angle,
                 visual_path_mode=visual_path_mode,
@@ -1604,7 +1690,7 @@ def emit_angle_only(
             )
             consume_pending_visual_twirl(actions, floor)
             final_visual_used = final_visual_used or twirled
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
 
@@ -1623,7 +1709,7 @@ def emit_angle_only(
         current_bpm: float | None = None
 
         for _ in range(whole_to_emit):
-            rel, shaped = shape_visual_relative(
+            rel, shaped, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 angle,
                 visual_path_mode=visual_path_mode,
@@ -1634,7 +1720,7 @@ def emit_angle_only(
             actions.append(set_bpm(floor, tile_bpm))
             current_bpm = tile_bpm
             final_visual_used = final_visual_used or shaped
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
 
@@ -1651,7 +1737,7 @@ def emit_angle_only(
             if final_angle <= 0:
                 final_angle = scaled_final_angle
 
-            rel, shaped = shape_visual_relative(
+            rel, shaped, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 final_angle,
                 visual_path_mode=visual_path_mode,
@@ -1661,7 +1747,7 @@ def emit_angle_only(
             final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
             actions.append(set_bpm(floor, final_bpm))
             current_bpm = final_bpm
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
             final_visual_used = final_visual_used or shaped or abs(final_angle - scaled_final_angle) > 1e-6
@@ -1778,7 +1864,7 @@ def emit_angle_compression(
     if visual_path_twirl_enabled(visual_path_mode):
         final_visual_used = False
         for _ in range(whole_to_emit):
-            rel, twirled = shape_visual_relative(
+            rel, twirled, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 angle,
                 visual_path_mode=visual_path_mode,
@@ -1786,7 +1872,7 @@ def emit_angle_compression(
             )
             consume_pending_visual_twirl(actions, floor)
             final_visual_used = final_visual_used or twirled
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
 
@@ -1810,7 +1896,7 @@ def emit_angle_compression(
                 actions.append(set_bpm(floor, final_bpm))
                 final_visual_used = True
 
-            rel, twirled = shape_visual_relative(
+            rel, twirled, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 final_angle,
                 visual_path_mode=visual_path_mode,
@@ -1818,7 +1904,7 @@ def emit_angle_compression(
             )
             consume_pending_visual_twirl(actions, floor)
             final_visual_used = final_visual_used or twirled
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
             bpm = final_bpm
@@ -1831,7 +1917,7 @@ def emit_angle_compression(
     if visual_path_enabled(visual_path_mode):
         final_visual_used = False
         for _ in range(whole_to_emit):
-            rel, shaped = shape_visual_relative(
+            rel, shaped, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 angle,
                 visual_path_mode=visual_path_mode,
@@ -1843,7 +1929,7 @@ def emit_angle_compression(
             bpm = tile_bpm
             current_bpm = tile_bpm if "current_bpm" in locals() else tile_bpm
             final_visual_used = final_visual_used or shaped
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
 
@@ -1860,7 +1946,7 @@ def emit_angle_compression(
             if final_angle <= 0:
                 final_angle = scaled_final_angle
 
-            rel, shaped = shape_visual_relative(
+            rel, shaped, twirled_for_this_tile = shape_visual_relative(
                 angle_data,
                 final_angle,
                 visual_path_mode=visual_path_mode,
@@ -1869,7 +1955,7 @@ def emit_angle_compression(
             consume_pending_visual_twirl(actions, floor)
             final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
             actions.append(set_bpm(floor, final_bpm))
-            add_relative(angle_data, rel)
+            add_relative(angle_data, rel, twirled=twirled_for_this_tile)
             floor += 1
             emitted += 1
             bpm = final_bpm
@@ -2421,7 +2507,7 @@ def emit_harmony_polyrhythm(
                 step=harmony_visual_step,
             )
 
-        rel, path_shaped = shape_visual_relative(
+        rel, path_shaped, twirled_for_this_tile = shape_visual_relative(
             angle_data,
             rel,
             visual_path_mode=visual_path_mode,
@@ -2449,7 +2535,7 @@ def emit_harmony_polyrhythm(
         else:
             current_bpm = float(play_bpm)
 
-        add_relative(angle_data, rel)
+        add_relative(angle_data, rel, twirled=twirled_for_this_tile)
 
         if angle_only_timing and need_setspeed:
             # Return to the global Harmony BPM for the next raw Angle-only tile.
@@ -2503,8 +2589,9 @@ def build_adofai_level(
     actions = level["actions"]
     apply_track_visual(level, actions, track_visual)
 
-    global CURRENT_VISUAL_ROUTE_STATE, CURRENT_TWIRL_ACTIVE
+    global CURRENT_VISUAL_ROUTE_STATE, CURRENT_TWIRL_ACTIVE, CURRENT_GENERATED_RELATIVES
     CURRENT_TWIRL_ACTIVE = False
+    CURRENT_GENERATED_RELATIVES = []
     CURRENT_VISUAL_ROUTE_STATE = make_visual_route_state(angle_data) if (
         visual_path_avoid_enabled(visual_path_mode) or visual_path_twirl_enabled(visual_path_mode)
     ) else None
@@ -2562,6 +2649,7 @@ def build_adofai_level(
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
         )
+        apply_twirl_angledata_rebuild(angle_data, actions, visual_path_mode)
         stats: dict[str, int | float | str] = {
             "method": method_key,
             "track_visual": track_visual,
@@ -2753,6 +2841,8 @@ def build_adofai_level(
         used += 1
 
         now = max(now, n.end)
+
+    apply_twirl_angledata_rebuild(angle_data, actions, visual_path_mode)
 
     stats: dict[str, int | float | str] = {
         "method": method_key,
