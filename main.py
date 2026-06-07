@@ -7,6 +7,8 @@ import io
 import numpy as np
 import webbrowser
 import shutil
+import math
+from fractions import Fraction
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -191,6 +193,7 @@ class MainWindow(QtWidgets.QMainWindow):
             getattr(self, "volume", None),
             getattr(self, "playback_speed", None),
             getattr(self, "analysis_profile", None),
+            getattr(self, "cqt_resolution", None),
         ]
 
         for w in widgets:
@@ -270,6 +273,8 @@ class MainWindow(QtWidgets.QMainWindow):
         edit_menu.addAction(tr("menu.copy"), self.copy_selected_notes)
         edit_menu.addAction(tr("menu.cut"), self.cut_selected_notes)
         edit_menu.addAction(tr("menu.paste"), self.paste_notes)
+        edit_menu.addSeparator()
+        edit_menu.addAction(tr("menu.insert_harmonic_diagram"), self.insert_harmonic_diagram)
         edit_menu.addSeparator()
         edit_menu.addAction(tr("menu.select_all"), self.editor.select_all_notes, QtGui.QKeySequence("Ctrl+A"))
         edit_menu.addAction(tr("menu.clear_selection"), self.editor.clear_selection, QtGui.QKeySequence("Esc"))
@@ -622,6 +627,23 @@ class MainWindow(QtWidgets.QMainWindow):
             "Full C0-C10: widest range, slower"
         )
 
+        self.cqt_resolution = QtWidgets.QComboBox()
+        self.cqt_resolution.addItems([
+            "profile default",
+            "100 cents",
+            "50 cents",
+            "25 cents",
+            "12.5 cents",
+            "41 EDO",
+            "53 EDO",
+        ])
+        self.cqt_resolution.setCurrentText("profile default")
+        self.cqt_resolution.setToolTip(
+            "Microtonal CQT display resolution.\n"
+            "profile default keeps the old behavior.\n"
+            "50/25/12.5 cents keeps sub-semitone CQT bins visible instead of folding them into semitone rows."
+        )
+
         view_form.addRow("Contrast", self.contrast)
         view_form.addRow("Gamma", self.gamma)
         view_form.addRow("Enhance", self.enhance)
@@ -629,6 +651,7 @@ class MainWindow(QtWidgets.QMainWindow):
         view_form.addRow("Harmonics", self.harmonics)
         view_form.addRow("Colormap", self.cmap)
         view_form.addRow("Analysis", self.analysis_profile)
+        view_form.addRow("CQT Resolution", self.cqt_resolution)
         self.settings_toolbox.addItem(view_page, "View / Analysis")
 
         # Curve / Angle page
@@ -692,8 +715,6 @@ class MainWindow(QtWidgets.QMainWindow):
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, activated=self.copy_selected_notes)
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+X"), self, activated=self.cut_selected_notes)
         QtGui.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, activated=self.paste_notes)
-        QtGui.QShortcut(QtGui.QKeySequence("Delete"), self, activated=self.editor.delete_selected)
-        QtGui.QShortcut(QtGui.QKeySequence("Ctrl+A"), self, activated=self.editor.select_all_notes)
         QtGui.QShortcut(QtGui.QKeySequence("Esc"), self, activated=self.editor.clear_selection)
         QtGui.QShortcut(QtGui.QKeySequence("Tab"), self, activated=self.editor.cycle_mode)
         QtGui.QShortcut(QtGui.QKeySequence("Space"), self, activated=self.toggle_playback)
@@ -747,6 +768,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def sync_notes_to_player(self) -> None:
         if hasattr(self.player, "set_preview_notes"):
             self.player.set_preview_notes(self.editor.notes)
+
+        if hasattr(self.player, "set_virtual_duration"):
+            spec = self.editor.spectrogram
+            duration = float(spec.duration) if spec is not None else 0.0
+            if self.editor.notes:
+                duration = max(duration, max(float(n.end) for n in self.editor.notes))
+            self.player.set_virtual_duration(duration)
+
         self.apply_note_sound_settings()
 
     def nudge_selected_notes(self, time_steps: int, pitch_steps: int) -> None:
@@ -933,7 +962,30 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def analysis_options(self) -> dict:
         profile = self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal"
-        return analysis_profile_options(profile)
+        opts = analysis_profile_options(profile)
+
+        resolution = self.cqt_resolution.currentText() if hasattr(self, "cqt_resolution") else "profile default"
+        res_key = (resolution or "profile default").lower().replace(" ", "_")
+        microtonal_map = {
+            "100_cents": 12,
+            "50_cents": 24,
+            "25_cents": 48,
+            "12.5_cents": 96,
+            "12_5_cents": 96,
+            "41_edo": 41,
+            "53_edo": 53,
+        }
+        if res_key in microtonal_map:
+            bpo = int(microtonal_map[res_key])
+            opts["cqt_bins_per_octave"] = bpo
+            opts["bins_per_semitone"] = max(1, int(round(bpo / 12.0)))
+            opts["fold_to_semitone"] = bpo == 12
+            # Keep high-resolution / non-12 CQT stable; hybrid_cqt can be rough
+            # with many bins per octave in some librosa versions.
+            if bpo != 12:
+                opts["engine"] = "cqt"
+
+        return opts
 
     def analysis_signature(self, path: str, opts: dict | None = None) -> str:
         """Signature for the currently displayed spectrogram analysis."""
@@ -1320,20 +1372,30 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.player.available:
             self.statusBar().showMessage(tr("status.playback_unavailable", error=self.player.error))
             return
-        if getattr(self.player, "audio", None) is None:
-            if self.current_audio:
-                self.statusBar().showMessage(tr("status.playback_loading"))
-                QtCore.QTimer.singleShot(1, lambda p=self.current_audio: self.load_audio_for_playback(p))
-            else:
-                self.statusBar().showMessage(tr("status.no_audio_loaded"))
-            return
 
         if not self.player.playing:
             self.sync_notes_to_player()
             self.apply_playback_speed()
+
+            if getattr(self.player, "audio", None) is None and self.current_audio:
+                self.statusBar().showMessage(tr("status.playback_loading"))
+                QtCore.QTimer.singleShot(1, lambda p=self.current_audio: self.load_audio_for_playback(p))
+                return
+
+            if getattr(self.player, "audio", None) is None:
+                has_notes = bool(getattr(self.editor, "notes", []))
+                metro_on = bool(self.metro_enabled.isChecked()) if hasattr(self, "metro_enabled") else False
+                if not has_notes and not metro_on:
+                    self.statusBar().showMessage(tr("status.no_audio_or_notes"))
+                    return
+
             self.player.seek(self.editor.playhead_time())
+
         self.player.toggle()
-        self.statusBar().showMessage(tr("status.playing") if self.player.playing else tr("status.paused", time=self.editor.playhead_time()))
+        if self.player.playing and getattr(self.player, "audio", None) is None:
+            self.statusBar().showMessage(tr("status.playing_notes_only"))
+        else:
+            self.statusBar().showMessage(tr("status.playing") if self.player.playing else tr("status.paused", time=self.editor.playhead_time()))
 
     def stop_playback(self) -> None:
         self.player.stop()
@@ -1385,6 +1447,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "song_volume": int(self.volume.value()) if hasattr(self, "volume") else 85,
             "playback_speed": float(self.playback_speed.value()) if hasattr(self, "playback_speed") else 1.0,
             "analysis_profile": self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal",
+            "cqt_resolution": self.cqt_resolution.currentText() if hasattr(self, "cqt_resolution") else "profile default",
             "display_mode": self.display_mode.currentText() if hasattr(self, "display_mode") else "wavetone",
             "cmap": self.cmap.currentText() if hasattr(self, "cmap") else "wavetone",
             "curve_shape": self.curve_shape.currentText() if hasattr(self, "curve_shape") else "ease",
@@ -1406,7 +1469,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for name in (
             "grid_bpm", "grid_offset_ms", "grid_enabled", "metro_enabled", "metro_vol",
             "snap_enabled", "snap_div", "note_octave", "export_octave", "export_semitone", "note_vol", "note_sound_enabled",
-            "volume", "playback_speed", "analysis_profile", "display_mode", "cmap", "curve_shape", "curve_interpolation",
+            "volume", "playback_speed", "analysis_profile", "cqt_resolution", "display_mode", "cmap", "curve_shape", "curve_interpolation",
         ):
             widget = getattr(self, name, None)
             if widget is not None and hasattr(widget, "blockSignals"):
@@ -1464,6 +1527,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 idx = self.analysis_profile.findText(str(settings["analysis_profile"]))
                 if idx >= 0:
                     self.analysis_profile.setCurrentIndex(idx)
+            if hasattr(self, "cqt_resolution") and "cqt_resolution" in settings:
+                idx = self.cqt_resolution.findText(str(settings["cqt_resolution"]))
+                if idx >= 0:
+                    self.cqt_resolution.setCurrentIndex(idx)
             if hasattr(self, "display_mode") and "display_mode" in settings:
                 idx = self.display_mode.findText(str(settings["display_mode"]))
                 if idx >= 0:
@@ -1898,6 +1965,348 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.load_failed"), str(e))
+
+    def parse_ratio_fraction(self, text: str) -> Fraction:
+        s = str(text).strip()
+        if not s:
+            raise ValueError("empty ratio")
+        # Accept 7/3, 1.25, 5:4, and simple whitespace.
+        if ":" in s:
+            a, b = s.split(":", 1)
+            value = Fraction(a.strip()) / Fraction(b.strip())
+        else:
+            value = Fraction(s)
+        if value <= 0:
+            raise ValueError("ratio must be positive")
+        return value
+
+    def parse_ratio_text(self, text: str) -> float:
+        return float(self.parse_ratio_fraction(text))
+
+    def octave_fold_ratio(self, ratio: float, *, low: float = 1.0, high: float = 2.0) -> float:
+        """
+        Fold a frequency ratio by powers of 2.
+        """
+        return float(self.octave_fold_fraction(Fraction(float(ratio)), low=low, high=high))
+
+    def octave_fold_fraction(self, ratio: Fraction, *, low: float = 1.0, high: float = 2.0) -> Fraction:
+        """
+        Fold a frequency ratio by powers of 2 while keeping exact rational values
+        where possible.
+        """
+        r = Fraction(ratio)
+        if r <= 0:
+            raise ValueError("ratio must be positive")
+        low_f = max(1e-12, float(low))
+        high_f = max(low_f * 1.000001, float(high))
+        while float(r) < low_f:
+            r *= 2
+        while float(r) >= high_f:
+            r /= 2
+        return r
+
+    def _factor_int(self, value: int) -> dict[int, int]:
+        n = abs(int(value))
+        factors: dict[int, int] = {}
+        d = 2
+        while d * d <= n:
+            while n % d == 0:
+                factors[d] = factors.get(d, 0) + 1
+                n //= d
+            d += 1 if d == 2 else 2
+        if n > 1:
+            factors[n] = factors.get(n, 0) + 1
+        return factors
+
+    def dimension_ratio_fraction(self, ratio: Fraction) -> Fraction:
+        """
+        Convert a rational ratio into the Caftaphata-style dimension
+        representative.
+
+        Supported dimension generators:
+
+            1d -> (2/1)^n
+            2d -> (3/2)^n
+            3d -> (5/4)^n
+            4d -> (7/4)^n
+            5d -> (11/4)^n
+
+        Example:
+            2d^m * 3d^n -> (3^m * 5^n) / (2^m * 4^n)
+        """
+        r = Fraction(ratio)
+        if r <= 0:
+            raise ValueError("ratio must be positive")
+
+        generators = {
+            2: Fraction(2, 1),
+            3: Fraction(3, 2),
+            5: Fraction(5, 4),
+            7: Fraction(7, 4),
+            11: Fraction(11, 4),
+        }
+
+        exponents: dict[int, int] = {}
+        for p, e in self._factor_int(r.numerator).items():
+            exponents[p] = exponents.get(p, 0) + e
+        for p, e in self._factor_int(r.denominator).items():
+            exponents[p] = exponents.get(p, 0) - e
+
+        out = Fraction(1, 1)
+        for p, e in sorted(exponents.items()):
+            gen = generators.get(p)
+            if gen is None:
+                raise ValueError(f"unsupported dimension prime: {p}")
+            if e >= 0:
+                out *= gen ** e
+            else:
+                out /= gen ** (-e)
+        return out
+
+    def format_ratio_value(self, ratio: Fraction | float, *, decimals: int = 6) -> str:
+        frac = ratio if isinstance(ratio, Fraction) else Fraction(float(ratio)).limit_denominator(1000000)
+        value = float(frac)
+        if frac.denominator <= 100000 and abs(value) < 100000:
+            return f"{frac.numerator}/{frac.denominator} ({value:.{decimals}f})"
+        return f"{value:.{decimals}f}"
+
+    def caftaphata_pitch_number(self, ratio: float, *, edo: int = 41, offset: int = 2) -> int:
+        edo = max(1, int(edo))
+        n = int(offset) + int(round(edo * math.log2(max(1e-12, float(ratio)))))
+        return n % edo
+
+    def insert_harmonic_diagram(self) -> None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(tr("dialog.harmonic_diagram.title"))
+        dialog.setMinimumWidth(520)
+        dialog.resize(560, 720)
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        info = QtWidgets.QLabel(tr("dialog.harmonic_diagram.info"))
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        form = QtWidgets.QFormLayout()
+        layout.addLayout(form)
+
+        root_hz = QtWidgets.QDoubleSpinBox()
+        root_hz.setRange(0.001, 100000.0)
+        root_hz.setDecimals(6)
+        root_hz.setSingleStep(1.0)
+        root_hz.setSuffix(" Hz")
+        root_hz.setValue(261.625565)
+
+        try:
+            if self.editor.selected_indices:
+                idx = next(iter(self.editor.selected_indices))
+                if 0 <= idx < len(self.editor.notes):
+                    root_hz.setValue(440.0 * (2.0 ** ((float(self.editor.notes[idx].midi) - 69.0) / 12.0)))
+        except Exception:
+            pass
+
+        root_shift = QtWidgets.QLineEdit("1")
+        root_shift.setToolTip("基準音倍率です。local値と同じ次元生成元で変換してから掛けます。例: 1, 1/3, 7/3, 5/3")
+
+        base_1d_offset = QtWidgets.QSpinBox()
+        base_1d_offset.setRange(-64, 64)
+        base_1d_offset.setValue(0)
+        base_1d_offset.setToolTip(
+            "基準音倍率に追加する1次元補正です。"
+            "最終的な基準倍率に (2/1)^offset を掛けます。例: 1/9で+1なら 4/9*2 = 8/9"
+        )
+
+        harmonics = QtWidgets.QLineEdit("1/3,1,3,7,9")
+        harmonics.setToolTip("例: 1/3,1,3,7,9 または 1,3,7,9,21")
+
+        start_box = QtWidgets.QDoubleSpinBox()
+        start_box.setRange(0.0, 36000.0)
+        start_box.setDecimals(6)
+        start_box.setSingleStep(0.25)
+        start_box.setSuffix(" s")
+        start_box.setValue(float(self.editor.playhead_time()) if hasattr(self.editor, "playhead_time") else 0.0)
+
+        duration_box = QtWidgets.QDoubleSpinBox()
+        duration_box.setRange(0.001, 36000.0)
+        duration_box.setDecimals(6)
+        duration_box.setSingleStep(0.25)
+        duration_box.setSuffix(" s")
+        duration_box.setValue(1.0)
+
+        time_unit = QtWidgets.QComboBox()
+        time_unit.addItems([
+            "seconds",
+            "beats",
+        ])
+        time_unit.setCurrentText("seconds")
+        time_unit.setToolTip("Start/Durationを秒で入力するか、拍で入力するかを切り替えます。")
+
+        bpm_box = QtWidgets.QDoubleSpinBox()
+        bpm_box.setRange(1.0, 2000.0)
+        bpm_box.setDecimals(6)
+        bpm_box.setSingleStep(1.0)
+        bpm_box.setSuffix(" BPM")
+        bpm_box.setValue(float(self.grid_bpm.value()) if hasattr(self, "grid_bpm") else 120.0)
+        bpm_box.setToolTip("Time unit = beats のときに、拍数を秒へ変換するBPMです。")
+
+        edo_box = QtWidgets.QSpinBox()
+        edo_box.setRange(1, 999)
+        edo_box.setValue(41)
+
+        offset_box = QtWidgets.QSpinBox()
+        offset_box.setRange(-999, 999)
+        offset_box.setValue(2)
+
+        preview = QtWidgets.QLabel()
+        preview.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
+        preview.setWordWrap(True)
+
+        form.addRow(tr("dialog.harmonic_diagram.root_hz"), root_hz)
+        form.addRow(tr("dialog.harmonic_diagram.root_shift"), root_shift)
+        form.addRow(tr("dialog.harmonic_diagram.base_1d_offset"), base_1d_offset)
+        form.addRow(tr("dialog.harmonic_diagram.harmonics"), harmonics)
+        form.addRow(tr("dialog.harmonic_diagram.time_unit"), time_unit)
+        form.addRow(tr("dialog.harmonic_diagram.bpm"), bpm_box)
+        form.addRow(tr("dialog.harmonic_diagram.start"), start_box)
+        form.addRow(tr("dialog.harmonic_diagram.duration"), duration_box)
+        form.addRow(tr("dialog.harmonic_diagram.edo"), edo_box)
+        form.addRow(tr("dialog.harmonic_diagram.offset"), offset_box)
+        form.addRow(tr("dialog.harmonic_diagram.preview"), preview)
+
+        def harmonic_time_values() -> tuple[float, float]:
+            start_value = float(start_box.value())
+            duration_value = float(duration_box.value())
+            if time_unit.currentText() == "beats":
+                beat_sec = 60.0 / max(1e-9, float(bpm_box.value()))
+                return start_value * beat_sec, duration_value * beat_sec
+            return start_value, duration_value
+
+        def one_d_offset_factor() -> Fraction:
+            offset = int(base_1d_offset.value())
+            if offset >= 0:
+                return Fraction(2, 1) ** offset
+            return Fraction(1, 2) ** (-offset)
+
+        def diagram_components(multiplier: Fraction, local: Fraction) -> tuple[Fraction, Fraction, Fraction, Fraction]:
+            """
+            Return:
+              raw_global_ratio, placed_ratio, base_dimension_ratio_with_1d_offset, local_dimension_ratio
+
+            Chalaxata/Caftaphata-style insertion:
+              1. convert the base multiplier by the fixed dimension generators
+              2. apply Base 1D offset as (2/1)^offset
+              3. convert the diagram/local value by the same fixed dimension generators
+              4. placed_ratio = base_dimension_ratio_with_1d_offset * local_dimension_ratio
+            """
+            raw_global = multiplier * local
+            base_rep = self.dimension_ratio_fraction(multiplier) * one_d_offset_factor()
+            local_rep = self.dimension_ratio_fraction(local)
+            return raw_global, base_rep * local_rep, base_rep, local_rep
+
+        def update_time_unit_ui() -> None:
+            beat_mode = time_unit.currentText() == "beats"
+            bpm_box.setEnabled(beat_mode)
+            if beat_mode:
+                start_box.setSuffix(" beat")
+                duration_box.setSuffix(" beat")
+                start_box.setSingleStep(1.0)
+                duration_box.setSingleStep(1.0)
+            else:
+                start_box.setSuffix(" s")
+                duration_box.setSuffix(" s")
+                start_box.setSingleStep(0.25)
+                duration_box.setSingleStep(0.25)
+            update_preview()
+
+        def update_preview() -> None:
+            try:
+                shift = self.parse_ratio_fraction(root_shift.text())
+                vals = [self.parse_ratio_fraction(x) for x in harmonics.text().replace(";", ",").split(",") if x.strip()]
+                if not vals:
+                    preview.setText("No harmonics")
+                    return
+                start_sec, duration_sec = harmonic_time_values()
+                if time_unit.currentText() == "beats":
+                    lines = [f"time: {start_box.value():g} beat + {duration_box.value():g} beat @ {bpm_box.value():g} BPM = {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
+                else:
+                    lines = [f"time: {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
+
+                base_rep = self.dimension_ratio_fraction(shift)
+                offset_factor = one_d_offset_factor()
+                effective_base = base_rep * offset_factor
+                lines.append(
+                    "base multiplier: "
+                    f"{self.format_ratio_value(shift)} -> dimension {self.format_ratio_value(base_rep)} "
+                    f"* 2^{int(base_1d_offset.value())} = {self.format_ratio_value(effective_base)}"
+                )
+
+                for v in vals:
+                    raw_ratio, ratio, multiplier_rep, local_rep = diagram_components(shift, v)
+
+                    hz = float(root_hz.value()) * float(ratio)
+                    midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
+                    pc = self.caftaphata_pitch_number(float(raw_ratio), edo=edo_box.value(), offset=offset_box.value())
+
+                    detail = (
+                        f"local {self.format_ratio_value(v)} -> dimension {self.format_ratio_value(local_rep)}, "
+                        f"base_dimension×local_dimension {self.format_ratio_value(ratio)}"
+                    )
+
+                    lines.append(f"{detail}, {hz:.6f} Hz, MIDI {midi:.6f}, #{pc}")
+                preview.setText("\n".join(lines))
+            except Exception as e:
+                preview.setText(f"Invalid ratio: {e}")
+
+        for w in (root_hz, base_1d_offset, start_box, duration_box, bpm_box, edo_box, offset_box):
+            w.valueChanged.connect(lambda *_: update_preview())
+        time_unit.currentTextChanged.connect(lambda *_: update_time_unit_ui())
+        root_shift.textChanged.connect(lambda *_: update_preview())
+        harmonics.textChanged.connect(lambda *_: update_preview())
+        update_time_unit_ui()
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            shift = self.parse_ratio_fraction(root_shift.text())
+            vals = [self.parse_ratio_fraction(x) for x in harmonics.text().replace(";", ",").split(",") if x.strip()]
+            if not vals:
+                raise ValueError("harmonics list is empty")
+
+            start, duration = harmonic_time_values()
+            end = start + duration
+            root_hz_value = float(root_hz.value())
+
+            self.editor.push_undo()
+            inserted = []
+            for v in vals:
+                raw_ratio, ratio, _multiplier_rep, _local_rep = diagram_components(shift, v)
+                hz = root_hz_value * float(ratio)
+                midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
+                self.editor.notes.append(Note(start, end, midi).normalized())
+                inserted.append(self.caftaphata_pitch_number(float(raw_ratio), edo=edo_box.value(), offset=offset_box.value()))
+
+            self.editor.selected_indices = set(range(len(self.editor.notes) - len(vals), len(self.editor.notes)))
+            self.editor.selected_index = min(self.editor.selected_indices) if self.editor.selected_indices else None
+            self.editor.redraw_notes()
+            self.editor.notes_changed.emit()
+            self.mark_dirty()
+            self.statusBar().showMessage(
+                tr(
+                    "status.harmonic_diagram_inserted",
+                    count=len(vals),
+                    numbers=", ".join(str(x) for x in inserted),
+                )
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, tr("dialog.harmonic_diagram.title"), str(e))
 
     def check_for_updates(self, *, silent: bool = False) -> None:
         """
@@ -2345,6 +2754,22 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "faint/hidden にするとトラック線を薄く/非表示にできます。"
         )
 
+        self.visual_path_mode = QtWidgets.QComboBox()
+        self.visual_path_mode.addItems(["raw", "upward"])
+        self.visual_path_mode.setCurrentText("raw")
+        self.visual_path_mode.setToolTip(
+            "全export mode共通の見た目パス補正。\n"
+            "raw: 角度をそのまま使う\n"
+            "upward: 各タイルの絶対方向を指定角度へ寄せ、SetSpeedでtimingを補正する"
+        )
+
+        self.visual_path_angle = QtWidgets.QDoubleSpinBox()
+        self.visual_path_angle.setRange(0.0, 359.999)
+        self.visual_path_angle.setDecimals(3)
+        self.visual_path_angle.setValue(90.0)
+        self.visual_path_angle.setSuffix("°")
+        self.visual_path_angle.setToolTip("Visual path upward の絶対方向。90°=上方向")
+
         self.final_angle_mode = QtWidgets.QComboBox()
         self.final_angle_mode.addItems(["scaled", "cardinal", "custom"])
         self.final_angle_mode.setCurrentText("scaled")
@@ -2437,6 +2862,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.base_bpm"), self.base_bpm),
             (tr("export.angle_only_bpm"), self.angle_only_bpm),
             (tr("export.track_visual"), self.track_visual),
+            (tr("export.visual_path_mode"), self.visual_path_mode),
+            (tr("export.visual_path_angle"), self.visual_path_angle),
         ])
 
         add_export_tab(tr("export.tab_harmony"), [
@@ -2556,6 +2983,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
             "track_visual": self.track_visual.currentText(),
+            "visual_path_mode": self.visual_path_mode.currentText(),
+            "visual_path_angle": float(self.visual_path_angle.value()),
             # Phase-continuous glide is now the standard behavior.
             "phase_continuous_glide": True,
             "final_angle_mode": self.final_angle_mode.currentText(),

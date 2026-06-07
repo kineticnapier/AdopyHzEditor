@@ -10,13 +10,13 @@ from note_model import Note, note_name, midi_to_hz
 
 
 class EditorPlot(pg.PlotWidget):
-    note_created = QtCore.Signal(float, float, int)
+    note_created = QtCore.Signal(float, float, float)
     curve_created = QtCore.Signal(float, float, float, float)
-    note_delete_requested = QtCore.Signal(float, int)
-    note_select_requested = QtCore.Signal(float, int, int)
+    note_delete_requested = QtCore.Signal(float, float)
+    note_select_requested = QtCore.Signal(float, float, int)
     note_move_preview = QtCore.Signal(float, int)
     note_move_finished = QtCore.Signal(float, int)
-    cursor_moved = QtCore.Signal(float, int)
+    cursor_moved = QtCore.Signal(float, float)
     wheel_navigate = QtCore.Signal(int, int)  # delta, modifiers int
 
     def __init__(self) -> None:
@@ -51,7 +51,7 @@ class EditorPlot(pg.PlotWidget):
 
         if ev.button() == QtCore.Qt.MouseButton.LeftButton:
             x = float(view.x())
-            y = int(round(float(view.y())))
+            y = float(view.y())
 
             # If clicked on an existing note, drag means move selected notes.
             if self.move_drag_checker is not None and self.move_drag_checker(x, y, mods_value):
@@ -68,7 +68,7 @@ class EditorPlot(pg.PlotWidget):
             return
 
         if ev.button() == QtCore.Qt.MouseButton.RightButton:
-            self.note_delete_requested.emit(float(view.x()), int(round(view.y())))
+            self.note_delete_requested.emit(float(view.x()), float(view.y()))
             ev.accept()
             return
 
@@ -87,7 +87,7 @@ class EditorPlot(pg.PlotWidget):
             else:
                 self._update_rubber()
         else:
-            self.cursor_moved.emit(float(view.x()), int(round(float(view.y()))))
+            self.cursor_moved.emit(float(view.x()), float(view.y()))
 
         ev.accept()
 
@@ -109,7 +109,7 @@ class EditorPlot(pg.PlotWidget):
 
             x1, x2 = float(start.x()), float(end.x())
             y1, y2 = float(start.y()), float(end.y())
-            y = int(round((y1 + y2) * 0.5))
+            y = float((y1 + y2) * 0.5)
             mods = int(ev.modifiers().value)
             alt = bool(mods & int(QtCore.Qt.KeyboardModifier.AltModifier.value))
 
@@ -146,7 +146,7 @@ class EditorPlot(pg.PlotWidget):
         if self._drag_start is None or self._drag_now is None:
             return
         x1, x2 = float(self._drag_start.x()), float(self._drag_now.x())
-        y = round((float(self._drag_start.y()) + float(self._drag_now.y())) * 0.5)
+        y = float((float(self._drag_start.y()) + float(self._drag_now.y())) * 0.5)
         rect = QtCore.QRectF(min(x1, x2), y - 0.45, abs(x2 - x1), 0.9)
 
         if self._rubber is None:
@@ -278,13 +278,16 @@ class EditorView(QtWidgets.QWidget):
             midi_max=int(midi_max),
             frame_times=frame_times,
             sr=22050,
+            bins_per_semitone=1,
+            folded_to_semitone=True,
         )
 
     def set_initial_blank_workspace(self) -> None:
         self.spectrogram = self.make_blank_workspace_spectrogram()
         self.refresh_image()
         spec = self.spectrogram
-        self.image.setRect(QtCore.QRectF(0, spec.midi_min - 0.5, spec.duration, spec.midi_max - spec.midi_min + 1))
+        step = float(getattr(spec, "pitch_step", 1.0) or 1.0)
+        self.image.setRect(QtCore.QRectF(0, spec.midi_min - step / 2.0, spec.duration, spec.db.shape[0] * step))
         self.set_view(0.0, min(12.0, spec.duration), spec.midi_min, min(60, spec.midi_max - spec.midi_min + 1))
         self.redraw_pitch_grid()
         self.redraw_beat_grid()
@@ -336,7 +339,7 @@ class EditorView(QtWidgets.QWidget):
         self.restore_state(nxt)
         self.status_changed.emit("Redo")
 
-    def start_move_drag(self, x: float, midi: int, mods_value: int) -> bool:
+    def start_move_drag(self, x: float, midi: float, mods_value: int) -> bool:
         # Ctrl/Shift click is reserved for multi-selection.
         ctrl = bool(mods_value & int(QtCore.Qt.KeyboardModifier.ControlModifier.value))
         shift = bool(mods_value & int(QtCore.Qt.KeyboardModifier.ShiftModifier.value))
@@ -472,11 +475,14 @@ class EditorView(QtWidgets.QWidget):
     def set_spectrogram(self, spec: Spectrogram) -> None:
         self.spectrogram = spec
         self.refresh_image()
-        self.image.setRect(QtCore.QRectF(0, spec.midi_min - 0.5, spec.duration, spec.midi_max - spec.midi_min + 1))
+        step = float(getattr(spec, "pitch_step", 1.0) or 1.0)
+        self.image.setRect(QtCore.QRectF(0, spec.midi_min - step / 2.0, spec.duration, spec.db.shape[0] * step))
         self.set_view(0.0, min(12.0, spec.duration), spec.midi_min, min(60, spec.midi_max - spec.midi_min + 1))
         self.redraw_pitch_grid()
         self.redraw_beat_grid()
-        self.status_changed.emit(f"Loaded spectrogram: {spec.duration:.2f}s / {spec.midi_min}-{spec.midi_max}")
+        bpo = int(getattr(spec, "bins_per_octave", 12) or 12)
+        cents = 1200.0 / max(1, bpo)
+        self.status_changed.emit(f"Loaded spectrogram: {spec.duration:.2f}s / {spec.midi_min}-{spec.midi_max} / {bpo}-EDO ({cents:g}c)")
 
     def refresh_image(self) -> None:
         if self.spectrogram is None:
@@ -539,7 +545,24 @@ class EditorView(QtWidgets.QWidget):
         if self.spectrogram is None:
             return
 
-        # WaveTone-like pitch guides: faint semitone lines, stronger C/octave lines.
+        # WaveTone-like pitch guides. In microtonal CQT modes, draw faint
+        # sub-semitone / EDO guide lines at the displayed CQT bin resolution.
+        pitch_step = max(1e-6, float(getattr(self.spectrogram, "pitch_step", 1.0) or 1.0))
+        if pitch_step < 0.999:
+            y = float(self.spectrogram.midi_min)
+            max_y = float(self.spectrogram.midi_max) + 1.0
+            count = 0
+            while y <= max_y + 1e-9 and count < 20000:
+                nearest_int = round(y)
+                if abs(y - nearest_int) > 1e-5:
+                    sub = pg.InfiniteLine(pos=y - pitch_step / 2.0, angle=0, movable=False)
+                    sub.setZValue(3)
+                    sub.setPen(pg.mkPen((160, 190, 255, 18), width=1))
+                    self.plot.plotItem.addItem(sub)
+                    self._pitch_guide_items.append(sub)
+                y += pitch_step
+                count += 1
+
         for midi in range(self.spectrogram.midi_min, self.spectrogram.midi_max + 1):
             y = midi - 0.5
             line = pg.InfiniteLine(pos=y, angle=0, movable=False)
@@ -733,27 +756,30 @@ class EditorView(QtWidgets.QWidget):
         best_db = float(values[int(np.argmax(values))])
         return best_midi, best_db
 
-    def on_cursor_moved(self, x: float, midi: int) -> None:
+    def on_cursor_moved(self, x: float, midi: float) -> None:
         if self.spectrogram is None:
             return
 
         x = max(0.0, min(float(x), self.spectrogram.duration))
-        midi = max(self.spectrogram.midi_min, min(self.spectrogram.midi_max, int(midi)))
+        midi = max(float(self.spectrogram.midi_min), min(float(self.spectrogram.midi_max), self.snap_pitch_to_display(float(midi))))
 
         self.cursor_x.setValue(x)
-        self.cursor_y.setValue(midi)
+        self.cursor_y.setValue(float(midi))
         self.cursor_x.setVisible(True)
         self.cursor_y.setVisible(True)
 
         freq = midi_to_hz(midi)
-        info = self.peak_info_at(x, midi, search_range=max(2, self.cursor_peak_range))
+        nearest = round(float(midi))
+        cents = (float(midi) - nearest) * 100.0
+        micro = f"{note_name(nearest)}{cents:+.1f}c"
+        info = self.peak_info_at(x, int(round(midi)), search_range=max(2, self.cursor_peak_range))
         if info is not None:
             peak_midi, peak_db = info
             self.status_changed.emit(
-                f"Cursor {x:.3f}s / {note_name(midi)} {freq:.2f}Hz | nearby peak: {note_name(peak_midi)} {midi_to_hz(peak_midi):.2f}Hz ({peak_db:.1f} dB)"
+                f"Cursor {x:.3f}s / {micro} {freq:.2f}Hz | nearby peak: {note_name(peak_midi)} {midi_to_hz(peak_midi):.2f}Hz ({peak_db:.1f} dB)"
             )
         else:
-            self.status_changed.emit(f"Cursor {x:.3f}s / {note_name(midi)} {freq:.2f}Hz")
+            self.status_changed.emit(f"Cursor {x:.3f}s / {micro} {freq:.2f}Hz")
 
     def set_snap_grid(self, *, enabled: bool, bpm: float, offset_sec: float, division: int = 1) -> None:
         self.snap_enabled = bool(enabled)
@@ -823,6 +849,21 @@ class EditorView(QtWidgets.QWidget):
         # default: ease-in-out
         return p0, p3
 
+    def current_pitch_step(self) -> float:
+        spec = getattr(self, "spectrogram", None)
+        step = float(getattr(spec, "pitch_step", 0.0) or 0.0)
+        if step > 0:
+            return step
+        bps = max(1, int(getattr(spec, "bins_per_semitone", 1) or 1))
+        return 1.0 / float(bps)
+
+    def snap_pitch_to_display(self, midi: float) -> float:
+        step = self.current_pitch_step()
+        if step <= 0:
+            return self.clamp_midi_value(float(midi))
+        snapped = round(float(midi) / step) * step
+        return self.clamp_midi_value(snapped)
+
     def add_curve_note(self, start: float, end: float, start_midi: float, end_midi: float) -> None:
         start_midi = self.clamp_midi_value(start_midi)
         end_midi = self.clamp_midi_value(end_midi)
@@ -861,9 +902,9 @@ class EditorView(QtWidgets.QWidget):
             f"Added {self.curve_shape}/{self.curve_interpolation} curve {note_name(start_midi)}→{note_name(end_midi)} {start:.3f}-{end:.3f}s"
         )
 
-    def add_note(self, start: float, end: float, midi: int) -> None:
+    def add_note(self, start: float, end: float, midi: float) -> None:
         if self.spectrogram is not None:
-            midi = int(round(self.clamp_midi_value(midi)))
+            midi = self.snap_pitch_to_display(float(midi))
 
         if self.snap_enabled:
             a = self.snap_time(start)
@@ -889,7 +930,7 @@ class EditorView(QtWidgets.QWidget):
         suffix = (" " + ", ".join(flags)) if flags else ""
         self.status_changed.emit(f"Added{suffix} {note_name(midi)} {midi_to_hz(midi):.2f}Hz {start:.3f}-{end:.3f}s")
 
-    def nearest_note_index(self, x: float, midi: int) -> int | None:
+    def nearest_note_index(self, x: float, midi: float) -> int | None:
         """
         Hit-test only when the cursor directly touches the note rectangle.
 
@@ -910,7 +951,7 @@ class EditorView(QtWidgets.QWidget):
                 if abs(float(midi) - n.midi_at(u)) <= 0.55:
                     candidates.append((n.duration, i))
             else:
-                if int(round(midi)) == int(round(n.midi)):
+                if abs(float(midi) - float(n.midi)) <= max(0.55, self.current_pitch_step() * 0.55):
                     candidates.append((n.duration, i))
 
         if not candidates:
@@ -918,7 +959,7 @@ class EditorView(QtWidgets.QWidget):
         candidates.sort()
         return candidates[0][1]
 
-    def select_nearest(self, x: float, midi: int, mods_value: int = 0) -> None:
+    def select_nearest(self, x: float, midi: float, mods_value: int = 0) -> None:
         idx = self.nearest_note_index(x, midi)
         ctrl = bool(mods_value & int(QtCore.Qt.KeyboardModifier.ControlModifier.value))
         shift = bool(mods_value & int(QtCore.Qt.KeyboardModifier.ShiftModifier.value))
@@ -954,7 +995,7 @@ class EditorView(QtWidgets.QWidget):
         self.playhead_moved.emit(self.playhead_time())
         self.status_changed.emit(f"Playhead: {self.playhead_time():.3f}s")
 
-    def delete_nearest(self, x: float, midi: int) -> None:
+    def delete_nearest(self, x: float, midi: float) -> None:
         idx = self.nearest_note_index(x, midi)
         if idx is not None:
             if idx in self.selected_indices and len(self.selected_indices) > 1:

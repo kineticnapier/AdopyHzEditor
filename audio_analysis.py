@@ -7,7 +7,7 @@ import json
 import numpy as np
 
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 
 @dataclass
@@ -19,6 +19,10 @@ class Spectrogram:
     midi_max: int
     frame_times: np.ndarray
     sr: int
+    bins_per_semitone: int = 1
+    folded_to_semitone: bool = True
+    bins_per_octave: int = 12
+    pitch_step: float = 1.0
 
 
 def midi_to_hz(note: float) -> float:
@@ -139,11 +143,13 @@ def analysis_cache_path(
     hop_length: int = 1536,
     engine: str = "hybrid",
     bins_per_semitone: int = 1,
+    fold_to_semitone: bool = True,
+    cqt_bins_per_octave: int | None = None,
 ) -> Path:
     path = Path(audio_path)
     midi_min, midi_max = clamp_midi_range_for_sr(midi_min, midi_max, sr)
     bins_per_semitone = max(1, int(bins_per_semitone))
-    bins_per_octave = 12 * bins_per_semitone
+    bins_per_octave = max(1, int(cqt_bins_per_octave or (12 * bins_per_semitone)))
     key = cache_key(
         path,
         cache_version=CACHE_VERSION,
@@ -154,6 +160,8 @@ def analysis_cache_path(
         bins_per_octave=bins_per_octave,
         engine=engine,
         bins_per_semitone=bins_per_semitone,
+        fold_to_semitone=bool(fold_to_semitone),
+        cqt_bins_per_octave=bins_per_octave,
     )
     return Path.home() / ".adopyhzeditor_cache" / f"{key}.npz"
 
@@ -175,6 +183,8 @@ def analyze_cqt(
     use_cache: bool = True,
     engine: str = "hybrid",
     bins_per_semitone: int = 1,
+    fold_to_semitone: bool = True,
+    cqt_bins_per_octave: int | None = None,
 ) -> Spectrogram:
     import librosa
 
@@ -182,7 +192,11 @@ def analyze_cqt(
     midi_min, midi_max = clamp_midi_range_for_sr(midi_min, midi_max, sr)
 
     bins_per_semitone = max(1, int(bins_per_semitone))
-    bins_per_octave = 12 * bins_per_semitone
+    bins_per_octave = max(1, int(cqt_bins_per_octave or (12 * bins_per_semitone)))
+    if bins_per_octave % 12 == 0:
+        bins_per_semitone = max(1, bins_per_octave // 12)
+    else:
+        fold_to_semitone = False
 
     cache_dir = Path.home() / ".adopyhzeditor_cache"
     cache_dir.mkdir(exist_ok=True)
@@ -198,6 +212,8 @@ def analyze_cqt(
         bins_per_octave=bins_per_octave,
         engine=engine,
         bins_per_semitone=bins_per_semitone,
+        fold_to_semitone=bool(fold_to_semitone),
+        cqt_bins_per_octave=bins_per_octave,
     )
     cache_path = cache_dir / f"{key}.npz"
 
@@ -211,13 +227,19 @@ def analyze_cqt(
             midi_max=int(data["midi_max"]),
             frame_times=data["frame_times"],
             sr=int(data["sr"]),
+            bins_per_semitone=int(data["bins_per_semitone"]) if "bins_per_semitone" in data.files else 1,
+            folded_to_semitone=bool(data["folded_to_semitone"]) if "folded_to_semitone" in data.files else True,
+            bins_per_octave=int(data["bins_per_octave"]) if "bins_per_octave" in data.files else 12,
+            pitch_step=float(data["pitch_step"]) if "pitch_step" in data.files else 1.0,
         )
 
+    import math
     y, actual_sr = librosa.load(str(path), sr=sr, mono=True)
     duration = float(librosa.get_duration(y=y, sr=actual_sr))
 
-    n_midi_bins = int(midi_max - midi_min + 1)
-    n_bins = n_midi_bins * bins_per_semitone
+    pitch_span = float(midi_max - midi_min + 1)
+    pitch_step = 12.0 / float(bins_per_octave)
+    n_bins = max(1, int(math.ceil(pitch_span / max(1e-9, pitch_step))))
 
     # hybrid_cqt is usually faster than full cqt for broad ranges.
     cqt_func = librosa.hybrid_cqt if engine == "hybrid" and hasattr(librosa, "hybrid_cqt") else librosa.cqt
@@ -242,7 +264,15 @@ def analyze_cqt(
         )
 
     mag = np.abs(cqt).astype(np.float32)
-    mag = reduce_oversampled_cqt_to_midi(mag, bins_per_semitone)
+    if bool(fold_to_semitone) and bins_per_octave % 12 == 0:
+        mag = reduce_oversampled_cqt_to_midi(mag, bins_per_semitone)
+        display_bins_per_semitone = 1
+        display_bins_per_octave = 12
+        display_pitch_step = 1.0
+    else:
+        display_bins_per_semitone = max(1, int(round(bins_per_octave / 12.0)))
+        display_bins_per_octave = bins_per_octave
+        display_pitch_step = 12.0 / float(bins_per_octave)
     db = librosa.amplitude_to_db(mag, ref=np.max).astype(np.float32)
     times = librosa.frames_to_time(np.arange(db.shape[1]), sr=actual_sr, hop_length=hop_length)
 
@@ -256,9 +286,13 @@ def analyze_cqt(
             midi_max=np.array(midi_max),
             frame_times=times,
             sr=np.array(actual_sr),
+            bins_per_semitone=np.array(display_bins_per_semitone),
+            folded_to_semitone=np.array(bool(fold_to_semitone)),
+            bins_per_octave=np.array(display_bins_per_octave),
+            pitch_step=np.array(display_pitch_step),
         )
 
-    return Spectrogram(str(path), db, duration, midi_min, midi_max, times, actual_sr)
+    return Spectrogram(str(path), db, duration, midi_min, midi_max, times, actual_sr, display_bins_per_semitone, bool(fold_to_semitone), display_bins_per_octave, display_pitch_step)
 
 
 def suppress_harmonics(z: np.ndarray, *, strength: float = 0.65, mode: str = "soft") -> np.ndarray:

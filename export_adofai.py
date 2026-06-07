@@ -104,6 +104,38 @@ def add_relative(angle_data: list[Any], rel: float) -> None:
     angle_data.append(clean_angle(cur))
 
 
+def visual_path_key(mode: str) -> str:
+    return (mode or "raw").lower().replace(" ", "_").replace("-", "_")
+
+
+def visual_path_enabled(mode: str) -> bool:
+    return visual_path_key(mode) in ("upward", "up", "vertical_up", "straight_up")
+
+
+def shape_visual_relative(
+    angle_data: list[Any],
+    rel: float,
+    *,
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
+) -> tuple[float, bool]:
+    """
+    Convert a timing/pitch relative angle into a visual-path relative angle.
+
+    In upward mode, the next absolute tile direction is forced toward the given
+    absolute angle (90° = up in ADOFAI/editor preview). Timing is preserved by
+    callers by recalculating SetSpeed from the returned relative angle.
+    """
+    base_rel = clean_relative_angle(rel)
+    if not visual_path_enabled(visual_path_mode):
+        return base_rel, False
+
+    prev_abs = float(angle_data[-1])
+    desired_abs = float(visual_path_angle) % 360.0
+    shaped = clean_relative_angle(prev_abs + 180.0 - desired_abs)
+    return shaped, abs(float(shaped) - float(base_rel)) > 1e-6
+
+
 def speed_event_floor(floor: int) -> int:
     """
     ADOFAI editor visually shows the speed event on the corner/transition tile
@@ -811,6 +843,8 @@ def emit_angle_only_curve_continuous(
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
 ) -> tuple[int, int, float | None, bool, float]:
     """
     Phase-continuous angle-only export for Curve/Glide notes.
@@ -831,6 +865,7 @@ def emit_angle_only_curve_continuous(
     final_visual_used = False
     emitted = 0
     restored = False
+    current_bpm: float | None = float(song_bpm)
 
     for i, rel in enumerate(angles):
         is_final = i == len(angles) - 1
@@ -852,22 +887,34 @@ def emit_angle_only_curve_continuous(
 
             final_rel = adjusted
 
+        final_rel, shaped = shape_visual_relative(
+            angle_data,
+            final_rel,
+            visual_path_mode=visual_path_mode,
+            visual_path_angle=visual_path_angle,
+        )
+
         if abs(float(final_rel) - float(raw_rel)) > 1e-6:
             # Preserve the actual interval duration represented by raw_rel.
             # duration(raw_rel, song_bpm) == duration(final_rel, compensated_bpm)
             compensated_bpm = float(song_bpm) * float(final_rel) / max(EPS, float(raw_rel))
             actions.append(set_bpm(floor, compensated_bpm))
+            current_bpm = compensated_bpm
+            final_visual_used = True
+
+        if shaped:
             final_visual_used = True
 
         add_relative(angle_data, final_rel)
         floor += 1
         emitted += 1
 
-        if abs(float(final_rel) - float(raw_rel)) > 1e-6:
+        if abs(float(final_rel) - float(raw_rel)) > 1e-6 and not visual_path_enabled(visual_path_mode):
             actions.append(set_bpm(floor, song_bpm))
+            current_bpm = float(song_bpm)
             restored = True
 
-    return floor, emitted, float(song_bpm), final_visual_used, total_phase
+    return floor, emitted, current_bpm, final_visual_used, total_phase
 
 
 def emit_direct_curve_continuous(
@@ -879,6 +926,8 @@ def emit_direct_curve_continuous(
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
 ) -> tuple[int, int, float | None, bool, float]:
     """
     Phase-continuous Direct 180 export for Curve/Glide notes.
@@ -913,11 +962,18 @@ def emit_direct_curve_continuous(
             if adjusted > 0:
                 rel = adjusted
 
+        rel, shaped = shape_visual_relative(
+            angle_data,
+            rel,
+            visual_path_mode=visual_path_mode,
+            visual_path_angle=visual_path_angle,
+        )
+
         bpm = rel * 60.0 / max(EPS, 180.0 * dt)
         actions.append(set_bpm(floor, bpm))
         current_bpm = bpm
 
-        if is_final and abs(rel - 180.0) > 1e-6:
+        if (is_final and abs(rel - 180.0) > 1e-6) or shaped:
             final_visual_used = True
 
         add_relative(angle_data, rel)
@@ -940,6 +996,8 @@ def emit_angle_compression_curve_continuous(
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
 ) -> tuple[int, int, float | None, bool, bool, float]:
     """
     Phase-continuous Angle Compression export for Curve/Glide notes.
@@ -993,6 +1051,15 @@ def emit_angle_compression_curve_continuous(
             if abs(rel - main_angle * frac) > 1e-6:
                 final_visual_used = True
 
+        rel, shaped = shape_visual_relative(
+            angle_data,
+            rel,
+            visual_path_mode=visual_path_mode,
+            visual_path_angle=visual_path_angle,
+        )
+        if shaped:
+            final_visual_used = True
+
         bpm = rel * 60.0 / max(EPS, 180.0 * dt)
         actions.append(set_bpm(floor, bpm))
         current_bpm = bpm
@@ -1004,7 +1071,16 @@ def emit_angle_compression_curve_continuous(
     return floor, emitted, current_bpm, target_used, final_visual_used, total_phase
 
 
-def emit_direct(angle_data, actions, floor, freq, dur, max_tiles_per_note) -> tuple[int, int, float | None]:
+def emit_direct(
+    angle_data,
+    actions,
+    floor,
+    freq,
+    dur,
+    max_tiles_per_note,
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
+) -> tuple[int, int, float | None]:
     if freq <= 0 or dur <= 0:
         return floor, 0, None
 
@@ -1018,6 +1094,37 @@ def emit_direct(angle_data, actions, floor, freq, dur, max_tiles_per_note) -> tu
 
     if max_tiles_per_note > 0:
         whole = min(whole, max_tiles_per_note)
+
+    if visual_path_enabled(visual_path_mode):
+        for _ in range(whole):
+            rel, _shaped = shape_visual_relative(
+                angle_data,
+                180.0,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            tile_bpm = freq * 60.0 * rel / 180.0
+            actions.append(set_bpm(floor, tile_bpm))
+            current_bpm = tile_bpm
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+
+        if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
+            rel, _shaped = shape_visual_relative(
+                angle_data,
+                180.0,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            frac_bpm = freq * 60.0 * rel / max(EPS, 180.0 * frac)
+            actions.append(set_bpm(floor, frac_bpm))
+            current_bpm = frac_bpm
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+
+        return floor, emitted, current_bpm
 
     if whole > 0:
         actions.append(set_bpm(floor, bpm))
@@ -1051,6 +1158,8 @@ def emit_angle_only(
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
 ) -> tuple[int, int, float | None, bool]:
     """
     Angle-only Hz charting.
@@ -1086,6 +1195,54 @@ def emit_angle_only(
     whole_to_emit = whole
     if max_tiles_per_note > 0:
         whole_to_emit = min(whole_to_emit, max_tiles_per_note)
+
+    if visual_path_enabled(visual_path_mode):
+        final_visual_used = bool(target_used and abs(angle - raw_angle) > 1e-6)
+        current_bpm: float | None = None
+
+        for _ in range(whole_to_emit):
+            rel, shaped = shape_visual_relative(
+                angle_data,
+                angle,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            tile_bpm = (freq * 60.0) * (rel / 180.0)
+            actions.append(set_bpm(floor, tile_bpm))
+            current_bpm = tile_bpm
+            final_visual_used = final_visual_used or shaped
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+
+        if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
+            scaled_final_angle = angle * frac
+            prev_abs = float(angle_data[-1])
+            final_angle = final_visual_angle(
+                mode=final_angle_mode,
+                prev_abs=prev_abs,
+                scaled_final_angle=scaled_final_angle,
+                custom_final_angle=final_custom_angle,
+                cardinal_step=final_cardinal_step,
+            )
+            if final_angle <= 0:
+                final_angle = scaled_final_angle
+
+            rel, shaped = shape_visual_relative(
+                angle_data,
+                final_angle,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
+            actions.append(set_bpm(floor, final_bpm))
+            current_bpm = final_bpm
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+            final_visual_used = final_visual_used or shaped or abs(final_angle - scaled_final_angle) > 1e-6
+
+        return floor, emitted, current_bpm if current_bpm is not None else float(song_bpm), final_visual_used
 
     if whole_to_emit > 0 and abs(angle_bpm - float(song_bpm)) > 1e-6:
         actions.append(set_bpm(floor, angle_bpm))
@@ -1149,6 +1306,8 @@ def emit_angle_compression(
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
 ) -> tuple[int, int, float | None, bool, bool]:
     if freq <= 0 or dur <= 0:
         return floor, 0, None, False, False
@@ -1191,6 +1350,53 @@ def emit_angle_compression(
     whole_to_emit = x_tiles
     if max_tiles_per_note > 0:
         whole_to_emit = min(whole_to_emit, max_tiles_per_note)
+
+    if visual_path_enabled(visual_path_mode):
+        final_visual_used = False
+        for _ in range(whole_to_emit):
+            rel, shaped = shape_visual_relative(
+                angle_data,
+                angle,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            tile_bpm = (freq * 60.0) * (rel / 180.0)
+            actions.append(set_bpm(floor, tile_bpm))
+            bpm = tile_bpm
+            current_bpm = tile_bpm if "current_bpm" in locals() else tile_bpm
+            final_visual_used = final_visual_used or shaped
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+
+        if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
+            scaled_final_angle = frac_base_angle * frac
+            prev_abs = float(angle_data[-1])
+            final_angle = final_visual_angle(
+                mode=final_angle_mode,
+                prev_abs=prev_abs,
+                scaled_final_angle=scaled_final_angle,
+                custom_final_angle=final_custom_angle,
+                cardinal_step=final_cardinal_step,
+            )
+            if final_angle <= 0:
+                final_angle = scaled_final_angle
+
+            rel, shaped = shape_visual_relative(
+                angle_data,
+                final_angle,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
+            actions.append(set_bpm(floor, final_bpm))
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+            bpm = final_bpm
+            final_visual_used = final_visual_used or shaped or abs(final_angle - scaled_final_angle) > 1e-6
+
+        return floor, emitted, bpm, target_used, final_visual_used
 
     for _ in range(whole_to_emit):
         add_relative(angle_data, angle)
@@ -1661,7 +1867,9 @@ def emit_harmony_polyrhythm(
     harmony_timing_mode: str = "setspeed",
     harmony_visual_mode: str = "raw",
     harmony_visual_step: float = 45.0,
-) -> tuple[int, int, float | None, int, int, int, int]:
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
+) -> tuple[int, int, float | None, int, int, int, int, int]:
     """
     Emit a single serial ADOFAI path from merged harmony impulse times.
 
@@ -1677,7 +1885,7 @@ def emit_harmony_polyrhythm(
         visual angle.
     """
     if not events:
-        return floor, 0, current_bpm, 0, 0, 0, 0
+        return floor, 0, current_bpm, 0, 0, 0, 0, 0
 
     timing_key = _harmony_timing_key(harmony_timing_mode)
     angle_only_timing = timing_key in ("angle_only", "angleonly", "angle", "global_bpm", "one_bpm")
@@ -1687,6 +1895,7 @@ def emit_harmony_polyrhythm(
     remapped_angles = 0
     target_angle_used = 0
     setspeed_events = 0
+    visual_path_tiles = 0
     now = 0.0
 
     for i, e in enumerate(events):
@@ -1733,6 +1942,15 @@ def emit_harmony_polyrhythm(
                 step=harmony_visual_step,
             )
 
+        rel, path_shaped = shape_visual_relative(
+            angle_data,
+            rel,
+            visual_path_mode=visual_path_mode,
+            visual_path_angle=visual_path_angle,
+        )
+        if path_shaped:
+            visual_path_tiles += 1
+
         # Preserve timing after changing the visual angle:
         #   new_bpm = old_bpm * (new_angle / old_angle)
         #
@@ -1763,7 +1981,7 @@ def emit_harmony_polyrhythm(
         emitted += 1
         now = t + dt
 
-    return floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events
+    return floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events, visual_path_tiles
 
 
 def build_adofai_level(
@@ -1777,6 +1995,8 @@ def build_adofai_level(
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
     track_visual: str = "normal",
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
@@ -1842,7 +2062,7 @@ def build_adofai_level(
             max_tiles=max_tiles,
             max_tiles_per_note=max_tiles_per_note,
         )
-        floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events = emit_harmony_polyrhythm(
+        floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events, visual_path_tiles = emit_harmony_polyrhythm(
             angle_data,
             actions,
             floor,
@@ -1853,10 +2073,15 @@ def build_adofai_level(
             harmony_timing_mode=harmony_timing_mode,
             harmony_visual_mode=harmony_visual_mode,
             harmony_visual_step=harmony_visual_step,
+            visual_path_mode=visual_path_mode,
+            visual_path_angle=visual_path_angle,
         )
         stats: dict[str, int | float | str] = {
             "method": method_key,
             "track_visual": track_visual,
+            "visual_path_mode": visual_path_mode,
+            "visual_path_angle": round(float(visual_path_angle), 6),
+            "visual_path_tiles": visual_path_tiles,
             "phase_continuous_glide": bool(use_phase_continuous_glide),
             "input_notes_total": len(notes),
             "base_bpm": round(float(base_bpm), 6),
@@ -1934,12 +2159,23 @@ def build_adofai_level(
                     final_angle_mode=final_angle_mode,
                     final_custom_angle=final_custom_angle,
                     final_cardinal_step=final_cardinal_step,
+                    visual_path_mode=visual_path_mode,
+                    visual_path_angle=visual_path_angle,
                 )
                 phase_continuous_curves += 1
                 if final_visual_used:
                     final_visual_corrections += 1
             else:
-                floor, t, note_bpm = emit_direct(angle_data, actions, floor, n.freq, audible, limit)
+                floor, t, note_bpm = emit_direct(
+                    angle_data,
+                    actions,
+                    floor,
+                    n.freq,
+                    audible,
+                    limit,
+                    visual_path_mode=visual_path_mode,
+                    visual_path_angle=visual_path_angle,
+                )
         elif method_key == "angle_only":
             if use_phase_continuous_glide and n.is_curve:
                 floor, t, note_bpm, final_visual_used, _total_phase = emit_angle_only_curve_continuous(
@@ -1953,6 +2189,8 @@ def build_adofai_level(
                     final_angle_mode=final_angle_mode,
                     final_custom_angle=final_custom_angle,
                     final_cardinal_step=final_cardinal_step,
+                    visual_path_mode=visual_path_mode,
+                    visual_path_angle=visual_path_angle,
                 )
                 phase_continuous_curves += 1
             else:
@@ -1968,6 +2206,8 @@ def build_adofai_level(
                     final_angle_mode=final_angle_mode,
                     final_custom_angle=final_custom_angle,
                     final_cardinal_step=final_cardinal_step,
+                    visual_path_mode=visual_path_mode,
+                    visual_path_angle=visual_path_angle,
                 )
 
             if n.target_angle is not None and float(n.target_angle) > EPS:
@@ -1990,6 +2230,8 @@ def build_adofai_level(
                     final_angle_mode=final_angle_mode,
                     final_custom_angle=final_custom_angle,
                     final_cardinal_step=final_cardinal_step,
+                    visual_path_mode=visual_path_mode,
+                    visual_path_angle=visual_path_angle,
                 )
                 phase_continuous_curves += 1
             else:
@@ -2007,6 +2249,8 @@ def build_adofai_level(
                     final_angle_mode=final_angle_mode,
                     final_custom_angle=final_custom_angle,
                     final_cardinal_step=final_cardinal_step,
+                    visual_path_mode=visual_path_mode,
+                    visual_path_angle=visual_path_angle,
                 )
             if target_used:
                 target_angle_used += 1
@@ -2024,6 +2268,8 @@ def build_adofai_level(
     stats: dict[str, int | float | str] = {
         "method": method_key,
         "track_visual": track_visual,
+        "visual_path_mode": visual_path_mode,
+        "visual_path_angle": round(float(visual_path_angle), 6),
         "curve_step_sec": round(float(curve_step_sec), 6),
         "curve_pitch_step": round(float(curve_pitch_step), 6),
         "phase_continuous_glide": bool(use_phase_continuous_glide),
@@ -2099,6 +2345,8 @@ def export_adofai(
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
     track_visual: str = "normal",
+    visual_path_mode: str = "raw",
+    visual_path_angle: float = 90.0,
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
@@ -2127,6 +2375,8 @@ def export_adofai(
         max_tiles=max_tiles,
         max_tiles_per_note=max_tiles_per_note,
         track_visual=track_visual,
+        visual_path_mode=visual_path_mode,
+        visual_path_angle=visual_path_angle,
         curve_step_sec=curve_step_sec,
         curve_pitch_step=curve_pitch_step,
         phase_continuous_glide=phase_continuous_glide,
