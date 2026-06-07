@@ -8,6 +8,8 @@ from note_model import Note, note_name
 
 EPS = 1e-9
 
+CURRENT_VISUAL_ROUTE_STATE: dict[str, Any] | None = None
+
 
 def new_level() -> dict[str, Any]:
     return {
@@ -109,7 +111,233 @@ def visual_path_key(mode: str) -> str:
 
 
 def visual_path_enabled(mode: str) -> bool:
-    return visual_path_key(mode) in ("upward", "up", "vertical_up", "straight_up")
+    return visual_path_key(mode) in ("upward", "up", "vertical_up", "straight_up", "upward_avoid", "avoid_upward", "auto_avoid")
+
+
+def visual_path_avoid_enabled(mode: str) -> bool:
+    return visual_path_key(mode) in ("upward_avoid", "avoid_upward", "auto_avoid")
+
+
+def abs_angle_diff(a: float, b: float) -> float:
+    return abs(((float(a) - float(b) + 180.0) % 360.0) - 180.0)
+
+
+def _route_cell(x: float, y: float, cell_size: float = 0.5) -> tuple[int, int]:
+    return (int(round(float(x) / cell_size)), int(round(float(y) / cell_size)))
+
+
+def _route_add_point(state: dict[str, Any], x: float, y: float) -> None:
+    state["points"].append((float(x), float(y)))
+    grid = state["grid"]
+    cell_size = float(state.get("cell_size", 0.5))
+    cell = _route_cell(x, y, cell_size)
+    grid.setdefault(cell, []).append((float(x), float(y)))
+
+
+def make_visual_route_state(angle_data: list[Any]) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "x": 0.0,
+        "y": 0.0,
+        "processed": 1,
+        "points": [],
+        "grid": {},
+        "cell_size": 0.5,
+        "collision_radius": 0.72,
+        "lookahead": 10,
+        "avoid_turns": 0,
+        "base_safe_tiles": 0,
+    }
+    _route_add_point(state, 0.0, 0.0)
+    sync_visual_route_state(angle_data, state)
+    return state
+
+
+def sync_visual_route_state(angle_data: list[Any], state: dict[str, Any] | None) -> None:
+    if state is None:
+        return
+    processed = int(state.get("processed", 1))
+    if processed < 1:
+        processed = 1
+    if processed > len(angle_data):
+        # The level was rebuilt or angleData was reset.
+        state["x"] = 0.0
+        state["y"] = 0.0
+        state["processed"] = 1
+        state["points"] = []
+        state["grid"] = {}
+        _route_add_point(state, 0.0, 0.0)
+        processed = 1
+
+    x = float(state.get("x", 0.0))
+    y = float(state.get("y", 0.0))
+    for raw in angle_data[processed:]:
+        try:
+            angle = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(angle):
+            continue
+        radians = math.radians(angle)
+        x += math.cos(radians)
+        y += -math.sin(radians)
+        _route_add_point(state, x, y)
+
+    state["x"] = x
+    state["y"] = y
+    state["processed"] = len(angle_data)
+
+
+def _route_nearest_distance_sq(state: dict[str, Any], x: float, y: float) -> float:
+    grid = state.get("grid", {})
+    cell_size = float(state.get("cell_size", 0.5))
+    cx, cy = _route_cell(x, y, cell_size)
+    best = float("inf")
+    # radius 0.72 and cell 0.5 means +/-2 cells covers all meaningful neighbors.
+    for gx in range(cx - 3, cx + 4):
+        for gy in range(cy - 3, cy + 4):
+            for px, py in grid.get((gx, gy), []):
+                dx = float(x) - float(px)
+                dy = float(y) - float(py)
+                d2 = dx * dx + dy * dy
+                if d2 < best:
+                    best = d2
+    return best
+
+
+def _route_heading_score(
+    state: dict[str, Any],
+    *,
+    heading: float,
+    preferred_heading: float,
+    base_heading: float,
+    prev_heading: float,
+    candidate_index: int,
+) -> float:
+    x0 = float(state.get("x", 0.0))
+    y0 = float(state.get("y", 0.0))
+    lookahead = max(1, int(state.get("lookahead", 10)))
+    collision_radius = max(0.01, float(state.get("collision_radius", 0.72)))
+    collision_r2 = collision_radius * collision_radius
+
+    rad = math.radians(float(heading))
+    dx = math.cos(rad)
+    dy = -math.sin(rad)
+
+    score = 0.0
+    for i in range(1, lookahead + 1):
+        x = x0 + dx * i
+        y = y0 + dy * i
+        nearest = _route_nearest_distance_sq(state, x, y)
+        if nearest < collision_r2:
+            score += (collision_r2 - nearest) * 2500.0 / i
+
+    # Prefer flowing upward, but avoid unnecessary hard turns.
+    up_diff = abs_angle_diff(heading, preferred_heading)
+    base_diff = abs_angle_diff(heading, base_heading)
+    prev_diff = abs_angle_diff(heading, prev_heading)
+    score += up_diff * 0.75
+    score += base_diff * 0.18
+    score += prev_diff * 0.10
+
+    # Keep the path from drifting too far sideways.
+    center_x = float(state.get("center_x", 0.0))
+    next_x = x0 + dx
+    score += abs(next_x - center_x) * 0.035
+
+    # Downward movement is allowed only as a fallback.
+    if math.sin(math.radians(float(heading))) < -0.15:
+        score += 350.0
+
+    # Stable tie-breaker so the path does not jitter between equivalent choices.
+    score += candidate_index * 0.001
+    return score
+
+
+def _route_is_safe(state: dict[str, Any], heading: float) -> bool:
+    x0 = float(state.get("x", 0.0))
+    y0 = float(state.get("y", 0.0))
+    lookahead = max(1, int(state.get("lookahead", 10)))
+    collision_radius = max(0.01, float(state.get("collision_radius", 0.72)))
+    collision_r2 = collision_radius * collision_radius
+
+    rad = math.radians(float(heading))
+    dx = math.cos(rad)
+    dy = -math.sin(rad)
+    for i in range(1, lookahead + 1):
+        x = x0 + dx * i
+        y = y0 + dy * i
+        if _route_nearest_distance_sq(state, x, y) < collision_r2:
+            return False
+    return True
+
+
+def _dedupe_headings(headings: list[float]) -> list[float]:
+    out: list[float] = []
+    seen: set[int] = set()
+    for h in headings:
+        h = float(h) % 360.0
+        key = int(round(h * 1000.0))
+        if key not in seen:
+            seen.add(key)
+            out.append(h)
+    return out
+
+
+def choose_upward_avoid_relative(
+    angle_data: list[Any],
+    base_rel: float,
+    *,
+    preferred_heading: float,
+    route_state: dict[str, Any] | None,
+) -> tuple[float, bool]:
+    if route_state is None:
+        return base_rel, False
+
+    sync_visual_route_state(angle_data, route_state)
+
+    prev_abs = float(angle_data[-1])
+    base_heading = (prev_abs + 180.0 - float(base_rel)) % 360.0
+    preferred = float(preferred_heading) % 360.0
+
+    if _route_is_safe(route_state, base_heading):
+        route_state["base_safe_tiles"] = int(route_state.get("base_safe_tiles", 0)) + 1
+        return base_rel, False
+
+    candidates = _dedupe_headings([
+        preferred,
+        preferred - 30.0,
+        preferred + 30.0,
+        preferred - 45.0,
+        preferred + 45.0,
+        preferred - 60.0,
+        preferred + 60.0,
+        preferred - 90.0,
+        preferred + 90.0,
+        preferred - 120.0,
+        preferred + 120.0,
+        base_heading,
+        prev_abs,
+        preferred + 180.0,
+    ])
+
+    best_heading = base_heading
+    best_score = float("inf")
+    for i, heading in enumerate(candidates):
+        score = _route_heading_score(
+            route_state,
+            heading=heading,
+            preferred_heading=preferred,
+            base_heading=base_heading,
+            prev_heading=prev_abs,
+            candidate_index=i,
+        )
+        if score < best_score:
+            best_score = score
+            best_heading = heading
+
+    shaped = clean_relative_angle(prev_abs + 180.0 - best_heading)
+    route_state["avoid_turns"] = int(route_state.get("avoid_turns", 0)) + 1
+    return shaped, abs(float(shaped) - float(base_rel)) > 1e-6
 
 
 def shape_visual_relative(
@@ -122,13 +350,24 @@ def shape_visual_relative(
     """
     Convert a timing/pitch relative angle into a visual-path relative angle.
 
-    In upward mode, the next absolute tile direction is forced toward the given
-    absolute angle (90° = up in ADOFAI/editor preview). Timing is preserved by
-    callers by recalculating SetSpeed from the returned relative angle.
+    upward:
+      force the next absolute tile direction to visual_path_angle.
+
+    upward avoid:
+      keep the original direction while it is safe; if lookahead predicts an
+      overlap with already placed tiles, choose an upward-biased safe heading.
     """
     base_rel = clean_relative_angle(rel)
     if not visual_path_enabled(visual_path_mode):
         return base_rel, False
+
+    if visual_path_avoid_enabled(visual_path_mode):
+        return choose_upward_avoid_relative(
+            angle_data,
+            base_rel,
+            preferred_heading=visual_path_angle,
+            route_state=CURRENT_VISUAL_ROUTE_STATE,
+        )
 
     prev_abs = float(angle_data[-1])
     desired_abs = float(visual_path_angle) % 360.0
@@ -2023,6 +2262,9 @@ def build_adofai_level(
     actions = level["actions"]
     apply_track_visual(level, actions, track_visual)
 
+    global CURRENT_VISUAL_ROUTE_STATE
+    CURRENT_VISUAL_ROUTE_STATE = make_visual_route_state(angle_data) if visual_path_avoid_enabled(visual_path_mode) else None
+
     method_key = (method or "rabbit_zip").lower().replace(" ", "_").replace("-", "_")
     use_phase_continuous_glide = bool(phase_continuous_glide)
 
@@ -2082,6 +2324,8 @@ def build_adofai_level(
             "visual_path_mode": visual_path_mode,
             "visual_path_angle": round(float(visual_path_angle), 6),
             "visual_path_tiles": visual_path_tiles,
+            "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
+            "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
             "phase_continuous_glide": bool(use_phase_continuous_glide),
             "input_notes_total": len(notes),
             "base_bpm": round(float(base_bpm), 6),
@@ -2270,6 +2514,8 @@ def build_adofai_level(
         "track_visual": track_visual,
         "visual_path_mode": visual_path_mode,
         "visual_path_angle": round(float(visual_path_angle), 6),
+        "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
+        "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
         "curve_step_sec": round(float(curve_step_sec), 6),
         "curve_pitch_step": round(float(curve_pitch_step), 6),
         "phase_continuous_glide": bool(use_phase_continuous_glide),
