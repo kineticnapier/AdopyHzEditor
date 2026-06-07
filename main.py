@@ -2762,7 +2762,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "raw: 角度をそのまま使う\n"
             "upward: 各タイルの絶対方向を指定角度へ寄せ、SetSpeedでtimingを補正する\n"
             "upward avoid: 通常方向が既存タイルに近づきそうな時だけ、上方向候補へ逃がす\n"
-            "twirl upward: 下向きになりそうな時だけTwirlを挟み、相対角度は変えずに回転方向だけ反転して上へ逃がす"
+            "twirl upward: 下向きになりそうな時だけTwirlを挟む。angleDataの相対角度は変えない"
         )
 
         self.visual_path_angle = QtWidgets.QDoubleSpinBox()
@@ -2773,12 +2773,13 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.visual_path_angle.setToolTip("Visual path upward の絶対方向。90°=上方向")
 
         self.final_angle_mode = QtWidgets.QComboBox()
-        self.final_angle_mode.addItems(["scaled", "cardinal", "custom"])
+        self.final_angle_mode.addItems(["scaled", "cardinal", "horizontal", "custom"])
         self.final_angle_mode.setCurrentText("scaled")
         self.final_angle_mode.setToolTip(
             "最後の端数タイルの見た目補正\n"
             "scaled: 従来通り。angle * frac\n"
             "cardinal: 最後の絶対角度を0/90/180/270付近へ寄せる\n"
+            "horizontal: 最後の絶対角度を必ず0°または180°の横向きへ寄せる\n"
             "custom: 下の Custom final angle を使う。180°にすれば直進"
         )
 

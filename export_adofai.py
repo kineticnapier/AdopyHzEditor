@@ -82,6 +82,9 @@ def final_visual_angle(
     cardinal:
         choose a relative angle that makes the final absolute tile direction snap
         to the nearest cardinal/grid direction.
+    horizontal:
+        choose a relative angle that makes the final absolute tile direction snap
+        to 0° or 180° only.
     custom:
         use user-specified relative angle.
     """
@@ -98,17 +101,21 @@ def final_visual_angle(
         desired_abs = nearest_cardinal_angle(scaled_abs, cardinal_step)
         return clean_relative_angle(prev_abs + 180.0 - desired_abs)
 
+    if mode in ("horizontal", "snap_horizontal", "sideways"):
+        scaled_abs = clean_angle(prev_abs + 180.0 - scaled_final_angle)
+        # Snap only to horizontal directions. 0° = right, 180° = left.
+        desired_abs = 0.0 if abs_angle_diff(scaled_abs, 0.0) <= abs_angle_diff(scaled_abs, 180.0) else 180.0
+        return clean_relative_angle(prev_abs + 180.0 - desired_abs)
+
     return float(scaled_final_angle)
 
 
 def add_relative(angle_data: list[Any], rel: float) -> None:
     prev = float(angle_data[-1])
-    if CURRENT_TWIRL_ACTIVE:
-        # When Twirl is active, the orbit direction is reversed, so the same
-        # timing relative angle maps to the mirrored absolute tile heading.
-        cur = prev - 180.0 + float(rel)
-    else:
-        cur = prev + 180.0 - float(rel)
+    # angleData itself always stores the same relative-angle geometry.
+    # Twirl is emitted only as an action event; it must not mirror the stored
+    # relative angle, otherwise e.g. 178.5949 becomes 181.4051 in the file.
+    cur = prev + 180.0 - float(rel)
     angle_data.append(clean_angle(cur))
 
 
@@ -408,9 +415,9 @@ def shape_visual_relative(
       overlap with already placed tiles, choose an upward-biased safe heading.
 
     twirl upward:
-      keep the relative angle unchanged. When the next tile would flow
-      downward, insert a pending Twirl and toggle the orbit direction so the
-      same relative angle escapes upward without extra SetSpeed compensation.
+      keep angleData relative angles unchanged. When the next tile would flow
+      downward, insert a pending Twirl and toggle the orbit direction. The
+      stored tile angle is not mirrored.
     """
     global CURRENT_TWIRL_ACTIVE
 
