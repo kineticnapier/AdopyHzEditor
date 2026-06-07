@@ -2755,13 +2755,14 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         )
 
         self.visual_path_mode = QtWidgets.QComboBox()
-        self.visual_path_mode.addItems(["raw", "upward", "upward avoid"])
+        self.visual_path_mode.addItems(["raw", "upward", "upward avoid", "twirl upward"])
         self.visual_path_mode.setCurrentText("raw")
         self.visual_path_mode.setToolTip(
             "全export mode共通の見た目パス補正。\n"
             "raw: 角度をそのまま使う\n"
             "upward: 各タイルの絶対方向を指定角度へ寄せ、SetSpeedでtimingを補正する\n"
-            "upward avoid: 通常方向が既存タイルに近づきそうな時だけ、上方向候補へ逃がす"
+            "upward avoid: 通常方向が既存タイルに近づきそうな時だけ、上方向候補へ逃がす\n"
+            "twirl upward: 下向きになりそうな時だけTwirlを挟み、回転方向を反転して上方向へ逃がす"
         )
 
         self.visual_path_angle = QtWidgets.QDoubleSpinBox()

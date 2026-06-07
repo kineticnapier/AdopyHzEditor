@@ -9,6 +9,7 @@ from note_model import Note, note_name
 EPS = 1e-9
 
 CURRENT_VISUAL_ROUTE_STATE: dict[str, Any] | None = None
+CURRENT_TWIRL_ACTIVE = False
 
 
 def new_level() -> dict[str, Any]:
@@ -102,7 +103,12 @@ def final_visual_angle(
 
 def add_relative(angle_data: list[Any], rel: float) -> None:
     prev = float(angle_data[-1])
-    cur = prev + 180.0 - float(rel)
+    if CURRENT_TWIRL_ACTIVE:
+        # When Twirl is active, the orbit direction is reversed, so the same
+        # timing relative angle maps to the mirrored absolute tile heading.
+        cur = prev - 180.0 + float(rel)
+    else:
+        cur = prev + 180.0 - float(rel)
     angle_data.append(clean_angle(cur))
 
 
@@ -111,11 +117,53 @@ def visual_path_key(mode: str) -> str:
 
 
 def visual_path_enabled(mode: str) -> bool:
-    return visual_path_key(mode) in ("upward", "up", "vertical_up", "straight_up", "upward_avoid", "avoid_upward", "auto_avoid")
+    return visual_path_key(mode) in (
+        "upward",
+        "up",
+        "vertical_up",
+        "straight_up",
+        "upward_avoid",
+        "avoid_upward",
+        "auto_avoid",
+        "twirl_upward",
+        "upward_twirl",
+        "twirl_up",
+    )
 
 
 def visual_path_avoid_enabled(mode: str) -> bool:
     return visual_path_key(mode) in ("upward_avoid", "avoid_upward", "auto_avoid")
+
+
+def visual_path_twirl_enabled(mode: str) -> bool:
+    return visual_path_key(mode) in ("twirl_upward", "upward_twirl", "twirl_up")
+
+
+def twirl_event(floor: int) -> dict[str, Any]:
+    return {
+        "floor": int(floor),
+        "eventType": "Twirl",
+    }
+
+
+def consume_pending_visual_twirl(actions: list[dict[str, Any]], floor: int) -> None:
+    state = CURRENT_VISUAL_ROUTE_STATE
+    if state is None or not state.get("pending_twirl"):
+        return
+    actions.append(twirl_event(floor))
+    state["pending_twirl"] = False
+
+
+def heading_from_timing_relative(prev_abs: float, rel: float, twirled: bool) -> float:
+    if twirled:
+        return clean_angle(float(prev_abs) - 180.0 + float(rel))
+    return clean_angle(float(prev_abs) + 180.0 - float(rel))
+
+
+def relative_for_heading(prev_abs: float, heading: float, twirled: bool) -> float:
+    if twirled:
+        return clean_relative_angle(float(heading) - float(prev_abs) + 180.0)
+    return clean_relative_angle(float(prev_abs) + 180.0 - float(heading))
 
 
 def abs_angle_diff(a: float, b: float) -> float:
@@ -146,6 +194,8 @@ def make_visual_route_state(angle_data: list[Any]) -> dict[str, Any]:
         "lookahead": 10,
         "avoid_turns": 0,
         "base_safe_tiles": 0,
+        "pending_twirl": False,
+        "twirl_turns": 0,
     }
     _route_add_point(state, 0.0, 0.0)
     sync_visual_route_state(angle_data, state)
@@ -356,10 +406,34 @@ def shape_visual_relative(
     upward avoid:
       keep the original direction while it is safe; if lookahead predicts an
       overlap with already placed tiles, choose an upward-biased safe heading.
+
+    twirl upward:
+      keep the original direction while it is not downward. When the next tile
+      would flow downward, insert a pending Twirl, toggle the orbit direction,
+      and use a relative angle that sends the next absolute tile upward.
     """
+    global CURRENT_TWIRL_ACTIVE
+
     base_rel = clean_relative_angle(rel)
     if not visual_path_enabled(visual_path_mode):
         return base_rel, False
+
+    if visual_path_twirl_enabled(visual_path_mode):
+        prev_abs = float(angle_data[-1])
+        base_heading = heading_from_timing_relative(prev_abs, base_rel, CURRENT_TWIRL_ACTIVE)
+        # In the editor preview, 90° moves upward and 270° moves downward.
+        if math.sin(math.radians(base_heading)) >= -0.08:
+            return base_rel, False
+
+        CURRENT_TWIRL_ACTIVE = not CURRENT_TWIRL_ACTIVE
+        state = CURRENT_VISUAL_ROUTE_STATE
+        if state is not None:
+            state["pending_twirl"] = True
+            state["twirl_turns"] = int(state.get("twirl_turns", 0)) + 1
+
+        desired_abs = float(visual_path_angle) % 360.0
+        shaped = relative_for_heading(prev_abs, desired_abs, CURRENT_TWIRL_ACTIVE)
+        return shaped, True
 
     if visual_path_avoid_enabled(visual_path_mode):
         return choose_upward_avoid_relative(
@@ -371,7 +445,7 @@ def shape_visual_relative(
 
     prev_abs = float(angle_data[-1])
     desired_abs = float(visual_path_angle) % 360.0
-    shaped = clean_relative_angle(prev_abs + 180.0 - desired_abs)
+    shaped = relative_for_heading(prev_abs, desired_abs, CURRENT_TWIRL_ACTIVE)
     return shaped, abs(float(shaped) - float(base_rel)) > 1e-6
 
 
@@ -1132,6 +1206,7 @@ def emit_angle_only_curve_continuous(
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
         )
+        consume_pending_visual_twirl(actions, floor)
 
         if abs(float(final_rel) - float(raw_rel)) > 1e-6:
             # Preserve the actual interval duration represented by raw_rel.
@@ -1207,6 +1282,7 @@ def emit_direct_curve_continuous(
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
         )
+        consume_pending_visual_twirl(actions, floor)
 
         bpm = rel * 60.0 / max(EPS, 180.0 * dt)
         actions.append(set_bpm(floor, bpm))
@@ -1296,6 +1372,7 @@ def emit_angle_compression_curve_continuous(
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
         )
+        consume_pending_visual_twirl(actions, floor)
         if shaped:
             final_visual_used = True
 
@@ -1342,6 +1419,7 @@ def emit_direct(
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
             )
+            consume_pending_visual_twirl(actions, floor)
             tile_bpm = freq * 60.0 * rel / 180.0
             actions.append(set_bpm(floor, tile_bpm))
             current_bpm = tile_bpm
@@ -1356,6 +1434,7 @@ def emit_direct(
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
             )
+            consume_pending_visual_twirl(actions, floor)
             frac_bpm = freq * 60.0 * rel / max(EPS, 180.0 * frac)
             actions.append(set_bpm(floor, frac_bpm))
             current_bpm = frac_bpm
@@ -1446,6 +1525,7 @@ def emit_angle_only(
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
             )
+            consume_pending_visual_twirl(actions, floor)
             tile_bpm = (freq * 60.0) * (rel / 180.0)
             actions.append(set_bpm(floor, tile_bpm))
             current_bpm = tile_bpm
@@ -1473,6 +1553,7 @@ def emit_angle_only(
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
             )
+            consume_pending_visual_twirl(actions, floor)
             final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
             actions.append(set_bpm(floor, final_bpm))
             current_bpm = final_bpm
@@ -1599,6 +1680,7 @@ def emit_angle_compression(
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
             )
+            consume_pending_visual_twirl(actions, floor)
             tile_bpm = (freq * 60.0) * (rel / 180.0)
             actions.append(set_bpm(floor, tile_bpm))
             bpm = tile_bpm
@@ -1627,6 +1709,7 @@ def emit_angle_compression(
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
             )
+            consume_pending_visual_twirl(actions, floor)
             final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
             actions.append(set_bpm(floor, final_bpm))
             add_relative(angle_data, rel)
@@ -2187,6 +2270,7 @@ def emit_harmony_polyrhythm(
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
         )
+        consume_pending_visual_twirl(actions, floor)
         if path_shaped:
             visual_path_tiles += 1
 
@@ -2262,8 +2346,11 @@ def build_adofai_level(
     actions = level["actions"]
     apply_track_visual(level, actions, track_visual)
 
-    global CURRENT_VISUAL_ROUTE_STATE
-    CURRENT_VISUAL_ROUTE_STATE = make_visual_route_state(angle_data) if visual_path_avoid_enabled(visual_path_mode) else None
+    global CURRENT_VISUAL_ROUTE_STATE, CURRENT_TWIRL_ACTIVE
+    CURRENT_TWIRL_ACTIVE = False
+    CURRENT_VISUAL_ROUTE_STATE = make_visual_route_state(angle_data) if (
+        visual_path_avoid_enabled(visual_path_mode) or visual_path_twirl_enabled(visual_path_mode)
+    ) else None
 
     method_key = (method or "rabbit_zip").lower().replace(" ", "_").replace("-", "_")
     use_phase_continuous_glide = bool(phase_continuous_glide)
@@ -2326,6 +2413,7 @@ def build_adofai_level(
             "visual_path_tiles": visual_path_tiles,
             "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
             "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
+            "visual_route_twirls": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("twirl_turns", 0)),
             "phase_continuous_glide": bool(use_phase_continuous_glide),
             "input_notes_total": len(notes),
             "base_bpm": round(float(base_bpm), 6),
@@ -2516,6 +2604,7 @@ def build_adofai_level(
         "visual_path_angle": round(float(visual_path_angle), 6),
         "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
         "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
+        "visual_route_twirls": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("twirl_turns", 0)),
         "curve_step_sec": round(float(curve_step_sec), 6),
         "curve_pitch_step": round(float(curve_pitch_step), 6),
         "phase_continuous_glide": bool(use_phase_continuous_glide),
