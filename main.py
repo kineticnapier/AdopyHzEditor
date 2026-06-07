@@ -2107,6 +2107,14 @@ class MainWindow(QtWidgets.QMainWindow):
         root_shift = QtWidgets.QLineEdit("1")
         root_shift.setToolTip("基準音倍率です。local値と同じ次元生成元で変換してから掛けます。例: 1, 1/3, 7/3, 5/3")
 
+        base_1d_offset = QtWidgets.QSpinBox()
+        base_1d_offset.setRange(-64, 64)
+        base_1d_offset.setValue(0)
+        base_1d_offset.setToolTip(
+            "基準音倍率に追加する1次元補正です。"
+            "最終的な基準倍率に (2/1)^offset を掛けます。例: 1/9で+1なら 4/9*2 = 8/9"
+        )
+
         harmonics = QtWidgets.QLineEdit("1/3,1,3,7,9")
         harmonics.setToolTip("例: 1/3,1,3,7,9 または 1,3,7,9,21")
 
@@ -2154,6 +2162,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         form.addRow(tr("dialog.harmonic_diagram.root_hz"), root_hz)
         form.addRow(tr("dialog.harmonic_diagram.root_shift"), root_shift)
+        form.addRow(tr("dialog.harmonic_diagram.base_1d_offset"), base_1d_offset)
         form.addRow(tr("dialog.harmonic_diagram.harmonics"), harmonics)
         form.addRow(tr("dialog.harmonic_diagram.time_unit"), time_unit)
         form.addRow(tr("dialog.harmonic_diagram.bpm"), bpm_box)
@@ -2171,18 +2180,25 @@ class MainWindow(QtWidgets.QMainWindow):
                 return start_value * beat_sec, duration_value * beat_sec
             return start_value, duration_value
 
+        def one_d_offset_factor() -> Fraction:
+            offset = int(base_1d_offset.value())
+            if offset >= 0:
+                return Fraction(2, 1) ** offset
+            return Fraction(1, 2) ** (-offset)
+
         def diagram_components(multiplier: Fraction, local: Fraction) -> tuple[Fraction, Fraction, Fraction, Fraction]:
             """
             Return:
-              raw_global_ratio, placed_ratio, base_dimension_ratio, local_dimension_ratio
+              raw_global_ratio, placed_ratio, base_dimension_ratio_with_1d_offset, local_dimension_ratio
 
             Chalaxata/Caftaphata-style insertion:
               1. convert the base multiplier by the fixed dimension generators
-              2. convert the diagram/local value by the same fixed dimension generators
-              3. placed_ratio = base_dimension_ratio * local_dimension_ratio
+              2. apply Base 1D offset as (2/1)^offset
+              3. convert the diagram/local value by the same fixed dimension generators
+              4. placed_ratio = base_dimension_ratio_with_1d_offset * local_dimension_ratio
             """
             raw_global = multiplier * local
-            base_rep = self.dimension_ratio_fraction(multiplier)
+            base_rep = self.dimension_ratio_fraction(multiplier) * one_d_offset_factor()
             local_rep = self.dimension_ratio_fraction(local)
             return raw_global, base_rep * local_rep, base_rep, local_rep
 
@@ -2215,9 +2231,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     lines = [f"time: {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
 
                 base_rep = self.dimension_ratio_fraction(shift)
+                offset_factor = one_d_offset_factor()
+                effective_base = base_rep * offset_factor
                 lines.append(
                     "base multiplier: "
-                    f"{self.format_ratio_value(shift)} -> dimension {self.format_ratio_value(base_rep)}"
+                    f"{self.format_ratio_value(shift)} -> dimension {self.format_ratio_value(base_rep)} "
+                    f"* 2^{int(base_1d_offset.value())} = {self.format_ratio_value(effective_base)}"
                 )
 
                 for v in vals:
@@ -2237,7 +2256,7 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception as e:
                 preview.setText(f"Invalid ratio: {e}")
 
-        for w in (root_hz, start_box, duration_box, bpm_box, edo_box, offset_box):
+        for w in (root_hz, base_1d_offset, start_box, duration_box, bpm_box, edo_box, offset_box):
             w.valueChanged.connect(lambda *_: update_preview())
         time_unit.currentTextChanged.connect(lambda *_: update_time_unit_ui())
         root_shift.textChanged.connect(lambda *_: update_preview())
