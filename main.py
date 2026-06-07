@@ -2105,25 +2105,10 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
 
         root_shift = QtWidgets.QLineEdit("1")
-        root_shift.setToolTip("ローカル倍音比に掛ける基準倍率です。例: 1, 1/3, 7/3, 5/3")
+        root_shift.setToolTip("基準音倍率です。local値と同じ次元生成元で変換してから掛けます。例: 1, 1/3, 7/3, 5/3")
 
         harmonics = QtWidgets.QLineEdit("1/3,1,3,7,9")
         harmonics.setToolTip("例: 1/3,1,3,7,9 または 1,3,7,9,21")
-
-        octave_handling = QtWidgets.QComboBox()
-        octave_handling.addItems([
-            "dimension diagram",
-            "fold total 1x-3x",
-            "fold total 1x-2x",
-            "raw frequency",
-        ])
-        octave_handling.setCurrentText("dimension diagram")
-        octave_handling.setToolTip(
-            "dimension diagram: Caftaphata風。倍率とローカル倍音を別々に次元代表値へ変換してから掛けます。\n"
-            "fold total 1x-3x: 倍率×ローカル倍音をそのまま1〜3倍へ折り返します。\n"
-            "fold total 1x-2x: 倍率×ローカル倍音をそのまま1〜2倍へ折り返します。\n"
-            "raw frequency: 倍音をそのまま周波数に掛けます。高音に飛びやすいです。"
-        )
 
         start_box = QtWidgets.QDoubleSpinBox()
         start_box.setRange(0.0, 36000.0)
@@ -2170,7 +2155,6 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow(tr("dialog.harmonic_diagram.root_hz"), root_hz)
         form.addRow(tr("dialog.harmonic_diagram.root_shift"), root_shift)
         form.addRow(tr("dialog.harmonic_diagram.harmonics"), harmonics)
-        form.addRow(tr("dialog.harmonic_diagram.octave_handling"), octave_handling)
         form.addRow(tr("dialog.harmonic_diagram.time_unit"), time_unit)
         form.addRow(tr("dialog.harmonic_diagram.bpm"), bpm_box)
         form.addRow(tr("dialog.harmonic_diagram.start"), start_box)
@@ -2190,36 +2174,17 @@ class MainWindow(QtWidgets.QMainWindow):
         def diagram_components(multiplier: Fraction, local: Fraction) -> tuple[Fraction, Fraction, Fraction, Fraction]:
             """
             Return:
-              raw_global_ratio, placed_ratio, multiplier_representative, local_representative
+              raw_global_ratio, placed_ratio, base_dimension_ratio, local_dimension_ratio
+
+            Chalaxata/Caftaphata-style insertion:
+              1. convert the base multiplier by the fixed dimension generators
+              2. convert the diagram/local value by the same fixed dimension generators
+              3. placed_ratio = base_dimension_ratio * local_dimension_ratio
             """
             raw_global = multiplier * local
-            mode = octave_handling.currentText()
-
-            if mode == "dimension diagram":
-                # The base/multiplier and the local point have separate 2F
-                # coordinates in the diagram. Convert each to a dimension
-                # representative independently, then multiply them.
-                multiplier_rep = self.octave_fold_fraction(
-                    self.dimension_ratio_fraction(multiplier),
-                    low=0.5,
-                    high=3.0,
-                )
-                local_rep = self.octave_fold_fraction(
-                    self.dimension_ratio_fraction(local),
-                    low=1.0,
-                    high=3.0,
-                )
-                return raw_global, multiplier_rep * local_rep, multiplier_rep, local_rep
-
-            if mode == "fold total 1x-3x":
-                ratio = self.octave_fold_fraction(raw_global, low=1.0, high=3.0)
-                return raw_global, ratio, Fraction(1, 1), ratio
-
-            if mode == "fold total 1x-2x":
-                ratio = self.octave_fold_fraction(raw_global, low=1.0, high=2.0)
-                return raw_global, ratio, Fraction(1, 1), ratio
-
-            return raw_global, raw_global, Fraction(1, 1), raw_global
+            base_rep = self.dimension_ratio_fraction(multiplier)
+            local_rep = self.dimension_ratio_fraction(local)
+            return raw_global, base_rep * local_rep, base_rep, local_rep
 
         def update_time_unit_ui() -> None:
             beat_mode = time_unit.currentText() == "beats"
@@ -2249,18 +2214,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 else:
                     lines = [f"time: {start_sec:.6f}s - {start_sec + duration_sec:.6f}s"]
 
-                if octave_handling.currentText() == "dimension diagram":
-                    multiplier_rep = self.octave_fold_fraction(
-                        self.dimension_ratio_fraction(shift),
-                        low=0.5,
-                        high=3.0,
-                    )
-                    lines.append(
-                        "multiplier: "
-                        f"{self.format_ratio_value(shift)} -> rep {self.format_ratio_value(multiplier_rep)}"
-                    )
-                else:
-                    lines.append(f"ratio multiplier: {self.format_ratio_value(shift)}")
+                base_rep = self.dimension_ratio_fraction(shift)
+                lines.append(
+                    "base multiplier: "
+                    f"{self.format_ratio_value(shift)} -> dimension {self.format_ratio_value(base_rep)}"
+                )
 
                 for v in vals:
                     raw_ratio, ratio, multiplier_rep, local_rep = diagram_components(shift, v)
@@ -2269,13 +2227,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
                     pc = self.caftaphata_pitch_number(float(raw_ratio), edo=edo_box.value(), offset=offset_box.value())
 
-                    if octave_handling.currentText() == "dimension diagram":
-                        detail = (
-                            f"local {self.format_ratio_value(v)} -> rep {self.format_ratio_value(local_rep)}, "
-                            f"placed {self.format_ratio_value(ratio)}"
-                        )
-                    else:
-                        detail = f"raw {self.format_ratio_value(raw_ratio)} -> placed {self.format_ratio_value(ratio)}"
+                    detail = (
+                        f"local {self.format_ratio_value(v)} -> dimension {self.format_ratio_value(local_rep)}, "
+                        f"base_dimension×local_dimension {self.format_ratio_value(ratio)}"
+                    )
 
                     lines.append(f"{detail}, {hz:.6f} Hz, MIDI {midi:.6f}, #{pc}")
                 preview.setText("\n".join(lines))
@@ -2285,7 +2240,6 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (root_hz, start_box, duration_box, bpm_box, edo_box, offset_box):
             w.valueChanged.connect(lambda *_: update_preview())
         time_unit.currentTextChanged.connect(lambda *_: update_time_unit_ui())
-        octave_handling.currentTextChanged.connect(lambda *_: update_preview())
         root_shift.textChanged.connect(lambda *_: update_preview())
         harmonics.textChanged.connect(lambda *_: update_preview())
         update_time_unit_ui()
@@ -2781,6 +2735,22 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "faint/hidden にするとトラック線を薄く/非表示にできます。"
         )
 
+        self.visual_path_mode = QtWidgets.QComboBox()
+        self.visual_path_mode.addItems(["raw", "upward"])
+        self.visual_path_mode.setCurrentText("raw")
+        self.visual_path_mode.setToolTip(
+            "全export mode共通の見た目パス補正。\n"
+            "raw: 角度をそのまま使う\n"
+            "upward: 各タイルの絶対方向を指定角度へ寄せ、SetSpeedでtimingを補正する"
+        )
+
+        self.visual_path_angle = QtWidgets.QDoubleSpinBox()
+        self.visual_path_angle.setRange(0.0, 359.999)
+        self.visual_path_angle.setDecimals(3)
+        self.visual_path_angle.setValue(90.0)
+        self.visual_path_angle.setSuffix("°")
+        self.visual_path_angle.setToolTip("Visual path upward の絶対方向。90°=上方向")
+
         self.final_angle_mode = QtWidgets.QComboBox()
         self.final_angle_mode.addItems(["scaled", "cardinal", "custom"])
         self.final_angle_mode.setCurrentText("scaled")
@@ -2873,6 +2843,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.base_bpm"), self.base_bpm),
             (tr("export.angle_only_bpm"), self.angle_only_bpm),
             (tr("export.track_visual"), self.track_visual),
+            (tr("export.visual_path_mode"), self.visual_path_mode),
+            (tr("export.visual_path_angle"), self.visual_path_angle),
         ])
 
         add_export_tab(tr("export.tab_harmony"), [
@@ -2992,6 +2964,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
             "track_visual": self.track_visual.currentText(),
+            "visual_path_mode": self.visual_path_mode.currentText(),
+            "visual_path_angle": float(self.visual_path_angle.value()),
             # Phase-continuous glide is now the standard behavior.
             "phase_continuous_glide": True,
             "final_angle_mode": self.final_angle_mode.currentText(),
