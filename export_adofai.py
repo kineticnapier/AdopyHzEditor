@@ -408,9 +408,9 @@ def shape_visual_relative(
       overlap with already placed tiles, choose an upward-biased safe heading.
 
     twirl upward:
-      keep the original direction while it is not downward. When the next tile
-      would flow downward, insert a pending Twirl, toggle the orbit direction,
-      and use a relative angle that sends the next absolute tile upward.
+      keep the relative angle unchanged. When the next tile would flow
+      downward, insert a pending Twirl and toggle the orbit direction so the
+      same relative angle escapes upward without extra SetSpeed compensation.
     """
     global CURRENT_TWIRL_ACTIVE
 
@@ -431,9 +431,10 @@ def shape_visual_relative(
             state["pending_twirl"] = True
             state["twirl_turns"] = int(state.get("twirl_turns", 0)) + 1
 
-        desired_abs = float(visual_path_angle) % 360.0
-        shaped = relative_for_heading(prev_abs, desired_abs, CURRENT_TWIRL_ACTIVE)
-        return shaped, True
+        # Do not alter the relative angle. Twirl itself changes the orbit
+        # direction, so the same rel is mirrored visually without any speed
+        # compensation.
+        return base_rel, True
 
     if visual_path_avoid_enabled(visual_path_mode):
         return choose_upward_avoid_relative(
@@ -1411,6 +1412,39 @@ def emit_direct(
     if max_tiles_per_note > 0:
         whole = min(whole, max_tiles_per_note)
 
+    if visual_path_twirl_enabled(visual_path_mode):
+        if whole > 0:
+            actions.append(set_bpm(floor, bpm))
+            current_bpm = bpm
+            for _ in range(whole):
+                rel, _twirled = shape_visual_relative(
+                    angle_data,
+                    180.0,
+                    visual_path_mode=visual_path_mode,
+                    visual_path_angle=visual_path_angle,
+                )
+                consume_pending_visual_twirl(actions, floor)
+                add_relative(angle_data, rel)
+                floor += 1
+                emitted += 1
+
+        if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
+            frac_bpm = bpm / frac
+            actions.append(set_bpm(floor, frac_bpm))
+            current_bpm = frac_bpm
+            rel, _twirled = shape_visual_relative(
+                angle_data,
+                180.0,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            consume_pending_visual_twirl(actions, floor)
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+
+        return floor, emitted, current_bpm
+
     if visual_path_enabled(visual_path_mode):
         for _ in range(whole):
             rel, _shaped = shape_visual_relative(
@@ -1513,6 +1547,66 @@ def emit_angle_only(
     whole_to_emit = whole
     if max_tiles_per_note > 0:
         whole_to_emit = min(whole_to_emit, max_tiles_per_note)
+
+    if visual_path_twirl_enabled(visual_path_mode):
+        if whole_to_emit > 0 and abs(angle_bpm - float(song_bpm)) > 1e-6:
+            actions.append(set_bpm(floor, angle_bpm))
+
+        final_visual_used = bool(target_used and abs(angle - raw_angle) > 1e-6)
+        for _ in range(whole_to_emit):
+            rel, twirled = shape_visual_relative(
+                angle_data,
+                angle,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            consume_pending_visual_twirl(actions, floor)
+            final_visual_used = final_visual_used or twirled
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+
+        if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
+            scaled_final_angle = angle * frac
+            prev_abs = float(angle_data[-1])
+            final_angle = final_visual_angle(
+                mode=final_angle_mode,
+                prev_abs=prev_abs,
+                scaled_final_angle=scaled_final_angle,
+                custom_final_angle=final_custom_angle,
+                cardinal_step=final_cardinal_step,
+            )
+
+            if final_angle <= 0:
+                final_angle = scaled_final_angle
+
+            final_bpm = (freq * 60.0) * (final_angle / max(EPS, 180.0 * frac))
+
+            if abs(final_bpm - float(song_bpm)) > 1e-6:
+                actions.append(set_bpm(floor, final_bpm))
+                final_visual_used = True
+
+            rel, twirled = shape_visual_relative(
+                angle_data,
+                final_angle,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            consume_pending_visual_twirl(actions, floor)
+            final_visual_used = final_visual_used or twirled
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+
+            if abs(final_bpm - float(song_bpm)) > 1e-6:
+                actions.append(set_bpm(floor, song_bpm))
+
+            if abs(final_angle - scaled_final_angle) > 1e-6:
+                final_visual_used = True
+        elif whole_to_emit > 0 and abs(angle_bpm - float(song_bpm)) > 1e-6:
+            actions.append(set_bpm(floor, song_bpm))
+
+        return floor, emitted, float(song_bpm), final_visual_used
 
     if visual_path_enabled(visual_path_mode):
         final_visual_used = bool(target_used and abs(angle - raw_angle) > 1e-6)
@@ -1670,6 +1764,59 @@ def emit_angle_compression(
     whole_to_emit = x_tiles
     if max_tiles_per_note > 0:
         whole_to_emit = min(whole_to_emit, max_tiles_per_note)
+
+    if visual_path_twirl_enabled(visual_path_mode):
+        final_visual_used = False
+        for _ in range(whole_to_emit):
+            rel, twirled = shape_visual_relative(
+                angle_data,
+                angle,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            consume_pending_visual_twirl(actions, floor)
+            final_visual_used = final_visual_used or twirled
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+
+        if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
+            scaled_final_angle = frac_base_angle * frac
+            prev_abs = float(angle_data[-1])
+            final_angle = final_visual_angle(
+                mode=final_angle_mode,
+                prev_abs=prev_abs,
+                scaled_final_angle=scaled_final_angle,
+                custom_final_angle=final_custom_angle,
+                cardinal_step=final_cardinal_step,
+            )
+
+            if final_angle <= 0:
+                final_angle = scaled_final_angle
+
+            final_bpm = (freq * 60.0) * (final_angle / max(EPS, 180.0 * frac))
+
+            if abs(final_bpm - bpm) > 1e-6:
+                actions.append(set_bpm(floor, final_bpm))
+                final_visual_used = True
+
+            rel, twirled = shape_visual_relative(
+                angle_data,
+                final_angle,
+                visual_path_mode=visual_path_mode,
+                visual_path_angle=visual_path_angle,
+            )
+            consume_pending_visual_twirl(actions, floor)
+            final_visual_used = final_visual_used or twirled
+            add_relative(angle_data, rel)
+            floor += 1
+            emitted += 1
+            bpm = final_bpm
+
+            if abs(final_angle - scaled_final_angle) > 1e-6:
+                final_visual_used = True
+
+        return floor, emitted, bpm, target_used, final_visual_used
 
     if visual_path_enabled(visual_path_mode):
         final_visual_used = False
