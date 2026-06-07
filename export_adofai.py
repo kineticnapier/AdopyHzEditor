@@ -112,10 +112,13 @@ def final_visual_angle(
 
 def add_relative(angle_data: list[Any], rel: float) -> None:
     prev = float(angle_data[-1])
-    # angleData itself always stores the same relative-angle geometry.
-    # Twirl is emitted only as an action event; it must not mirror the stored
-    # relative angle, otherwise e.g. 178.5949 becomes 181.4051 in the file.
-    cur = prev + 180.0 - float(rel)
+    if CURRENT_TWIRL_ACTIVE:
+        # Twirl applies immediately to the tile being generated after the event.
+        # Keep the requested relative angle, but use the reversed relative-angle
+        # formula for the stored absolute angle.
+        cur = prev - 180.0 + float(rel)
+    else:
+        cur = prev + 180.0 - float(rel)
     angle_data.append(clean_angle(cur))
 
 
@@ -415,9 +418,9 @@ def shape_visual_relative(
       overlap with already placed tiles, choose an upward-biased safe heading.
 
     twirl upward:
-      keep angleData relative angles unchanged. When the next tile would flow
-      downward, insert a pending Twirl and toggle the orbit direction. The
-      stored tile angle is not mirrored.
+      keep the requested relative angles unchanged. When the next tile would
+      flow downward, insert a pending Twirl and immediately use the reversed
+      relative-angle formula for that same tile.
     """
     global CURRENT_TWIRL_ACTIVE
 
@@ -438,9 +441,9 @@ def shape_visual_relative(
             state["pending_twirl"] = True
             state["twirl_turns"] = int(state.get("twirl_turns", 0)) + 1
 
-        # Do not alter the relative angle. Twirl itself changes the orbit
-        # direction, so the same rel is mirrored visually without any speed
-        # compensation.
+        # Do not alter the relative angle. The Twirl event toggles the orbit
+        # direction immediately, and add_relative() will use the reversed formula
+        # for this same tile.
         return base_rel, True
 
     if visual_path_avoid_enabled(visual_path_mode):
