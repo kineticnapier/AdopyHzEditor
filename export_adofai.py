@@ -577,6 +577,44 @@ def pause_beats(floor: int, beats: float) -> dict[str, Any]:
     }
 
 
+def visual_position_key(mode: str) -> str:
+    return (mode or "off").lower().replace(" ", "_").replace("-", "_")
+
+
+def visual_position_note_step_enabled(mode: str) -> bool:
+    return visual_position_key(mode) in ("note_step", "per_note", "note", "step")
+
+
+def position_track_event(floor: int, x: float, y: float) -> dict[str, Any]:
+    return {
+        "floor": int(floor) + 1,
+        "eventType": "PositionTrack",
+        "positionOffset": [round(float(x), 6), round(float(y), 6)],
+        "relativeTo": [0, "ThisTile"],
+        "justThisTile": False,
+        "editorOnly": False,
+    }
+
+
+def add_position_step_if_needed(
+    actions: list[dict[str, Any]],
+    floor: int,
+    *,
+    note_index: int,
+    visual_position_mode: str,
+    visual_position_x: float,
+    visual_position_y: float,
+) -> bool:
+    if not visual_position_note_step_enabled(visual_position_mode):
+        return False
+    if int(note_index) <= 0:
+        return False
+    if abs(float(visual_position_x)) <= EPS and abs(float(visual_position_y)) <= EPS:
+        return False
+    actions.append(position_track_event(floor, visual_position_x, visual_position_y))
+    return True
+
+
 def track_color_for_visual(track_visual: str) -> tuple[str, str]:
     """
     Return (trackColor, secondaryTrackColor).
@@ -643,17 +681,42 @@ def keycount_floor_x(keycount: float) -> int:
     return max(1, int(math.floor(max(0.0, keycount) + EPS)))
 
 
-def choose_change_x(keycount: float, mode: str, fixed: float) -> float:
-    x_floor = keycount_floor_x(keycount)
-    mode = (mode or "floor").lower().replace(" ", "_").replace("-", "_")
+def x_mode_key(mode: str) -> str:
+    return (mode or "floor").lower().replace(" ", "_").replace("-", "_")
 
-    if mode == "fixed":
+
+def x_mode_target_bpm(mode: str) -> bool:
+    return x_mode_key(mode) in ("target_bpm", "bpm", "semi_angle_only", "half_angle_only")
+
+
+def choose_change_x(
+    keycount: float,
+    mode: str,
+    fixed: float,
+    *,
+    duration_sec: float | None = None,
+    target_bpm: float | None = None,
+) -> float:
+    x_floor = keycount_floor_x(keycount)
+    mode_key = x_mode_key(mode)
+
+    if x_mode_target_bpm(mode_key):
+        # Pick x so the generated SetSpeed BPM becomes target_bpm:
+        #   angle = 180*x/keycount
+        #   bpm   = freq*60*angle/180
+        #         = 60*x/duration
+        # => x = bpm*duration/60
+        if duration_sec is not None and duration_sec > EPS and target_bpm is not None and target_bpm > EPS:
+            return max(0.000001, float(target_bpm) * float(duration_sec) / 60.0)
+        return max(1.0, float(x_floor))
+
+    if mode_key == "fixed":
         return max(0.000001, float(fixed))
-    if mode in ("lowest_floor", "lowest", "min_floor", "minimum_floor"):
+    if mode_key in ("lowest_floor", "lowest", "min_floor", "minimum_floor"):
         return max(1.0, float(fixed))
-    if mode == "round":
+    if mode_key == "round":
         return max(1.0, float(round(keycount)))
-    if mode == "ceil":
+    if mode_key == "ceil":
         return max(1.0, float(math.ceil(keycount)))
 
     return max(1.0, float(x_floor))
@@ -667,6 +730,7 @@ def build_adofai_debug_rows(
     angle_only_bpm: float = 1600.0,
     rabbit_x_mode: str = "floor",
     rabbit_fixed_x: float = 8.0,
+    rabbit_target_bpm: float = 1600.0,
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
     curve_step_sec: float = 0.025,
@@ -797,6 +861,8 @@ def build_adofai_debug_rows(
                     "final_visual_used": bool(final_visual_used),
                     "lowest_floor_x": global_lowest_floor_x,
                     "effective_fixed_x": round(float(effective_fixed_x), 6),
+                    "rabbit_target_bpm": round(float(rabbit_target_bpm), 6),
+                    "target_bpm_x_mode": bool(target_bpm_mode),
                     "_angle_sequence": angle_sequence,
                 })
             else:
@@ -831,6 +897,8 @@ def build_adofai_debug_rows(
                     "final_visual_used": False,
                     "lowest_floor_x": global_lowest_floor_x,
                     "effective_fixed_x": round(float(effective_fixed_x), 6),
+                    "rabbit_target_bpm": round(float(rabbit_target_bpm), 6),
+                    "target_bpm_x_mode": bool(target_bpm_mode),
                 })
 
         elif method_key == "angle_only":
@@ -914,7 +982,7 @@ def build_adofai_debug_rows(
                 effective_final = ""
                 if frac > 1e-6 and (limit <= 0 or emitted < limit):
                     effective_final = final_visual_angle(
-                        mode=final_angle_mode,
+                        mode=effective_final_angle_mode,
                         prev_abs=prev_abs,
                         scaled_final_angle=angle * frac,
                         custom_final_angle=final_custom_angle,
@@ -953,10 +1021,18 @@ def build_adofai_debug_rows(
 
                 whole = int(math.floor(total_phase + EPS))
                 frac = total_phase - math.floor(total_phase)
-                change_x = choose_change_x(total_phase, rabbit_x_mode, effective_fixed_x)
+                change_x = choose_change_x(
+                    total_phase,
+                    rabbit_x_mode,
+                    effective_fixed_x,
+                    duration_sec=dur,
+                    target_bpm=rabbit_target_bpm,
+                )
                 auto_angle = 180.0 * change_x / max(EPS, total_phase)
+                target_bpm_mode = x_mode_target_bpm(rabbit_x_mode)
+                effective_final_angle_mode = "horizontal" if target_bpm_mode else final_angle_mode
 
-                target_used = n.target_angle is not None and float(n.target_angle) > 0
+                target_used = n.target_angle is not None and float(n.target_angle) > 0 and not target_bpm_mode
                 angle = float(n.target_angle) if target_used else auto_angle
 
                 emitted = len(intervals)
@@ -978,7 +1054,7 @@ def build_adofai_debug_rows(
                             prev_before_final = clean_angle(prev_before_final + 180.0 - float(prev_rel))
 
                         adjusted = final_visual_angle(
-                            mode=final_angle_mode,
+                            mode=effective_final_angle_mode,
                             prev_abs=prev_before_final,
                             scaled_final_angle=scaled_final,
                             custom_final_angle=final_custom_angle,
@@ -1023,10 +1099,18 @@ def build_adofai_debug_rows(
                 whole = int(math.floor(keycount + EPS))
                 frac = keycount - math.floor(keycount)
 
-                change_x = choose_change_x(keycount, rabbit_x_mode, effective_fixed_x)
+                change_x = choose_change_x(
+                    keycount,
+                    rabbit_x_mode,
+                    effective_fixed_x,
+                    duration_sec=dur,
+                    target_bpm=rabbit_target_bpm,
+                )
                 auto_angle = 180.0 * change_x / keycount if keycount > EPS else 180.0
+                target_bpm_mode = x_mode_target_bpm(rabbit_x_mode)
+                effective_final_angle_mode = "horizontal" if target_bpm_mode else final_angle_mode
 
-                target_used = n.target_angle is not None and float(n.target_angle) > 0
+                target_used = n.target_angle is not None and float(n.target_angle) > 0 and not target_bpm_mode
                 angle = float(n.target_angle) if target_used else auto_angle
                 bpm = (freq * 60.0) * (angle / 180.0)
 
@@ -1403,6 +1487,7 @@ def emit_angle_compression_curve_continuous(
     play_bpm,
     x_mode,
     fixed_x,
+    target_bpm,
     max_tiles_per_note,
     target_angle: float | None = None,
     final_angle_mode: str = "scaled",
@@ -1429,10 +1514,18 @@ def emit_angle_compression_curve_continuous(
     whole = int(math.floor(total_phase + EPS))
     frac = total_phase - math.floor(total_phase)
 
-    change_x = choose_change_x(total_phase, x_mode, fixed_x)
+    target_bpm_mode = x_mode_target_bpm(x_mode)
+    change_x = choose_change_x(
+        total_phase,
+        x_mode,
+        fixed_x,
+        duration_sec=note.duration,
+        target_bpm=target_bpm,
+    )
     auto_angle = 180.0 * change_x / max(EPS, total_phase)
 
-    target_used = target_angle is not None
+    target_used = target_angle is not None and not target_bpm_mode
+    effective_final_angle_mode = "horizontal" if target_bpm_mode else final_angle_mode
     main_angle = float(target_angle) if target_used else auto_angle
     if main_angle <= 0:
         main_angle = auto_angle
@@ -1451,7 +1544,7 @@ def emit_angle_compression_curve_continuous(
             rel = main_angle * frac
             prev_abs = float(angle_data[-1])
             adjusted = final_visual_angle(
-                mode=final_angle_mode,
+                mode=effective_final_angle_mode,
                 prev_abs=prev_abs,
                 scaled_final_angle=rel,
                 custom_final_angle=final_custom_angle,
@@ -1811,6 +1904,7 @@ def emit_angle_compression(
     play_bpm,
     x_mode,
     fixed_x,
+    target_bpm,
     max_tiles_per_note,
     target_angle: float | None = None,
     final_angle_mode: str = "scaled",
@@ -1831,10 +1925,18 @@ def emit_angle_compression(
     x_tiles = int(math.floor(keycount + EPS))
     frac = keycount - math.floor(keycount)
 
-    change_x = choose_change_x(keycount, x_mode, fixed_x)
+    target_bpm_mode = x_mode_target_bpm(x_mode)
+    change_x = choose_change_x(
+        keycount,
+        x_mode,
+        fixed_x,
+        duration_sec=dur,
+        target_bpm=target_bpm,
+    )
     auto_angle = 180.0 * change_x / keycount
 
-    target_used = target_angle is not None
+    target_used = target_angle is not None and not target_bpm_mode
+    effective_final_angle_mode = "horizontal" if target_bpm_mode else final_angle_mode
     angle = float(target_angle) if target_used else auto_angle
     # Keep obviously invalid values from producing impossible geometry.
     if angle <= 0:
@@ -1880,7 +1982,7 @@ def emit_angle_compression(
             scaled_final_angle = frac_base_angle * frac
             prev_abs = float(angle_data[-1])
             final_angle = final_visual_angle(
-                mode=final_angle_mode,
+                mode=effective_final_angle_mode,
                 prev_abs=prev_abs,
                 scaled_final_angle=scaled_final_angle,
                 custom_final_angle=final_custom_angle,
@@ -1937,7 +2039,7 @@ def emit_angle_compression(
             scaled_final_angle = frac_base_angle * frac
             prev_abs = float(angle_data[-1])
             final_angle = final_visual_angle(
-                mode=final_angle_mode,
+                mode=effective_final_angle_mode,
                 prev_abs=prev_abs,
                 scaled_final_angle=scaled_final_angle,
                 custom_final_angle=final_custom_angle,
@@ -1973,7 +2075,7 @@ def emit_angle_compression(
         scaled_final_angle = frac_base_angle * frac
         prev_abs = float(angle_data[-1])
         final_angle = final_visual_angle(
-            mode=final_angle_mode,
+            mode=effective_final_angle_mode,
             prev_abs=prev_abs,
             scaled_final_angle=scaled_final_angle,
             custom_final_angle=final_custom_angle,
@@ -2558,11 +2660,15 @@ def build_adofai_level(
     angle_only_bpm: float = 1600.0,
     rabbit_x_mode: str = "floor",
     rabbit_fixed_x: float = 8.0,
+    rabbit_target_bpm: float = 1600.0,
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
     track_visual: str = "normal",
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
+    visual_position_mode: str = "off",
+    visual_position_x: float = 0.0,
+    visual_position_y: float = 0.0,
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
@@ -2614,6 +2720,7 @@ def build_adofai_level(
     floor = 1
     now = 0.0
     tiles = 0
+    position_track_events = 0
     overlaps = 0
     used = 0
     target_angle_used = 0
@@ -2655,6 +2762,10 @@ def build_adofai_level(
             "track_visual": track_visual,
             "visual_path_mode": visual_path_mode,
             "visual_path_angle": round(float(visual_path_angle), 6),
+            "visual_position_mode": visual_position_mode,
+            "visual_position_x": round(float(visual_position_x), 6),
+            "visual_position_y": round(float(visual_position_y), 6),
+            "position_track_events": 0,
             "visual_path_tiles": visual_path_tiles,
             "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
             "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
@@ -2716,6 +2827,16 @@ def build_adofai_level(
             now = n.start
         elif n.start < now - 1e-6:
             overlaps += 1
+
+        if add_position_step_if_needed(
+            actions,
+            floor,
+            note_index=used,
+            visual_position_mode=visual_position_mode,
+            visual_position_x=visual_position_x,
+            visual_position_y=visual_position_y,
+        ):
+            position_track_events += 1
 
         audible = n.duration
         rest = 0.0
@@ -2802,6 +2923,7 @@ def build_adofai_level(
                     play_bpm,
                     rabbit_x_mode,
                     effective_fixed_x,
+                    rabbit_target_bpm,
                     limit,
                     target_angle=n.target_angle,
                     final_angle_mode=final_angle_mode,
@@ -2821,6 +2943,7 @@ def build_adofai_level(
                     play_bpm,
                     rabbit_x_mode,
                     effective_fixed_x,
+                    rabbit_target_bpm,
                     limit,
                     target_angle=n.target_angle,
                     final_angle_mode=final_angle_mode,
@@ -2849,6 +2972,10 @@ def build_adofai_level(
         "track_visual": track_visual,
         "visual_path_mode": visual_path_mode,
         "visual_path_angle": round(float(visual_path_angle), 6),
+        "visual_position_mode": visual_position_mode,
+        "visual_position_x": round(float(visual_position_x), 6),
+        "visual_position_y": round(float(visual_position_y), 6),
+        "position_track_events": position_track_events,
         "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
         "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
         "visual_route_twirls": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("twirl_turns", 0)),
@@ -2862,6 +2989,8 @@ def build_adofai_level(
         "effective_play_bpm": round(float(play_bpm), 6),
         "lowest_floor_x": global_lowest_floor_x,
         "effective_fixed_x": round(float(effective_fixed_x), 6),
+        "rabbit_target_bpm": round(float(rabbit_target_bpm), 6),
+        "target_bpm_x_mode": bool(x_mode_target_bpm(rabbit_x_mode)),
         "first_note_offset_seconds": round(first_note_offset, 6),
         "start_floor": 1,
         "notes_total": len(sorted_notes),
@@ -2924,11 +3053,15 @@ def export_adofai(
     angle_only_bpm: float = 1600.0,
     rabbit_x_mode: str = "floor",
     rabbit_fixed_x: float = 8.0,
+    rabbit_target_bpm: float = 1600.0,
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
     track_visual: str = "normal",
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
+    visual_position_mode: str = "off",
+    visual_position_x: float = 0.0,
+    visual_position_y: float = 0.0,
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
@@ -2954,11 +3087,15 @@ def export_adofai(
         angle_only_bpm=angle_only_bpm,
         rabbit_x_mode=rabbit_x_mode,
         rabbit_fixed_x=rabbit_fixed_x,
+        rabbit_target_bpm=rabbit_target_bpm,
         max_tiles=max_tiles,
         max_tiles_per_note=max_tiles_per_note,
         track_visual=track_visual,
         visual_path_mode=visual_path_mode,
         visual_path_angle=visual_path_angle,
+        visual_position_mode=visual_position_mode,
+        visual_position_x=visual_position_x,
+        visual_position_y=visual_position_y,
         curve_step_sec=curve_step_sec,
         curve_pitch_step=curve_pitch_step,
         phase_continuous_glide=phase_continuous_glide,

@@ -2718,12 +2718,13 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_visual_step.setToolTip("Harmony visual mode が custom step のときの角度刻み")
 
         self.x_mode = QtWidgets.QComboBox()
-        self.x_mode.addItems(["floor", "lowest_floor", "round", "ceil", "fixed"])
+        self.x_mode.addItems(["floor", "lowest_floor", "round", "ceil", "fixed", "target_bpm"])
         self.x_mode.setToolTip(
             "変更用xの選び方\n"
             "floor = 各ノートの floor(Keycount)\n"
             "lowest_floor = 全ノート中の一番低い floor(Keycount) に固定\n"
-            "fixed = 下の Fixed change x を使う"
+            "fixed = 下の Fixed change x を使う\n"
+            "target_bpm = 指定BPMになるように x を自動計算。最後の端数tileはhorizontal扱い"
         )
 
         self.fixed_x = QtWidgets.QDoubleSpinBox()
@@ -2731,6 +2732,15 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.fixed_x.setDecimals(6)
         self.fixed_x.setValue(8.0)
         self.fixed_x.setToolTip("Change x mode が fixed のときに使う変更用x。lowest_floorでは無視されます。")
+
+        self.target_bpm = QtWidgets.QDoubleSpinBox()
+        self.target_bpm.setRange(1.0, 999999.0)
+        self.target_bpm.setDecimals(6)
+        self.target_bpm.setValue(max(1000.0, default_bpm * 10.0))
+        self.target_bpm.setToolTip(
+            "Change x mode が target_bpm のときに使うBPM。\n"
+            "x = BPM * note_duration / 60 で計算し、SetSpeedがこのBPMになるようにします。"
+        )
 
 
 
@@ -2771,6 +2781,26 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.visual_path_angle.setValue(90.0)
         self.visual_path_angle.setSuffix("°")
         self.visual_path_angle.setToolTip("Visual path upward の絶対方向。90°=上方向")
+
+        self.visual_position_mode = QtWidgets.QComboBox()
+        self.visual_position_mode.addItems(["off", "note step"])
+        self.visual_position_mode.setCurrentText("off")
+        self.visual_position_mode.setToolTip(
+            "PositionTrackによる見た目調整。\n"
+            "note step: 2つ目以降のノート開始floorにPositionTrackを置き、以降のタイルを指定量ずらします。"
+        )
+
+        self.visual_position_x = QtWidgets.QDoubleSpinBox()
+        self.visual_position_x.setRange(-100000.0, 100000.0)
+        self.visual_position_x.setDecimals(6)
+        self.visual_position_x.setValue(0.0)
+        self.visual_position_x.setToolTip("PositionTrack positionOffset[0]")
+
+        self.visual_position_y = QtWidgets.QDoubleSpinBox()
+        self.visual_position_y.setRange(-100000.0, 100000.0)
+        self.visual_position_y.setDecimals(6)
+        self.visual_position_y.setValue(0.0)
+        self.visual_position_y.setToolTip("PositionTrack positionOffset[1]")
 
         self.final_angle_mode = QtWidgets.QComboBox()
         self.final_angle_mode.addItems(["scaled", "cardinal", "horizontal", "custom"])
@@ -2867,6 +2897,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.track_visual"), self.track_visual),
             (tr("export.visual_path_mode"), self.visual_path_mode),
             (tr("export.visual_path_angle"), self.visual_path_angle),
+            (tr("export.visual_position_mode"), self.visual_position_mode),
+            (tr("export.visual_position_x"), self.visual_position_x),
+            (tr("export.visual_position_y"), self.visual_position_y),
         ])
 
         add_export_tab(tr("export.tab_harmony"), [
@@ -2883,6 +2916,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         add_export_tab(tr("export.tab_advanced"), [
             (tr("export.change_x_mode"), self.x_mode),
             (tr("export.fixed_change_x"), self.fixed_x),
+            (tr("export.target_bpm"), self.target_bpm),
             (tr("export.max_tiles"), self.max_tiles),
             (tr("export.max_tiles_per_note"), self.max_tiles_per_note),
         ])
@@ -2983,11 +3017,15 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "harmony_visual_step": float(self.harmony_visual_step.value()),
             "rabbit_x_mode": self.x_mode.currentText(),
             "rabbit_fixed_x": float(self.fixed_x.value()),
+            "rabbit_target_bpm": float(self.target_bpm.value()),
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
             "track_visual": self.track_visual.currentText(),
             "visual_path_mode": self.visual_path_mode.currentText(),
             "visual_path_angle": float(self.visual_path_angle.value()),
+            "visual_position_mode": self.visual_position_mode.currentText(),
+            "visual_position_x": float(self.visual_position_x.value()),
+            "visual_position_y": float(self.visual_position_y.value()),
             # Phase-continuous glide is now the standard behavior.
             "phase_continuous_glide": True,
             "final_angle_mode": self.final_angle_mode.currentText(),
