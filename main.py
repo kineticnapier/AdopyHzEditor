@@ -16,6 +16,7 @@ from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_c
 from audio_player import AudioPlayer, decode_audio_file
 from editor_view import EditorView
 from export_midi import export_midi
+from midi_import import import_midi, MidiImportError
 from export_adofai import export_adofai, build_adofai_debug_rows, build_adofai_level, build_tile_preview_points
 from project_io import save_project, load_project
 from help_dialog import HelpDialog
@@ -258,6 +259,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         file_menu = menubar.addMenu(tr("menu.file"))
         file_menu.addAction(tr("menu.open_audio"), self.open_audio, QtGui.QKeySequence("Ctrl+O"))
+        file_menu.addAction(tr("menu.import_midi"), self.import_midi_file, QtGui.QKeySequence("Ctrl+I"))
         file_menu.addAction(tr("menu.blank_workspace"), self.configure_blank_workspace)
         file_menu.addAction(tr("menu.save_project"), self.save_project_as, QtGui.QKeySequence("Ctrl+S"))
         file_menu.addAction(tr("menu.load_project"), self.load_project_from_file, QtGui.QKeySequence("Ctrl+L"))
@@ -361,6 +363,7 @@ class MainWindow(QtWidgets.QMainWindow):
         action("▶", lambda: self.seek_relative(1.0), tip=tr("toolbar.forward"))
         tb.addSeparator()
 
+        action("MIDI↓", self.import_midi_file, "Ctrl+I", tr("dialog.import_midi.title"))
         action("MIDI", self.export_midi_file, "Ctrl+M", tr("dialog.export_midi.title"))
         action("Hz", self.export_adofai_file, "Ctrl+E", tr("dialog.export_adofai.title"))
         tb.addSeparator()
@@ -2402,6 +2405,122 @@ class MainWindow(QtWidgets.QMainWindow):
     # Backward-compatible name for older internal callers.
     def notes_with_output_octave(self) -> list[Note]:
         return self.notes_with_export_pitch_offset()
+
+    def _midi_import_mode(self) -> str:
+        if not self.editor.notes:
+            return "replace"
+
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        box.setWindowTitle(tr("dialog.import_midi.mode_title"))
+        box.setText(tr("dialog.import_midi.mode_text"))
+        replace_btn = box.addButton(tr("dialog.import_midi.replace"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        append_btn = box.addButton(tr("dialog.import_midi.append"), QtWidgets.QMessageBox.ButtonRole.ActionRole)
+        cancel_btn = box.addButton(tr("dialog.import_midi.cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(replace_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == replace_btn:
+            return "replace"
+        if clicked == append_btn:
+            return "append"
+        if clicked == cancel_btn:
+            return "cancel"
+        return "cancel"
+
+    def _ensure_workspace_for_imported_midi(self, notes: list[Note], duration_seconds: float, message: str) -> None:
+        if self.current_audio is not None and self.editor.spectrogram is not None:
+            self.update_time_labels()
+            self.update_view_from_controls()
+            self.apply_timing_helpers()
+            self.sync_notes_to_player()
+            self.statusBar().showMessage(message)
+            return
+
+        if notes:
+            midi_min = max(0, int(math.floor(min(n.midi for n in notes))) - 4)
+            midi_max = min(127, int(math.ceil(max(n.midi for n in notes))) + 4)
+            duration = max(1.0, float(duration_seconds), max(float(n.end) for n in notes) + 1.0)
+        else:
+            midi_min = int(getattr(self, "blank_workspace_midi_min", 12))
+            midi_max = int(getattr(self, "blank_workspace_midi_max", 120))
+            duration = max(1.0, float(duration_seconds))
+
+        if midi_max <= midi_min:
+            midi_max = min(127, midi_min + 12)
+
+        self.apply_blank_workspace(
+            duration=duration,
+            midi_min=midi_min,
+            midi_max=midi_max,
+            message=message,
+            mark_dirty=False,
+        )
+
+    def import_midi_file(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            tr("dialog.import_midi.title"),
+            "",
+            "MIDI Files (*.mid *.midi);;All Files (*)",
+        )
+        if not path:
+            return
+
+        try:
+            result = import_midi(path)
+        except MidiImportError as e:
+            QtWidgets.QMessageBox.critical(self, tr("dialog.import_midi.failed"), str(e))
+            return
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, tr("dialog.import_midi.failed"), repr(e))
+            return
+
+        if not result.notes:
+            QtWidgets.QMessageBox.information(
+                self,
+                tr("dialog.import_midi.no_notes_title"),
+                tr("dialog.import_midi.no_notes_text"),
+            )
+            return
+
+        mode = self._midi_import_mode()
+        if mode == "cancel":
+            return
+
+        imported = [n.normalized() for n in result.notes]
+        message = tr(
+            "status.imported_midi",
+            name=Path(path).name,
+            notes=len(imported),
+            tracks=result.track_count,
+            ppq=result.ppq,
+        )
+
+        if mode == "replace":
+            self.current_project = None
+            self._suppress_dirty = True
+            try:
+                self.editor.set_notes(imported)
+            finally:
+                self._suppress_dirty = False
+            self.note_clipboard.clear()
+        else:
+            self.editor.push_undo()
+            self.editor.notes = sorted(
+                [n.normalized() for n in self.editor.notes] + imported,
+                key=lambda n: (n.start, n.midi, n.end),
+            )
+            if hasattr(self.editor, "selected_indices"):
+                self.editor.selected_indices.clear()
+            self.editor.selected_index = None
+            self.editor.redraw_notes()
+            self.editor.notes_changed.emit()
+
+        self._ensure_workspace_for_imported_midi(imported if mode == "replace" else self.editor.notes, result.duration_seconds, message)
+        self.sync_notes_to_player()
+        self.mark_dirty()
 
     def export_midi_file(self) -> None:
         if not self.editor.notes:
