@@ -2458,6 +2458,18 @@ class MainWindow(QtWidgets.QMainWindow):
             mark_dirty=False,
         )
 
+    def apply_imported_midi_tempo(self, result) -> float:
+        bpm = float(getattr(result, "initial_bpm", 120.0) or 120.0)
+        if not math.isfinite(bpm) or bpm <= 0:
+            bpm = 120.0
+
+        if hasattr(self, "grid_bpm"):
+            clamped = max(float(self.grid_bpm.minimum()), min(float(self.grid_bpm.maximum()), bpm))
+            self.grid_bpm.setValue(clamped)
+            self.apply_timing_helpers()
+
+        return bpm
+
     def import_midi_file(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -2490,12 +2502,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         imported = [n.normalized() for n in result.notes]
+        midi_bpm = self.apply_imported_midi_tempo(result)
         message = tr(
             "status.imported_midi",
             name=Path(path).name,
             notes=len(imported),
             tracks=result.track_count,
             ppq=result.ppq,
+            bpm=round(float(midi_bpm), 6),
+            tempos=getattr(result, "explicit_tempo_event_count", 0),
         )
 
         if mode == "replace":

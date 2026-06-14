@@ -22,6 +22,30 @@ class MidiImportResult:
     def note_count(self) -> int:
         return len(self.notes)
 
+    @property
+    def initial_tempo_us_per_quarter(self) -> int:
+        # tempo_events includes the default 120 BPM tempo plus explicit MIDI
+        # tempo meta events. If the file has a tempo meta at tick 0, use the
+        # last tick-0 value so it overrides the default.
+        tempo = 500000
+        # Sort by tick only. Python's stable sort preserves the original order
+        # for multiple tick-0 events, so explicit tempo events appended after the
+        # default tempo override the inserted default.
+        for tick, us_per_quarter in sorted(self.tempo_events, key=lambda x: int(x[0])):
+            if int(tick) > 0:
+                break
+            tempo = int(us_per_quarter)
+        return max(1, int(tempo))
+
+    @property
+    def initial_bpm(self) -> float:
+        return 60_000_000.0 / float(self.initial_tempo_us_per_quarter)
+
+    @property
+    def explicit_tempo_event_count(self) -> int:
+        # One default tempo is inserted even if the MIDI has no tempo meta.
+        return max(0, len(self.tempo_events) - 1)
+
 
 class MidiImportError(ValueError):
     pass
@@ -53,7 +77,9 @@ def _read_varlen(data: bytes, pos: int, end: int) -> tuple[int, int]:
 
 
 def _tick_to_seconds_converter(tempo_events: list[tuple[int, int]], ppq: int):
-    events = sorted((int(t), int(us)) for t, us in tempo_events)
+    # Sort by tick only so a real tick-0 tempo meta appended after the inserted
+    # default tempo overrides the default in the conversion timeline.
+    events = sorted(((int(t), int(us)) for t, us in tempo_events), key=lambda x: int(x[0]))
     if not events or events[0][0] != 0:
         events.insert(0, (0, 500000))
 
