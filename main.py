@@ -191,6 +191,7 @@ class MainWindow(QtWidgets.QMainWindow):
             getattr(self, "export_semitone", None),
             getattr(self, "note_vol", None),
             getattr(self, "note_sound_enabled", None),
+            getattr(self, "note_instrument", None),
             getattr(self, "volume", None),
             getattr(self, "playback_speed", None),
             getattr(self, "analysis_profile", None),
@@ -264,6 +265,7 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addAction(tr("menu.save_project"), self.save_project_as, QtGui.QKeySequence("Ctrl+S"))
         file_menu.addAction(tr("menu.load_project"), self.load_project_from_file, QtGui.QKeySequence("Ctrl+L"))
         file_menu.addAction(tr("menu.load_project_notes_only"), self.load_project_notes_only)
+        file_menu.addAction(tr("menu.merge_project_notes"), self.merge_project_notes_from_file)
         file_menu.addSeparator()
         file_menu.addAction(tr("menu.export_midi"), self.export_midi_file, QtGui.QKeySequence("Ctrl+M"))
         file_menu.addAction(tr("menu.export_adofai"), self.export_adofai_file, QtGui.QKeySequence("Ctrl+E"))
@@ -504,11 +506,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.note_octave.setToolTip("Preview Oct: ノートプレビュー音だけをオクターブ単位で上下。画面上のノート位置や出力には影響しません。")
         self.note_octave.valueChanged.connect(self.apply_note_sound_settings)
 
+        self.note_instrument = QtWidgets.QComboBox()
+        self.note_instrument.addItem("Sine", "sine")
+        self.note_instrument.addItem("Piano", "piano")
+        self.note_instrument.addItem("Organ", "organ")
+        self.note_instrument.addItem("Square", "square")
+        self.note_instrument.addItem("Triangle", "triangle")
+        self.note_instrument.setToolTip("Preview Sound: ノートプレビュー音の簡易音色。出力には影響しません。")
+        self.note_instrument.currentIndexChanged.connect(self.apply_note_sound_settings)
+
         playback_form.addRow("Song Vol", self.volume)
         playback_form.addRow("Speed", self.playback_speed)
         playback_form.addRow("Note Preview", self.note_sound_enabled)
         playback_form.addRow("Note Vol", self.note_vol)
         playback_form.addRow("Preview Oct", self.note_octave)
+        playback_form.addRow("Preview Sound", self.note_instrument)
         self.settings_toolbox.addItem(playback_page, "Playback")
 
         # Export pitch page
@@ -766,6 +778,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 enabled=self.note_sound_enabled.isChecked() if hasattr(self, "note_sound_enabled") else True,
                 volume=float(self.note_vol.value()) / 100.0 if hasattr(self, "note_vol") else 0.20,
                 octave_shift=self.current_preview_octave_shift(),
+                instrument=self.current_preview_instrument(),
             )
 
     def sync_notes_to_player(self) -> None:
@@ -1447,6 +1460,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "export_semitone": int(self.export_semitone.value()) if hasattr(self, "export_semitone") else 0,
             "note_volume": int(self.note_vol.value()) if hasattr(self, "note_vol") else 20,
             "note_sound_enabled": bool(self.note_sound_enabled.isChecked()) if hasattr(self, "note_sound_enabled") else True,
+            "note_instrument": self.current_preview_instrument(),
             "song_volume": int(self.volume.value()) if hasattr(self, "volume") else 85,
             "playback_speed": float(self.playback_speed.value()) if hasattr(self, "playback_speed") else 1.0,
             "analysis_profile": self.analysis_profile.currentText() if hasattr(self, "analysis_profile") else "Normal",
@@ -1471,7 +1485,7 @@ class MainWindow(QtWidgets.QMainWindow):
         blockers = []
         for name in (
             "grid_bpm", "grid_offset_ms", "grid_enabled", "metro_enabled", "metro_vol",
-            "snap_enabled", "snap_div", "note_octave", "export_octave", "export_semitone", "note_vol", "note_sound_enabled",
+            "snap_enabled", "snap_div", "note_octave", "export_octave", "export_semitone", "note_vol", "note_sound_enabled", "note_instrument",
             "volume", "playback_speed", "analysis_profile", "cqt_resolution", "display_mode", "cmap", "curve_shape", "curve_interpolation",
         ):
             widget = getattr(self, name, None)
@@ -1522,6 +1536,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.note_vol.setValue(int(settings["note_volume"]))
             if hasattr(self, "note_sound_enabled") and "note_sound_enabled" in settings:
                 self.note_sound_enabled.setChecked(bool(settings["note_sound_enabled"]))
+            if hasattr(self, "note_instrument") and "note_instrument" in settings:
+                idx = self.note_instrument.findData(str(settings["note_instrument"]))
+                if idx < 0:
+                    idx = self.note_instrument.findText(str(settings["note_instrument"]))
+                if idx >= 0:
+                    self.note_instrument.setCurrentIndex(idx)
             if hasattr(self, "volume") and "song_volume" in settings:
                 self.volume.setValue(int(settings["song_volume"]))
             if hasattr(self, "playback_speed") and "playback_speed" in settings:
@@ -1604,6 +1624,51 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def load_project_notes_only(self) -> None:
         self.load_project_from_file(notes_only=True)
+
+    def merge_project_notes_from_file(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            tr("dialog.merge_project_notes.title"),
+            "",
+            "AdopyHzEditor Project (*.adopyhz);;Old Project (*.ahe.json *.json);;JSON (*.json);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            _audio, notes, _settings = load_project(path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, tr("dialog.load_failed"), str(e))
+            return
+
+        if not notes:
+            QtWidgets.QMessageBox.information(
+                self,
+                tr("dialog.merge_project_notes.empty_title"),
+                tr("dialog.merge_project_notes.empty_text"),
+            )
+            return
+
+        self.editor.push_undo()
+        merged = sorted(
+            [n.normalized() for n in self.editor.notes] + [n.normalized() for n in notes],
+            key=lambda n: (n.start, n.midi, n.end),
+        )
+        self.editor.notes = merged
+        if hasattr(self.editor, "selected_indices"):
+            self.editor.selected_indices.clear()
+        self.editor.selected_index = None
+        self.editor.redraw_notes()
+        self.editor.notes_changed.emit()
+
+        if self.current_audio is None or self.editor.spectrogram is None:
+            self.unload_audio_to_blank_spectrogram(
+                self.editor.notes,
+                message=tr("status.merged_project_notes", name=Path(path).name, notes=len(notes)),
+            )
+
+        self.sync_notes_to_player()
+        self.mark_dirty()
+        self.statusBar().showMessage(tr("status.merged_project_notes", name=Path(path).name, notes=len(notes)))
 
     def estimate_blank_spectrogram_bounds(self, notes: list[Note] | None = None) -> tuple[float, int, int]:
         """
@@ -2345,6 +2410,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def current_preview_octave_shift(self) -> int:
         return int(self.note_octave.value()) if hasattr(self, "note_octave") else 0
+
+    def current_preview_instrument(self) -> str:
+        if not hasattr(self, "note_instrument"):
+            return "sine"
+        data = self.note_instrument.currentData()
+        return str(data if data is not None else self.note_instrument.currentText()).lower().replace(" ", "_").replace("-", "_")
 
     def current_export_octave_shift(self) -> int:
         return int(self.export_octave.value()) if hasattr(self, "export_octave") else 0

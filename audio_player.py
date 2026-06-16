@@ -57,6 +57,7 @@ class AudioPlayer:
         self.note_sound_enabled = True
         self.note_volume = 0.20
         self.note_octave_shift = 0
+        self.note_instrument = "sine"
         self.preview_notes: list[tuple[int, int, float]] = []  # start_sample, end_sample, midi
 
         try:
@@ -128,11 +129,30 @@ class AudioPlayer:
             self.playback_speed = max(0.10, min(4.0, float(speed)))
             self._pos_float = float(self.pos)
 
-    def set_note_sound(self, *, enabled: bool, volume: float, octave_shift: int = 0) -> None:
+    def _normalize_note_instrument(self, instrument: str | None) -> str:
+        key = (instrument or "sine").lower().replace(" ", "_").replace("-", "_")
+        aliases = {
+            "sin": "sine",
+            "tone": "sine",
+            "piano_like": "piano",
+            "soft_piano": "piano",
+            "pluck": "piano",
+            "organ_like": "organ",
+            "square_wave": "square",
+            "triangle_wave": "triangle",
+        }
+        key = aliases.get(key, key)
+        if key not in {"sine", "piano", "organ", "square", "triangle"}:
+            key = "sine"
+        return key
+
+    def set_note_sound(self, *, enabled: bool, volume: float, octave_shift: int = 0, instrument: str | None = None) -> None:
         with self.lock:
             self.note_sound_enabled = bool(enabled)
             self.note_volume = max(0.0, min(1.5, float(volume)))
             self.note_octave_shift = int(octave_shift)
+            if instrument is not None:
+                self.note_instrument = self._normalize_note_instrument(str(instrument))
 
     def set_preview_notes(self, notes) -> None:
         """
@@ -258,15 +278,46 @@ class AudioPlayer:
             freq = midi_to_hz(float(midi) + octave_shift * 12)
             sample_index = np.arange(block_start + out_s, block_start + out_e, dtype=np.float32)
             # 絶対サンプル時刻から生成するのでブロック境界で位相が飛びにくい
-            wave = np.sin(2.0 * np.pi * freq * sample_index / sr).astype(np.float32)
+            phase = 2.0 * np.pi * freq * sample_index / sr
+            local = sample_index - ns
+            local_sec = local / float(sr)
+            instrument = str(getattr(self, "note_instrument", "sine"))
+
+            if instrument == "piano":
+                # Lightweight piano-ish preview: bright attack + quick decay.
+                wave = (
+                    1.00 * np.sin(phase)
+                    + 0.45 * np.sin(2.0 * phase)
+                    + 0.22 * np.sin(3.0 * phase)
+                    + 0.10 * np.sin(4.0 * phase)
+                ).astype(np.float32) / 1.55
+                decay_rate = float(np.clip(freq / 260.0, 1.4, 6.0))
+                instrument_env = np.exp(-local_sec * decay_rate).astype(np.float32)
+            elif instrument == "organ":
+                wave = (
+                    1.00 * np.sin(phase)
+                    + 0.35 * np.sin(2.0 * phase)
+                    + 0.18 * np.sin(3.0 * phase)
+                ).astype(np.float32) / 1.35
+                instrument_env = np.ones_like(wave, dtype=np.float32)
+            elif instrument == "square":
+                wave = np.sign(np.sin(phase)).astype(np.float32) * 0.65
+                instrument_env = np.ones_like(wave, dtype=np.float32)
+            elif instrument == "triangle":
+                # 2/pi * asin(sin(x)) gives a band-limited-enough soft triangle for preview.
+                wave = (2.0 / np.pi * np.arcsin(np.sin(phase))).astype(np.float32)
+                instrument_env = np.ones_like(wave, dtype=np.float32)
+            else:
+                wave = np.sin(phase).astype(np.float32)
+                instrument_env = np.ones_like(wave, dtype=np.float32)
 
             # ノートの頭/尻だけ軽くフェード
-            local = sample_index - ns
             note_len = max(1, ne - ns)
             fade = min(int(sr * 0.006), max(1, note_len // 4))
             env = np.ones_like(wave)
             env = np.minimum(env, np.clip(local / fade, 0.0, 1.0))
             env = np.minimum(env, np.clip((ne - sample_index) / fade, 0.0, 1.0))
+            env *= instrument_env
 
             outdata[out_s:out_e, 0] += wave * env * self.note_volume
 

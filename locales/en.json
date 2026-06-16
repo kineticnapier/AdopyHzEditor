@@ -252,5 +252,10 @@
   "dialog.import_midi.time_scale": "Time scale",
   "dialog.import_midi.apply_tempo": "Apply MIDI tempo to Grid BPM",
   "dialog.import_midi.cleanup_hint": "For Hz charting, merge + 20 ms usually removes duplicate/tiny OMR garbage without changing the main notes too much.",
-  "dialog.import_midi.no_notes_after_cleanup_text": "All MIDI notes were removed by the cleanup settings."
+  "dialog.import_midi.no_notes_after_cleanup_text": "All MIDI notes were removed by the cleanup settings.",
+  "menu.merge_project_notes": "Merge Project Notes...",
+  "dialog.merge_project_notes.title": "Merge Project Notes",
+  "dialog.merge_project_notes.empty_title": "No notes to merge",
+  "dialog.merge_project_notes.empty_text": "This project file does not contain any notes.",
+  "status.merged_project_notes": "Merged project notes: {name} / +{notes} notes"
 }

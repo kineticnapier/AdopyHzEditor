@@ -587,7 +587,7 @@ def visual_position_note_step_enabled(mode: str) -> bool:
 
 def position_track_event(floor: int, x: float, y: float) -> dict[str, Any]:
     return {
-        "floor": int(floor) + 1,
+        "floor": int(floor),
         "eventType": "PositionTrack",
         "positionOffset": [round(float(x), 6), round(float(y), 6)],
         "relativeTo": [0, "ThisTile"],
@@ -2536,7 +2536,7 @@ def emit_harmony_polyrhythm(
     harmony_visual_step: float = 45.0,
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
-) -> tuple[int, int, float | None, int, int, int, int, int]:
+) -> tuple[int, int, float | None, int, int, int, int, int, int, float]:
     """
     Emit a single serial ADOFAI path from merged harmony impulse times.
 
@@ -2552,7 +2552,7 @@ def emit_harmony_polyrhythm(
         visual angle.
     """
     if not events:
-        return floor, 0, current_bpm, 0, 0, 0, 0, 0
+        return floor, 0, current_bpm, 0, 0, 0, 0, 0, 0, 0.0
 
     timing_key = _harmony_timing_key(harmony_timing_mode)
     angle_only_timing = timing_key in ("angle_only", "angleonly", "angle", "global_bpm", "one_bpm")
@@ -2563,6 +2563,8 @@ def emit_harmony_polyrhythm(
     target_angle_used = 0
     setspeed_events = 0
     visual_path_tiles = 0
+    harmony_pause_events = 0
+    harmony_rest_seconds = 0.0
     now = 0.0
 
     for i, e in enumerate(events):
@@ -2574,8 +2576,24 @@ def emit_harmony_polyrhythm(
             pause_seconds(actions, floor, t - now, current_bpm)
             now = t
 
+        source_note = e.get("note")
+        rest_after = 0.0
         if i + 1 < len(events):
-            dt = max(EPS, float(events[i + 1]["time"]) - t)
+            next_t = float(events[i + 1]["time"])
+            dt = max(EPS, next_t - t)
+
+            # If the current note has already ended before the next harmony
+            # impulse, do not encode the silent gap as an extremely slow tile.
+            # Emit the audible part as the tile duration, then add a Pause on
+            # the next floor. This keeps rests/gaps visible in Harmony Charting
+            # instead of effectively collapsing them into the previous note.
+            try:
+                note_end = float(getattr(source_note, "end"))
+            except Exception:
+                note_end = None
+            if note_end is not None and t < note_end < next_t - 1e-6:
+                dt = max(EPS, note_end - t)
+                rest_after = max(0.0, next_t - note_end)
         else:
             freq = max(EPS, float(e.get("freq", 1.0)))
             dt = 1.0 / freq
@@ -2594,7 +2612,6 @@ def emit_harmony_polyrhythm(
             old_rel = harmony_relative_angle(float(e.get("freq", 1.0)), play_bpm)
             base_bpm_for_tile = old_rel * 60.0 / max(EPS, 180.0 * dt)
 
-        source_note = e.get("note")
         target = getattr(source_note, "target_angle", None)
         target_used = target is not None and float(target) > EPS
 
@@ -2639,6 +2656,11 @@ def emit_harmony_polyrhythm(
 
         add_relative(angle_data, rel, twirled=twirled_for_this_tile)
 
+        if rest_after > 1e-6:
+            pause_seconds(actions, floor + 1, rest_after, current_bpm)
+            harmony_pause_events += 1
+            harmony_rest_seconds += rest_after
+
         if angle_only_timing and need_setspeed:
             # Return to the global Harmony BPM for the next raw Angle-only tile.
             actions.append(set_bpm(floor + 1, play_bpm))
@@ -2647,9 +2669,9 @@ def emit_harmony_polyrhythm(
 
         floor += 1
         emitted += 1
-        now = t + dt
+        now = t + dt + rest_after
 
-    return floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events, visual_path_tiles
+    return floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events, visual_path_tiles, harmony_pause_events, harmony_rest_seconds
 
 
 def build_adofai_level(
@@ -2742,7 +2764,7 @@ def build_adofai_level(
             max_tiles=max_tiles,
             max_tiles_per_note=max_tiles_per_note,
         )
-        floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events, visual_path_tiles = emit_harmony_polyrhythm(
+        floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events, visual_path_tiles, harmony_pause_events, harmony_rest_seconds = emit_harmony_polyrhythm(
             angle_data,
             actions,
             floor,
@@ -2789,6 +2811,8 @@ def build_adofai_level(
             "harmony_visual_step": round(float(harmony_visual_step), 6),
             "harmony_angles_remapped": remapped_angles,
             "harmony_setspeed_events": setspeed_events,
+            "harmony_pause_events": harmony_pause_events,
+            "harmony_rest_seconds": round(float(harmony_rest_seconds), 6),
             "harmony_events_total": len(events),
             "simultaneous_adjusted": simultaneous_adjusted,
             "tiny_intervals": tiny_intervals,
