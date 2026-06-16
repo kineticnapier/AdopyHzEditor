@@ -47,6 +47,173 @@ class MidiImportResult:
         return max(0, len(self.tempo_events) - 1)
 
 
+@dataclass
+class MidiCleanupStats:
+    input_notes: int = 0
+    output_notes: int = 0
+    removed_velocity: int = 0
+    removed_short: int = 0
+    overlaps_fixed: int = 0
+    merged_notes: int = 0
+    trimmed_notes: int = 0
+
+    @property
+    def removed_total(self) -> int:
+        return int(self.removed_velocity) + int(self.removed_short) + int(self.merged_notes)
+
+
+@dataclass
+class MidiImportCleanupOptions:
+    same_pitch_overlap_mode: str = "merge"
+    min_duration_seconds: float = 0.02
+    min_velocity: int = 1
+    time_scale: float = 1.0
+
+
+def _copy_note_with_times(note: Note, start: float, end: float) -> Note:
+    n = note.normalized()
+    return Note(
+        float(start),
+        float(end),
+        n.midi,
+        n.velocity,
+        n.kind,
+        n.midi_end,
+        n.ctrl1_midi,
+        n.ctrl2_midi,
+        n.interpolation,
+        n.target_angle,
+    ).normalized()
+
+
+def cleanup_imported_midi_notes(
+    notes: list[Note],
+    *,
+    same_pitch_overlap_mode: str = "merge",
+    min_duration_seconds: float = 0.02,
+    min_velocity: int = 1,
+    time_scale: float = 1.0,
+) -> tuple[list[Note], MidiCleanupStats]:
+    """
+    Post-process MIDI notes for Hz charting.
+
+    OMR/MIDI exports often contain duplicate same-pitch overlaps, tiny garbage
+    notes, or very quiet notes. Same-pitch overlaps are especially bad for Hz
+    charting because they generate the same frequency twice.
+    """
+    stats = MidiCleanupStats(input_notes=len(notes))
+
+    mode = (same_pitch_overlap_mode or "merge").lower().replace(" ", "_").replace("-", "_")
+    if mode not in {"off", "none", "merge", "trim"}:
+        mode = "merge"
+
+    try:
+        min_duration = max(0.0, float(min_duration_seconds))
+    except Exception:
+        min_duration = 0.02
+
+    try:
+        velocity_floor = max(0, min(127, int(min_velocity)))
+    except Exception:
+        velocity_floor = 1
+
+    try:
+        scale = float(time_scale)
+        if not scale > 0:
+            scale = 1.0
+    except Exception:
+        scale = 1.0
+
+    working: list[Note] = []
+    for note in notes:
+        n = note.normalized()
+        if int(n.velocity) < velocity_floor:
+            stats.removed_velocity += 1
+            continue
+
+        scaled = _copy_note_with_times(n, n.start * scale, n.end * scale)
+        if scaled.duration < min_duration:
+            stats.removed_short += 1
+            continue
+        working.append(scaled)
+
+    working.sort(key=lambda n: (n.midi, n.start, n.end))
+
+    if mode in {"off", "none"}:
+        result = sorted(working, key=lambda n: (n.start, n.midi, n.end))
+        stats.output_notes = len(result)
+        return result, stats
+
+    eps = 1e-7
+    by_pitch: dict[int, list[Note]] = {}
+    for n in working:
+        # Imported MIDI notes are integer pitches. Use a millinote key so this
+        # also behaves sensibly if fractional pitches ever appear here.
+        by_pitch.setdefault(int(round(float(n.midi) * 1000.0)), []).append(n)
+
+    result: list[Note] = []
+
+    for group in by_pitch.values():
+        group.sort(key=lambda n: (n.start, n.end, -n.velocity))
+        if not group:
+            continue
+
+        if mode == "merge":
+            current = group[0]
+            for nxt in group[1:]:
+                if float(nxt.start) < float(current.end) - eps:
+                    stats.overlaps_fixed += 1
+                    stats.merged_notes += 1
+                    current = Note(
+                        current.start,
+                        max(current.end, nxt.end),
+                        current.midi,
+                        max(int(current.velocity), int(nxt.velocity)),
+                        current.kind,
+                        current.midi_end,
+                        current.ctrl1_midi,
+                        current.ctrl2_midi,
+                        current.interpolation,
+                        current.target_angle,
+                    ).normalized()
+                else:
+                    result.append(current)
+                    current = nxt
+            result.append(current)
+            continue
+
+        # trim: keep both note-on events, but cut the previous same-pitch note
+        # so it ends exactly at the next start.
+        trimmed_group: list[Note] = []
+        for nxt in group:
+            if trimmed_group and float(nxt.start) < float(trimmed_group[-1].end) - eps:
+                stats.overlaps_fixed += 1
+                prev = trimmed_group[-1]
+                trimmed = _copy_note_with_times(prev, prev.start, max(prev.start, nxt.start))
+                stats.trimmed_notes += 1
+                if trimmed.duration >= min_duration:
+                    trimmed_group[-1] = trimmed
+                else:
+                    trimmed_group.pop()
+                    stats.removed_short += 1
+            trimmed_group.append(nxt)
+        result.extend(trimmed_group)
+
+    # A trim pass can create new too-short notes. A merge pass should not, but
+    # this final filter keeps the contract consistent.
+    final: list[Note] = []
+    for n in result:
+        nn = n.normalized()
+        if nn.duration < min_duration:
+            stats.removed_short += 1
+            continue
+        final.append(nn)
+
+    final.sort(key=lambda n: (n.start, n.midi, n.end))
+    stats.output_notes = len(final)
+    return final, stats
+
+
 class MidiImportError(ValueError):
     pass
 

@@ -16,7 +16,7 @@ from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_c
 from audio_player import AudioPlayer, decode_audio_file
 from editor_view import EditorView
 from export_midi import export_midi
-from midi_import import import_midi, MidiImportError
+from midi_import import import_midi, MidiImportError, cleanup_imported_midi_notes
 from export_adofai import export_adofai, build_adofai_debug_rows, build_adofai_level, build_tile_preview_points
 from project_io import save_project, load_project
 from help_dialog import HelpDialog
@@ -2406,28 +2406,88 @@ class MainWindow(QtWidgets.QMainWindow):
     def notes_with_output_octave(self) -> list[Note]:
         return self.notes_with_export_pitch_offset()
 
-    def _midi_import_mode(self) -> str:
-        if not self.editor.notes:
-            return "replace"
+    def _midi_import_options(self) -> dict[str, object] | None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(tr("dialog.import_midi.options_title"))
+        dialog.setModal(True)
 
-        box = QtWidgets.QMessageBox(self)
-        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
-        box.setWindowTitle(tr("dialog.import_midi.mode_title"))
-        box.setText(tr("dialog.import_midi.mode_text"))
-        replace_btn = box.addButton(tr("dialog.import_midi.replace"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        append_btn = box.addButton(tr("dialog.import_midi.append"), QtWidgets.QMessageBox.ButtonRole.ActionRole)
-        cancel_btn = box.addButton(tr("dialog.import_midi.cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(replace_btn)
-        box.exec()
+        layout = QtWidgets.QVBoxLayout(dialog)
 
-        clicked = box.clickedButton()
-        if clicked == replace_btn:
-            return "replace"
-        if clicked == append_btn:
-            return "append"
-        if clicked == cancel_btn:
-            return "cancel"
-        return "cancel"
+        info = QtWidgets.QLabel(tr("dialog.import_midi.options_text"))
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        mode_group = QtWidgets.QGroupBox(tr("dialog.import_midi.apply_group"))
+        mode_layout = QtWidgets.QVBoxLayout(mode_group)
+        replace_radio = QtWidgets.QRadioButton(tr("dialog.import_midi.replace"))
+        append_radio = QtWidgets.QRadioButton(tr("dialog.import_midi.append"))
+        replace_radio.setChecked(True)
+        mode_layout.addWidget(replace_radio)
+        if self.editor.notes:
+            mode_layout.addWidget(append_radio)
+        else:
+            append_radio.setEnabled(False)
+        layout.addWidget(mode_group)
+
+        cleanup_group = QtWidgets.QGroupBox(tr("dialog.import_midi.cleanup_group"))
+        form = QtWidgets.QFormLayout(cleanup_group)
+
+        overlap_combo = QtWidgets.QComboBox()
+        overlap_combo.addItem(tr("dialog.import_midi.overlap_merge"), "merge")
+        overlap_combo.addItem(tr("dialog.import_midi.overlap_trim"), "trim")
+        overlap_combo.addItem(tr("dialog.import_midi.overlap_off"), "off")
+        form.addRow(tr("dialog.import_midi.overlap_mode"), overlap_combo)
+
+        min_duration = QtWidgets.QDoubleSpinBox()
+        min_duration.setRange(0.0, 5000.0)
+        min_duration.setDecimals(1)
+        min_duration.setSingleStep(5.0)
+        min_duration.setSuffix(" ms")
+        min_duration.setValue(20.0)
+        form.addRow(tr("dialog.import_midi.min_duration"), min_duration)
+
+        min_velocity = QtWidgets.QSpinBox()
+        min_velocity.setRange(0, 127)
+        min_velocity.setValue(1)
+        form.addRow(tr("dialog.import_midi.min_velocity"), min_velocity)
+
+        time_scale = QtWidgets.QDoubleSpinBox()
+        time_scale.setRange(0.01, 100.0)
+        time_scale.setDecimals(4)
+        time_scale.setSingleStep(0.1)
+        time_scale.setValue(1.0)
+        time_scale.setSuffix(" x")
+        form.addRow(tr("dialog.import_midi.time_scale"), time_scale)
+
+        apply_tempo = QtWidgets.QCheckBox(tr("dialog.import_midi.apply_tempo"))
+        apply_tempo.setChecked(True)
+        form.addRow("", apply_tempo)
+
+        hint = QtWidgets.QLabel(tr("dialog.import_midi.cleanup_hint"))
+        hint.setWordWrap(True)
+        form.addRow("", hint)
+
+        layout.addWidget(cleanup_group)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+
+        return {
+            "mode": "append" if append_radio.isChecked() and self.editor.notes else "replace",
+            "overlap_mode": overlap_combo.currentData(),
+            "min_duration_seconds": float(min_duration.value()) / 1000.0,
+            "min_velocity": int(min_velocity.value()),
+            "time_scale": float(time_scale.value()),
+            "apply_tempo": bool(apply_tempo.isChecked()),
+        }
 
     def _ensure_workspace_for_imported_midi(self, notes: list[Note], duration_seconds: float, message: str) -> None:
         if self.current_audio is not None and self.editor.spectrogram is not None:
@@ -2497,16 +2557,40 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
-        mode = self._midi_import_mode()
-        if mode == "cancel":
+        options = self._midi_import_options()
+        if options is None:
             return
 
-        imported = [n.normalized() for n in result.notes]
-        midi_bpm = self.apply_imported_midi_tempo(result)
+        imported, cleanup_stats = cleanup_imported_midi_notes(
+            result.notes,
+            same_pitch_overlap_mode=str(options.get("overlap_mode", "merge")),
+            min_duration_seconds=float(options.get("min_duration_seconds", 0.02)),
+            min_velocity=int(options.get("min_velocity", 1)),
+            time_scale=float(options.get("time_scale", 1.0)),
+        )
+
+        if not imported:
+            QtWidgets.QMessageBox.information(
+                self,
+                tr("dialog.import_midi.no_notes_title"),
+                tr("dialog.import_midi.no_notes_after_cleanup_text"),
+            )
+            return
+
+        mode = str(options.get("mode", "replace"))
+        apply_tempo = bool(options.get("apply_tempo", True))
+        if apply_tempo:
+            midi_bpm = self.apply_imported_midi_tempo(result)
+        else:
+            midi_bpm = float(getattr(result, "initial_bpm", 120.0) or 120.0)
+
         message = tr(
             "status.imported_midi",
             name=Path(path).name,
             notes=len(imported),
+            raw=getattr(cleanup_stats, "input_notes", result.note_count),
+            removed=getattr(cleanup_stats, "removed_total", 0),
+            overlaps=getattr(cleanup_stats, "overlaps_fixed", 0),
             tracks=result.track_count,
             ppq=result.ppq,
             bpm=round(float(midi_bpm), 6),
@@ -2533,7 +2617,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.editor.redraw_notes()
             self.editor.notes_changed.emit()
 
-        self._ensure_workspace_for_imported_midi(imported if mode == "replace" else self.editor.notes, result.duration_seconds, message)
+        time_scale_value = float(options.get("time_scale", 1.0))
+        imported_duration = max([float(result.duration_seconds) * time_scale_value] + [n.end for n in imported] + [0.0])
+        self._ensure_workspace_for_imported_midi(imported if mode == "replace" else self.editor.notes, imported_duration, message)
         self.sync_notes_to_player()
         self.mark_dirty()
 

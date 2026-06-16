@@ -238,5 +238,19 @@
   "dialog.import_midi.replace": "ノートを置き換え",
   "dialog.import_midi.append": "ノートを追加",
   "dialog.import_midi.cancel": "キャンセル",
-  "status.imported_midi": "MIDI読み込み: {name} / {notes} notes / {tracks} tracks / PPQ {ppq} / BPM {bpm}"
+  "status.imported_midi": "MIDI読み込み: {name} / {notes} notes ({raw} raw, {removed} removed, {overlaps} overlaps) / {tracks} tracks / PPQ {ppq} / BPM {bpm}",
+  "dialog.import_midi.options_title": "MIDI読み込み",
+  "dialog.import_midi.options_text": "このMIDIの反映方法と、OMR/MIDIで起きやすい重なり問題の整理方法を選択します。",
+  "dialog.import_midi.apply_group": "ノート反映",
+  "dialog.import_midi.cleanup_group": "クリーンアップ",
+  "dialog.import_midi.overlap_mode": "同じ音程の重なり",
+  "dialog.import_midi.overlap_merge": "重なりを結合",
+  "dialog.import_midi.overlap_trim": "前のノートを切る",
+  "dialog.import_midi.overlap_off": "オフ",
+  "dialog.import_midi.min_duration": "これ未満を削除",
+  "dialog.import_midi.min_velocity": "最小Velocity",
+  "dialog.import_midi.time_scale": "Time scale",
+  "dialog.import_midi.apply_tempo": "MIDI tempoをGrid BPMに反映",
+  "dialog.import_midi.cleanup_hint": "Hz Charting用途なら、結合 + 20 ms がPDF/OMR由来の二重ノート・極小ゴミノート対策として無難です。",
+  "dialog.import_midi.no_notes_after_cleanup_text": "クリーンアップ設定により、すべてのMIDIノートが削除されました。"
 }

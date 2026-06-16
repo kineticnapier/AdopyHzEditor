@@ -238,5 +238,19 @@
   "dialog.import_midi.replace": "Replace notes",
   "dialog.import_midi.append": "Append notes",
   "dialog.import_midi.cancel": "Cancel",
-  "status.imported_midi": "Imported MIDI: {name} / {notes} notes / {tracks} tracks / PPQ {ppq} / BPM {bpm}"
+  "status.imported_midi": "Imported MIDI: {name} / {notes} notes ({raw} raw, {removed} removed, {overlaps} overlaps) / {tracks} tracks / PPQ {ppq} / BPM {bpm}",
+  "dialog.import_midi.options_title": "Import MIDI",
+  "dialog.import_midi.options_text": "Choose how to import this MIDI and clean up common OMR/MIDI overlap problems.",
+  "dialog.import_midi.apply_group": "Apply notes",
+  "dialog.import_midi.cleanup_group": "Cleanup",
+  "dialog.import_midi.overlap_mode": "Same-pitch overlap",
+  "dialog.import_midi.overlap_merge": "Merge overlapping notes",
+  "dialog.import_midi.overlap_trim": "Trim previous note",
+  "dialog.import_midi.overlap_off": "Off",
+  "dialog.import_midi.min_duration": "Remove shorter than",
+  "dialog.import_midi.min_velocity": "Minimum velocity",
+  "dialog.import_midi.time_scale": "Time scale",
+  "dialog.import_midi.apply_tempo": "Apply MIDI tempo to Grid BPM",
+  "dialog.import_midi.cleanup_hint": "For Hz charting, merge + 20 ms usually removes duplicate/tiny OMR garbage without changing the main notes too much.",
+  "dialog.import_midi.no_notes_after_cleanup_text": "All MIDI notes were removed by the cleanup settings."
 }
