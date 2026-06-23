@@ -2980,12 +2980,14 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_timing_mode.addItems([
             "setspeed",
             "angle-only",
+            "ratio-polyrhythm",
         ])
         self.harmony_timing_mode.setCurrentText("angle-only")
         self.harmony_timing_mode.setToolTip(
             "Harmonyのtiming変換方法。\n"
             "setspeed: pitch由来の角度 + SetSpeedでtiming補正。\n"
-            "angle-only: 1つのグローバルBPMで、次のzipまでの時間を角度に直接変換します。"
+            "angle-only: 1つのグローバルBPMで、次のzipまでの時間を角度に直接変換します。\n"
+            "ratio-polyrhythm: 音程比を小整数比へ近似し、3:4や4:5:6の角度列を生成します。"
         )
 
         self.harmony_visual_mode = QtWidgets.QComboBox()
@@ -3007,6 +3009,31 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_visual_step.setValue(45.0)
         self.harmony_visual_step.setSuffix("°")
         self.harmony_visual_step.setToolTip("Harmony visual mode が custom step のときの角度刻み")
+
+        self.harmony_poly_cycle_angle = QtWidgets.QDoubleSpinBox()
+        self.harmony_poly_cycle_angle.setRange(1.0, 100000.0)
+        self.harmony_poly_cycle_angle.setDecimals(3)
+        self.harmony_poly_cycle_angle.setValue(720.0)
+        self.harmony_poly_cycle_angle.setSuffix("°")
+        self.harmony_poly_cycle_angle.setToolTip(
+            "ratio-polyrhythmで1周期全体に割り当てる相対角度合計。\n"
+            "3:4で720°にすると 180,60,120,120,60,180 のような列になります。"
+        )
+
+        self.harmony_poly_pseudo_angle = QtWidgets.QDoubleSpinBox()
+        self.harmony_poly_pseudo_angle.setRange(1.0, 180.0)
+        self.harmony_poly_pseudo_angle.setDecimals(3)
+        self.harmony_poly_pseudo_angle.setValue(30.0)
+        self.harmony_poly_pseudo_angle.setSuffix("°")
+        self.harmony_poly_pseudo_angle.setToolTip("ratio-polyrhythmで同時点を疑似同時押しにするときの角度")
+
+        self.harmony_poly_max_denominator = QtWidgets.QSpinBox()
+        self.harmony_poly_max_denominator.setRange(1, 256)
+        self.harmony_poly_max_denominator.setValue(24)
+        self.harmony_poly_max_denominator.setToolTip(
+            "音程比を分数近似するときの最大分母。\n"
+            "大きくすると精密になりますが、7:11:13系などで密度が増えやすくなります。"
+        )
 
         self.x_mode = QtWidgets.QComboBox()
         self.x_mode.addItems(["floor", "lowest_floor", "round", "ceil", "fixed", "target_bpm"])
@@ -3202,6 +3229,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.harmony_timing_mode"), self.harmony_timing_mode),
             (tr("export.harmony_visual_mode"), self.harmony_visual_mode),
             (tr("export.harmony_visual_step"), self.harmony_visual_step),
+            (tr("export.harmony_poly_cycle_angle"), self.harmony_poly_cycle_angle),
+            (tr("export.harmony_poly_pseudo_angle"), self.harmony_poly_pseudo_angle),
+            (tr("export.harmony_poly_max_denominator"), self.harmony_poly_max_denominator),
         ])
 
         add_export_tab(tr("export.tab_advanced"), [
@@ -3306,6 +3336,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "harmony_timing_mode": self.harmony_timing_mode.currentText(),
             "harmony_visual_mode": self.harmony_visual_mode.currentText(),
             "harmony_visual_step": float(self.harmony_visual_step.value()),
+            "harmony_poly_cycle_angle": float(self.harmony_poly_cycle_angle.value()),
+            "harmony_poly_pseudo_angle": float(self.harmony_poly_pseudo_angle.value()),
+            "harmony_poly_max_denominator": int(self.harmony_poly_max_denominator.value()),
             "rabbit_x_mode": self.x_mode.currentText(),
             "rabbit_fixed_x": float(self.fixed_x.value()),
             "rabbit_target_bpm": float(self.target_bpm.value()),

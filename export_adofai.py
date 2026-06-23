@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from fractions import Fraction
 import json
 import math
 from typing import Any
@@ -2310,6 +2311,254 @@ def ratio_to_semitones(ratio: float) -> float:
     return 12.0 * math.log2(max(EPS, float(ratio)))
 
 
+
+def _fraction_from_ratio(value: float, max_denominator: int = 24) -> Fraction:
+    max_den = max(1, int(max_denominator))
+    try:
+        ratio = max(EPS, float(value))
+    except Exception:
+        ratio = 1.0
+    return Fraction(ratio).limit_denominator(max_den)
+
+
+def build_harmony_ratio_polyrhythm_pattern(
+    voice_specs: list[dict[str, Any]],
+    *,
+    max_denominator: int = 24,
+) -> dict[str, Any]:
+    """
+    Convert Harmony voice frequency ratios into a small-integer polyrhythm.
+
+    Example:
+        ratios 1 : 4/3
+        -> root-normalized fractions 1/1 : 4/3
+        -> common root cycles = 3
+        -> counts = 3 : 4
+        -> positions: 0, 1/4, 1/3, 1/2, 2/3, 3/4, ...
+
+    This is intentionally based on limited-denominator rational approximation,
+    so equal-temperament intervals can still produce readable 2:3, 3:4,
+    4:5:6-style patterns.
+    """
+    if not voice_specs:
+        voice_specs = [{"voice": 0, "label": "root", "ratio": 1.0}]
+
+    max_den = max(1, int(max_denominator))
+    raw_ratios = [max(EPS, float(v.get("ratio", 1.0))) for v in voice_specs]
+    root_ratio = raw_ratios[0] if raw_ratios else 1.0
+    normalized = [max(EPS, r / max(EPS, root_ratio)) for r in raw_ratios]
+    fractions = [_fraction_from_ratio(r, max_den) for r in normalized]
+
+    common_denominator = 1
+    for frac in fractions:
+        common_denominator = math.lcm(common_denominator, max(1, int(frac.denominator)))
+
+    counts: list[int] = []
+    for frac in fractions:
+        count = int(frac.numerator) * (common_denominator // int(frac.denominator))
+        counts.append(max(1, count))
+
+    # Build one common-period grid. Positions are in [0, 1), and the next
+    # cycle's position 0 is the visual end point of the previous cycle.
+    by_pos: dict[Fraction, list[dict[str, Any]]] = {}
+    for voice_index, (voice_spec, count, frac) in enumerate(zip(voice_specs, counts, fractions)):
+        for k in range(count):
+            pos = Fraction(k, count)
+            by_pos.setdefault(pos, []).append({
+                "voice": int(voice_spec.get("voice", voice_index)),
+                "voice_index": voice_index,
+                "count": count,
+                "step": k,
+                "ratio_fraction": frac,
+                "ratio": normalized[voice_index],
+                "label": str(voice_spec.get("label", voice_index)),
+            })
+
+    positions = sorted(by_pos)
+    occurrences: list[dict[str, Any]] = []
+    for pos_index, pos in enumerate(positions):
+        cluster = sorted(by_pos[pos], key=lambda item: (int(item["voice"]), int(item["step"])))
+        for cluster_index, item in enumerate(cluster):
+            occurrences.append({
+                **item,
+                "pos": pos,
+                "pos_float": float(pos),
+                "pos_index": pos_index,
+                "cluster_index": cluster_index,
+                "cluster_size": len(cluster),
+            })
+
+    ratio_text = ":".join(str(c) for c in counts)
+    fraction_text = ":".join(f"{f.numerator}/{f.denominator}" for f in fractions)
+    return {
+        "root_ratio": float(root_ratio),
+        "common_root_cycles": int(common_denominator),
+        "counts": counts,
+        "ratio_text": ratio_text,
+        "fraction_text": fraction_text,
+        "positions": positions,
+        "occurrences": occurrences,
+    }
+
+
+def build_harmony_ratio_polyrhythm_events(
+    notes: list[Note],
+    *,
+    harmony_mode: str = "off",
+    harmony_custom_semitone: float = 7.0,
+    harmony_epsilon_ms: float = 0.001,
+    harmony_tuning: str = "equal temperament",
+    harmony_root_mode: str = "fixed root",
+    max_tiles: int = 200000,
+    max_tiles_per_note: int = 5000,
+    harmony_poly_cycle_angle: float = 720.0,
+    harmony_poly_pseudo_angle: float = 30.0,
+    harmony_poly_max_denominator: int = 24,
+) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]], dict[str, Any]]:
+    """
+    Build Harmony events by repeating a ratio-derived polyrhythm pattern.
+
+    Unlike build_harmony_impulse_events(), this first quantizes voice ratios to
+    small integers and then repeats the exact combined grid. The resulting visual
+    angles can be taken directly from the pattern gaps, e.g. 3:4 ->
+    180, 60, 120, 120, 60, 180 when cycle_angle is 720°.
+    """
+    voice_specs = build_harmony_voice_specs(
+        harmony_mode,
+        harmony_custom_semitone,
+        harmony_tuning=harmony_tuning,
+        harmony_root_mode=harmony_root_mode,
+    )
+    pattern = build_harmony_ratio_polyrhythm_pattern(
+        voice_specs,
+        max_denominator=harmony_poly_max_denominator,
+    )
+    epsilon_sec = max(0.0, float(harmony_epsilon_ms)) / 1000.0
+    cycle_angle = max(0.001, float(harmony_poly_cycle_angle))
+    pseudo_angle = clean_relative_angle(max(0.001, float(harmony_poly_pseudo_angle)))
+    common_root_cycles = max(1, int(pattern.get("common_root_cycles", 1)))
+    root_ratio = max(EPS, float(pattern.get("root_ratio", 1.0)))
+    occurrences: list[dict[str, Any]] = list(pattern.get("occurrences", []))
+
+    events: list[dict[str, Any]] = []
+    adjusted = 0
+    total_emitted = 0
+
+    for note_id, note in enumerate(notes):
+        n0 = note.normalized()
+        if n0.duration <= EPS:
+            continue
+
+        if n0.is_curve:
+            # Ratio-polyrhythm is meant for stable harmony shapes. For glides,
+            # use the start frequency so the visual rhythm remains readable.
+            root_freq = max(EPS, float(n0.freq_at(0.0)) * root_ratio)
+            root_midi = float(n0.midi_at(0.0)) + ratio_to_semitones(root_ratio)
+        else:
+            root_freq = max(EPS, float(n0.freq) * root_ratio)
+            root_midi = float(n0.midi) + ratio_to_semitones(root_ratio)
+
+        cycle_seconds = common_root_cycles / max(EPS, root_freq)
+        if cycle_seconds <= EPS:
+            continue
+
+        note_events: list[dict[str, Any]] = []
+        per_note_limit = max_tiles_per_note if int(max_tiles_per_note) > 0 else 10**12
+        cycle_index = 0
+        while True:
+            cycle_start = n0.start + cycle_index * cycle_seconds
+            if cycle_start >= n0.end - EPS:
+                break
+            for occ in occurrences:
+                if len(note_events) >= per_note_limit:
+                    break
+                pos_float = float(occ.get("pos_float", 0.0))
+                raw_time = cycle_start + pos_float * cycle_seconds
+                if raw_time >= n0.end - EPS:
+                    continue
+                cluster_index = int(occ.get("cluster_index", 0))
+                t = raw_time + cluster_index * epsilon_sec
+                if t >= n0.end - EPS:
+                    continue
+                ratio = max(EPS, float(occ.get("ratio", 1.0)) * root_ratio)
+                freq = max(EPS, float(n0.freq) * ratio)
+                midi = float(n0.midi) + ratio_to_semitones(ratio)
+                event = {
+                    "time": t,
+                    "raw_time": raw_time,
+                    "midi": midi,
+                    "freq": freq,
+                    "voice": int(occ.get("voice", 0)),
+                    "interval": ratio_to_semitones(ratio),
+                    "ratio": ratio,
+                    "voice_label": str(occ.get("label", occ.get("voice", 0))),
+                    "tuning": str(voice_specs[int(occ.get("voice_index", 0))].get("tuning", "")) if voice_specs else "",
+                    "root_factor": float(voice_specs[0].get("root_factor", 1.0)) if voice_specs else 1.0,
+                    "note": n0,
+                    "note_id": note_id,
+                    "poly_cycle_index": cycle_index,
+                    "poly_pos": occ.get("pos", Fraction(0, 1)),
+                    "poly_pos_float": pos_float,
+                    "poly_cluster_index": cluster_index,
+                    "poly_cluster_size": int(occ.get("cluster_size", 1)),
+                    "poly_cycle_angle": cycle_angle,
+                    "poly_pseudo_angle": pseudo_angle,
+                    "poly_ratio_text": str(pattern.get("ratio_text", "")),
+                    "poly_fraction_text": str(pattern.get("fraction_text", "")),
+                    "poly_root_cycles": common_root_cycles,
+                }
+                if cluster_index > 0:
+                    adjusted += 1
+                note_events.append(event)
+            if len(note_events) >= per_note_limit:
+                break
+            cycle_index += 1
+
+        note_events.sort(key=lambda e: (
+            int(e.get("poly_cycle_index", 0)),
+            float(e.get("poly_pos_float", 0.0)),
+            int(e.get("poly_cluster_index", 0)),
+            int(e.get("voice", 0)),
+        ))
+
+        for seq_index, event in enumerate(note_events):
+            event["poly_seq_index"] = seq_index
+
+        for idx, event in enumerate(note_events[:-1]):
+            nxt = note_events[idx + 1]
+            event["poly_next_seq_index"] = idx + 1
+            same_pos = (
+                int(event.get("poly_cycle_index", -1)) == int(nxt.get("poly_cycle_index", -2))
+                and abs(float(event.get("poly_pos_float", 0.0)) - float(nxt.get("poly_pos_float", 0.0))) < 1e-12
+            )
+            if same_pos:
+                event["poly_rel_to_next"] = pseudo_angle
+            else:
+                cur_phase = int(event.get("poly_cycle_index", 0)) + float(event.get("poly_pos_float", 0.0))
+                next_phase = int(nxt.get("poly_cycle_index", 0)) + float(nxt.get("poly_pos_float", 0.0))
+                gap = max(EPS, next_phase - cur_phase)
+                event["poly_rel_to_next"] = clean_relative_angle(gap * cycle_angle)
+
+        events.extend(note_events)
+        total_emitted += len(note_events)
+        if max_tiles > 0 and total_emitted >= max_tiles:
+            break
+
+    events.sort(key=lambda e: (float(e["time"]), int(e.get("note_id", 0)), int(e.get("voice", 0)), float(e.get("midi", 0.0))))
+
+    if max_tiles > 0 and len(events) > max_tiles:
+        events = events[:max_tiles]
+
+    pattern_stats = {
+        "ratio_text": str(pattern.get("ratio_text", "")),
+        "fraction_text": str(pattern.get("fraction_text", "")),
+        "common_root_cycles": int(pattern.get("common_root_cycles", 1)),
+        "cycle_angle": round(cycle_angle, 6),
+        "pseudo_angle": round(float(pseudo_angle), 6),
+        "max_denominator": int(harmony_poly_max_denominator),
+    }
+    return events, adjusted, voice_specs, pattern_stats
+
 def _note_impulse_events(
     note: Note,
     *,
@@ -2556,6 +2805,7 @@ def emit_harmony_polyrhythm(
 
     timing_key = _harmony_timing_key(harmony_timing_mode)
     angle_only_timing = timing_key in ("angle_only", "angleonly", "angle", "global_bpm", "one_bpm")
+    ratio_polyrhythm_timing = timing_key in ("ratio_polyrhythm", "ratio_poly", "polyrhythm_ratio", "poly_ratio", "ratio")
 
     emitted = 0
     tiny_intervals = 0
@@ -2601,7 +2851,20 @@ def emit_harmony_polyrhythm(
         if dt <= 1e-6:
             tiny_intervals += 1
 
-        if angle_only_timing:
+        poly_rel = e.get("poly_rel_to_next")
+        poly_rel_matches_next = False
+        if ratio_polyrhythm_timing and poly_rel is not None and i + 1 < len(events):
+            nxt_event = events[i + 1]
+            poly_rel_matches_next = (
+                nxt_event.get("note_id") == e.get("note_id")
+                and int(nxt_event.get("poly_seq_index", -999999)) == int(e.get("poly_next_seq_index", -1))
+            )
+        if ratio_polyrhythm_timing and poly_rel is not None and poly_rel_matches_next:
+            # Ratio-polyrhythm mode: the visual angle comes from the small
+            # integer ratio pattern itself. Timing is preserved by SetSpeed.
+            old_rel = clean_relative_angle(float(poly_rel))
+            base_bpm_for_tile = old_rel * 60.0 / max(EPS, 180.0 * dt)
+        elif angle_only_timing:
             # In Harmony Angle-only mode, the raw angle itself represents the
             # exact time until the next merged impulse at the global BPM.
             old_rel = harmony_timing_angle(dt, play_bpm)
@@ -2619,6 +2882,10 @@ def emit_harmony_polyrhythm(
             # Explicit per-note Target Angle wins over automatic readable remap.
             rel = clean_relative_angle(float(target))
             target_angle_used += 1
+        elif ratio_polyrhythm_timing and poly_rel is not None and poly_rel_matches_next:
+            # Keep the ratio-derived angle sequence exact. Use Visual path / Twirl
+            # for shape control instead of snapping these gaps to another grid.
+            rel = old_rel
         else:
             rel = remap_harmony_visual_angle(
                 old_rel,
@@ -2707,6 +2974,9 @@ def build_adofai_level(
     harmony_timing_mode: str = "setspeed",
     harmony_visual_mode: str = "raw",
     harmony_visual_step: float = 45.0,
+    harmony_poly_cycle_angle: float = 720.0,
+    harmony_poly_pseudo_angle: float = 30.0,
+    harmony_poly_max_denominator: int = 24,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
@@ -2754,16 +3024,33 @@ def build_adofai_level(
     if method_key in ("harmony", "harmony_polyrhythm"):
         level.setdefault("settings", {})["bpm"] = round(play_bpm, 6)
         current_bpm = play_bpm
-        events, simultaneous_adjusted, voice_specs = build_harmony_impulse_events(
-            sorted_notes,
-            harmony_mode=harmony_mode,
-            harmony_custom_semitone=harmony_custom_semitone,
-            harmony_epsilon_ms=harmony_epsilon_ms,
-            harmony_tuning=harmony_tuning,
-            harmony_root_mode=harmony_root_mode,
-            max_tiles=max_tiles,
-            max_tiles_per_note=max_tiles_per_note,
-        )
+        harmony_timing_key = _harmony_timing_key(harmony_timing_mode)
+        harmony_ratio_pattern_stats: dict[str, Any] = {}
+        if harmony_timing_key in ("ratio_polyrhythm", "ratio_poly", "polyrhythm_ratio", "poly_ratio", "ratio"):
+            events, simultaneous_adjusted, voice_specs, harmony_ratio_pattern_stats = build_harmony_ratio_polyrhythm_events(
+                sorted_notes,
+                harmony_mode=harmony_mode,
+                harmony_custom_semitone=harmony_custom_semitone,
+                harmony_epsilon_ms=harmony_epsilon_ms,
+                harmony_tuning=harmony_tuning,
+                harmony_root_mode=harmony_root_mode,
+                max_tiles=max_tiles,
+                max_tiles_per_note=max_tiles_per_note,
+                harmony_poly_cycle_angle=harmony_poly_cycle_angle,
+                harmony_poly_pseudo_angle=harmony_poly_pseudo_angle,
+                harmony_poly_max_denominator=harmony_poly_max_denominator,
+            )
+        else:
+            events, simultaneous_adjusted, voice_specs = build_harmony_impulse_events(
+                sorted_notes,
+                harmony_mode=harmony_mode,
+                harmony_custom_semitone=harmony_custom_semitone,
+                harmony_epsilon_ms=harmony_epsilon_ms,
+                harmony_tuning=harmony_tuning,
+                harmony_root_mode=harmony_root_mode,
+                max_tiles=max_tiles,
+                max_tiles_per_note=max_tiles_per_note,
+            )
         floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events, visual_path_tiles, harmony_pause_events, harmony_rest_seconds = emit_harmony_polyrhythm(
             angle_data,
             actions,
@@ -2809,6 +3096,12 @@ def build_adofai_level(
             "harmony_voice_labels": ",".join(str(v.get("label", "")) for v in voice_specs),
             "harmony_visual_mode": harmony_visual_mode,
             "harmony_visual_step": round(float(harmony_visual_step), 6),
+            "harmony_poly_cycle_angle": round(float(harmony_poly_cycle_angle), 6),
+            "harmony_poly_pseudo_angle": round(float(harmony_poly_pseudo_angle), 6),
+            "harmony_poly_max_denominator": int(harmony_poly_max_denominator),
+            "harmony_poly_ratio_pattern": str(harmony_ratio_pattern_stats.get("ratio_text", "")),
+            "harmony_poly_fraction_pattern": str(harmony_ratio_pattern_stats.get("fraction_text", "")),
+            "harmony_poly_common_root_cycles": int(harmony_ratio_pattern_stats.get("common_root_cycles", 0) or 0),
             "harmony_angles_remapped": remapped_angles,
             "harmony_setspeed_events": setspeed_events,
             "harmony_pause_events": harmony_pause_events,
@@ -3102,6 +3395,9 @@ def export_adofai(
     harmony_timing_mode: str = "setspeed",
     harmony_visual_mode: str = "raw",
     harmony_visual_step: float = 45.0,
+    harmony_poly_cycle_angle: float = 720.0,
+    harmony_poly_pseudo_angle: float = 30.0,
+    harmony_poly_max_denominator: int = 24,
     pretty: bool = False,
 ) -> dict[str, int | float | str]:
     level, stats = build_adofai_level(
@@ -3136,6 +3432,9 @@ def export_adofai(
         harmony_timing_mode=harmony_timing_mode,
         harmony_visual_mode=harmony_visual_mode,
         harmony_visual_step=harmony_visual_step,
+        harmony_poly_cycle_angle=harmony_poly_cycle_angle,
+        harmony_poly_pseudo_angle=harmony_poly_pseudo_angle,
+        harmony_poly_max_denominator=harmony_poly_max_denominator,
     )
     text = json.dumps(level, ensure_ascii=False, indent=2 if pretty else None, separators=None if pretty else (",", ":"))
     Path(path).write_text(text, encoding="utf-8")

@@ -257,5 +257,8 @@
   "dialog.merge_project_notes.title": "プロジェクトノートを合成",
   "dialog.merge_project_notes.empty_title": "合成するノートなし",
   "dialog.merge_project_notes.empty_text": "このプロジェクトファイルにはノートが含まれていません。",
-  "status.merged_project_notes": "プロジェクトノートを合成: {name} / +{notes} notes"
+  "status.merged_project_notes": "プロジェクトノートを合成: {name} / +{notes} notes",
+  "export.harmony_poly_cycle_angle": "Poly cycle angle",
+  "export.harmony_poly_pseudo_angle": "Pseudo chord angle",
+  "export.harmony_poly_max_denominator": "Ratio max denom"
 }
