@@ -14,6 +14,7 @@ class EditorPlot(pg.PlotWidget):
     curve_created = QtCore.Signal(float, float, float, float)
     note_delete_requested = QtCore.Signal(float, float)
     note_select_requested = QtCore.Signal(float, float, int)
+    note_region_select_requested = QtCore.Signal(float, float, float, float, int)
     note_move_preview = QtCore.Signal(float, int)
     note_move_finished = QtCore.Signal(float, int)
     cursor_moved = QtCore.Signal(float, float)
@@ -32,6 +33,7 @@ class EditorPlot(pg.PlotWidget):
         self._drag_now: Optional[QtCore.QPointF] = None
         self._rubber: Optional[QtWidgets.QGraphicsRectItem] = None
         self._move_mode = False
+        self._region_select_mode = False
 
         # EditorView injects this callable.
         # Callable[[float, int, int], bool]
@@ -52,16 +54,19 @@ class EditorPlot(pg.PlotWidget):
         if ev.button() == QtCore.Qt.MouseButton.LeftButton:
             x = float(view.x())
             y = float(view.y())
+            ctrl = bool(mods_value & int(QtCore.Qt.KeyboardModifier.ControlModifier.value))
 
             # If clicked on an existing note, drag means move selected notes.
             if self.move_drag_checker is not None and self.move_drag_checker(x, y, mods_value):
                 self._move_mode = True
+                self._region_select_mode = False
                 self._drag_start = view
                 self._drag_now = view
                 ev.accept()
                 return
 
             self._move_mode = False
+            self._region_select_mode = ctrl
             self._drag_start = view
             self._drag_now = view
             ev.accept()
@@ -104,6 +109,7 @@ class EditorPlot(pg.PlotWidget):
                 self._drag_start = None
                 self._drag_now = None
                 self._move_mode = False
+                self._region_select_mode = False
                 ev.accept()
                 return
 
@@ -113,7 +119,9 @@ class EditorPlot(pg.PlotWidget):
             mods = int(ev.modifiers().value)
             alt = bool(mods & int(QtCore.Qt.KeyboardModifier.AltModifier.value))
 
-            if abs(x2 - x1) < 0.035:
+            if self._region_select_mode and (abs(x2 - x1) >= 0.035 or abs(y2 - y1) >= 0.35):
+                self.note_region_select_requested.emit(x1, y1, x2, y2, mods)
+            elif abs(x2 - x1) < 0.035:
                 self.note_select_requested.emit(x1, y, mods)
             else:
                 if x1 <= x2:
@@ -131,6 +139,7 @@ class EditorPlot(pg.PlotWidget):
 
             self._drag_start = None
             self._drag_now = None
+            self._region_select_mode = False
         ev.accept()
 
     def wheelEvent(self, ev: QtGui.QWheelEvent) -> None:
@@ -146,8 +155,12 @@ class EditorPlot(pg.PlotWidget):
         if self._drag_start is None or self._drag_now is None:
             return
         x1, x2 = float(self._drag_start.x()), float(self._drag_now.x())
-        y = float((float(self._drag_start.y()) + float(self._drag_now.y())) * 0.5)
-        rect = QtCore.QRectF(min(x1, x2), y - 0.45, abs(x2 - x1), 0.9)
+        if self._region_select_mode:
+            y1, y2 = float(self._drag_start.y()), float(self._drag_now.y())
+            rect = QtCore.QRectF(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+        else:
+            y = float((float(self._drag_start.y()) + float(self._drag_now.y())) * 0.5)
+            rect = QtCore.QRectF(min(x1, x2), y - 0.45, abs(x2 - x1), 0.9)
 
         if self._rubber is None:
             self._rubber = QtWidgets.QGraphicsRectItem()
@@ -246,6 +259,7 @@ class EditorView(QtWidgets.QWidget):
         self.plot.curve_created.connect(self.add_curve_note)
         self.plot.note_delete_requested.connect(self.delete_nearest)
         self.plot.note_select_requested.connect(self.select_nearest)
+        self.plot.note_region_select_requested.connect(self.select_region)
         self.plot.note_move_preview.connect(self.preview_move_selected)
         self.plot.note_move_finished.connect(self.finish_move_selected)
         self.plot.cursor_moved.connect(self.on_cursor_moved)
@@ -994,6 +1008,52 @@ class EditorView(QtWidgets.QWidget):
         self.set_playhead(x)
         self.playhead_moved.emit(self.playhead_time())
         self.status_changed.emit(f"Playhead: {self.playhead_time():.3f}s")
+
+    def note_intersects_region(self, note: Note, x_min: float, x_max: float, y_min: float, y_max: float) -> bool:
+        n = note.normalized()
+        if n.end < x_min or n.start > x_max:
+            return False
+
+        pitch_pad = max(0.55, self.current_pitch_step() * 0.55)
+        if not n.is_curve:
+            return (float(n.midi) + pitch_pad) >= y_min and (float(n.midi) - pitch_pad) <= y_max
+
+        if n.duration <= 0:
+            return y_min <= n.midi_at(0.0) <= y_max
+
+        start_u = max(0.0, (x_min - n.start) / n.duration)
+        end_u = min(1.0, (x_max - n.start) / n.duration)
+        if end_u < start_u:
+            return False
+
+        steps = max(8, min(96, int(max(8, (end_u - start_u) * n.duration / 0.02))))
+        for k in range(steps + 1):
+            u = start_u + (end_u - start_u) * (k / steps)
+            y = n.midi_at(u)
+            if (y + pitch_pad) >= y_min and (y - pitch_pad) <= y_max:
+                return True
+        return False
+
+    def select_region(self, x1: float, y1: float, x2: float, y2: float, mods_value: int = 0) -> None:
+        x_min, x_max = sorted((max(0.0, float(x1)), max(0.0, float(x2))))
+        y_min, y_max = sorted((float(y1), float(y2)))
+
+        found = {
+            i
+            for i, n in enumerate(self.notes)
+            if self.note_intersects_region(n, x_min, x_max, y_min, y_max)
+        }
+
+        ctrl = bool(mods_value & int(QtCore.Qt.KeyboardModifier.ControlModifier.value))
+        shift = bool(mods_value & int(QtCore.Qt.KeyboardModifier.ShiftModifier.value))
+        if ctrl or shift:
+            self.selected_indices.update(found)
+        else:
+            self.selected_indices = found
+
+        self.selected_index = min(self.selected_indices) if self.selected_indices else None
+        self.redraw_notes()
+        self.status_changed.emit(f"Selected {len(self.selected_indices)} notes")
 
     def delete_nearest(self, x: float, midi: float) -> None:
         idx = self.nearest_note_index(x, midi)

@@ -612,7 +612,7 @@ def add_position_step_if_needed(
         return False
     if abs(float(visual_position_x)) <= EPS and abs(float(visual_position_y)) <= EPS:
         return False
-    actions.append(position_track_event(floor, visual_position_x, visual_position_y))
+    actions.append(position_track_event(floor + 1, visual_position_x, visual_position_y))
     return True
 
 
