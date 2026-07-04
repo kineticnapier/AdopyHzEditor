@@ -2478,6 +2478,7 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_epsilon_ms: float = 0.001,
     harmony_tuning: str = "equal temperament",
     harmony_root_mode: str = "fixed root",
+    play_bpm: float = 120.0,
     max_tiles: int = 200000,
     max_tiles_per_note: int = 5000,
     harmony_poly_cycle_angle: float = 720.0,
@@ -2493,6 +2494,11 @@ def build_harmony_ratio_polyrhythm_events(
     rather than turned into a pseudo-chord.  The resulting angle sequence is
     simply the sorted-position gap sequence, e.g. 3:4 at cycle_angle 720° ->
     180, 60, 120, 120, 60, 180.
+
+    Stable98: ratio-polyrhythm is true angle timing.  The cycle length is
+    derived from the global Harmony BPM and cycle_angle, so emitted tiles do
+    not require per-tile SetSpeed compensation.  Pitch/frequency is retained
+    only as metadata for labels/debugging.
     """
     voice_specs = build_harmony_voice_specs(
         harmony_mode,
@@ -2508,7 +2514,7 @@ def build_harmony_ratio_polyrhythm_events(
     # The parameter is retained for project compatibility, but Scratch-style
     # conversion merges simultaneous positions instead of offsetting them.
     _unused_pseudo_angle = clean_relative_angle(max(0.001, float(harmony_poly_pseudo_angle)))
-    _unused_epsilon_sec = max(0.0, float(harmony_epsilon_ms)) / 1000.0
+    merge_epsilon_sec = max(1e-9, float(harmony_epsilon_ms) / 1000.0)
 
     cycle_angle = max(0.001, float(harmony_poly_cycle_angle))
     common_root_cycles = max(1, int(pattern.get("common_root_cycles", 1)))
@@ -2545,7 +2551,11 @@ def build_harmony_ratio_polyrhythm_events(
             root_freq = max(EPS, float(n0.freq) * root_ratio)
             root_midi = float(n0.midi) + ratio_to_semitones(root_ratio)
 
-        cycle_seconds = common_root_cycles / max(EPS, root_freq)
+        # In Scratch-style polyrhythm mode, timing is encoded by the generated
+        # angles themselves at one global BPM.  Do not derive cycle length from
+        # root_freq, otherwise every pitch change needs SetSpeed compensation
+        # and the result behaves like Hz Charting again.
+        cycle_seconds = cycle_angle * 60.0 / (180.0 * max(EPS, float(play_bpm)))
         if cycle_seconds <= EPS:
             continue
 
@@ -2603,6 +2613,8 @@ def build_harmony_ratio_polyrhythm_events(
                     "poly_actual_fraction_text": str(pattern.get("actual_fraction_text", "")),
                     "poly_ratio_octave_mode": str(pattern.get("ratio_octave_mode", harmony_poly_ratio_octave_mode)),
                     "poly_root_cycles": common_root_cycles,
+                    "poly_cycle_seconds": cycle_seconds,
+                    "poly_timing_source": "global_bpm",
                     "poly_scratch_merge": True,
                 }
                 note_events.append(event)
@@ -2619,11 +2631,20 @@ def build_harmony_ratio_polyrhythm_events(
         for seq_index, event in enumerate(note_events):
             event["poly_seq_index"] = seq_index
 
-        for idx, event in enumerate(note_events[:-1]):
-            nxt = note_events[idx + 1]
-            event["poly_next_seq_index"] = idx + 1
+        for idx, event in enumerate(note_events):
             cur_phase = int(event.get("poly_cycle_index", 0)) + float(event.get("poly_pos_float", 0.0))
-            next_phase = int(nxt.get("poly_cycle_index", 0)) + float(nxt.get("poly_pos_float", 0.0))
+            if idx + 1 < len(note_events):
+                nxt = note_events[idx + 1]
+                event["poly_next_seq_index"] = idx + 1
+                event["poly_has_next_in_note"] = True
+                next_phase = int(nxt.get("poly_cycle_index", 0)) + float(nxt.get("poly_pos_float", 0.0))
+            else:
+                # Keep the final tile of the note on the same Scratch-style
+                # grid.  If the note ends exactly on a cycle boundary, this is
+                # the final position -> cycle-end gap, e.g. 3:4 gives 180°.
+                event["poly_next_seq_index"] = -1
+                event["poly_has_next_in_note"] = False
+                next_phase = math.floor(cur_phase) + 1.0
             gap = max(EPS, next_phase - cur_phase)
             event["poly_rel_to_next"] = clean_relative_angle(gap * cycle_angle)
 
@@ -2634,8 +2655,38 @@ def build_harmony_ratio_polyrhythm_events(
 
     events.sort(key=lambda e: (float(e["time"]), int(e.get("note_id", 0)), int(e.get("voice", 0)), float(e.get("midi", 0.0))))
 
+    # Stable99: after stable98 removed per-tile SetSpeed, simultaneous roots from
+    # MIDI chords became near-zero angle gaps, which draws a straight back/forth
+    # line.  Scratch-style polyrhythm is a union of hit positions, so merge all
+    # globally simultaneous events before emitting angleData.
+    global_simultaneous_merged = 0
+    if events:
+        merged_events: list[dict[str, Any]] = []
+        for event in events:
+            if merged_events and abs(float(event.get("time", 0.0)) - float(merged_events[-1].get("time", 0.0))) <= merge_epsilon_sec:
+                primary = merged_events[-1]
+                primary["poly_global_cluster_size"] = int(primary.get("poly_global_cluster_size", 1)) + 1
+                primary.setdefault("poly_global_note_ids", set()).add(int(event.get("note_id", -1)))
+                primary.setdefault("poly_global_voice_labels", []).append(str(event.get("voice_label", "")))
+                primary.setdefault("poly_global_midis", []).append(float(event.get("midi", 0.0)))
+                global_simultaneous_merged += 1
+                continue
+            event = dict(event)
+            event["poly_global_cluster_size"] = 1
+            event["poly_global_note_ids"] = {int(event.get("note_id", -1))}
+            event["poly_global_voice_labels"] = [str(event.get("voice_label", ""))]
+            event["poly_global_midis"] = [float(event.get("midi", 0.0))]
+            merged_events.append(event)
+        events = merged_events
+
     if max_tiles > 0 and len(events) > max_tiles:
         events = events[:max_tiles]
+
+    # Convert temporary sets to stable debug strings so the data remains JSON-ish
+    # if debug rows inspect these event objects.
+    for event in events:
+        if isinstance(event.get("poly_global_note_ids"), set):
+            event["poly_global_note_ids"] = ",".join(str(x) for x in sorted(event["poly_global_note_ids"]))
 
     pattern_stats = {
         "ratio_text": str(pattern.get("ratio_text", "")),
@@ -2648,7 +2699,11 @@ def build_harmony_ratio_polyrhythm_events(
         "actual_fraction_text": str(pattern.get("actual_fraction_text", "")),
         "scratch_merge": "true",
         "duplicate_hits_merged": int(duplicate_hits_merged_total),
+        "global_simultaneous_merged": int(global_simultaneous_merged),
         "unique_positions": int(len(merged_positions)),
+        "timing_source": "global_bpm",
+        "cycle_seconds": round(float(cycle_angle * 60.0 / (180.0 * max(EPS, float(play_bpm)))), 9),
+        "play_bpm": round(float(play_bpm), 6),
     }
     return events, duplicate_hits_merged_total, voice_specs, pattern_stats
 
@@ -2892,6 +2947,10 @@ def emit_harmony_polyrhythm(
         one global BPM is used, and each time gap is encoded directly as an
         angle. This avoids per-tile SetSpeed unless target/remap changes the
         visual angle.
+
+    Ratio-polyrhythm mode:
+        the Scratch-derived relative angles are the timing.  It stays at the
+        global Harmony BPM and does not emit per-tile SetSpeed events.
     """
     if not events:
         return floor, 0, current_bpm, 0, 0, 0, 0, 0, 0, 0.0
@@ -2952,11 +3011,18 @@ def emit_harmony_polyrhythm(
                 nxt_event.get("note_id") == e.get("note_id")
                 and int(nxt_event.get("poly_seq_index", -999999)) == int(e.get("poly_next_seq_index", -1))
             )
-        if ratio_polyrhythm_timing and poly_rel is not None and poly_rel_matches_next:
-            # Ratio-polyrhythm mode: the visual angle comes from the small
-            # integer ratio pattern itself. Timing is preserved by SetSpeed.
+        if ratio_polyrhythm_timing and poly_rel is not None and (poly_rel_matches_next or i + 1 >= len(events)):
+            # Ratio-polyrhythm mode: the Scratch-derived relative angle is the
+            # timing.  Keep one global BPM; do not compensate with SetSpeed.
+            # The very last event also keeps its final position->cycle-end gap.
             old_rel = clean_relative_angle(float(poly_rel))
-            base_bpm_for_tile = old_rel * 60.0 / max(EPS, 180.0 * dt)
+            base_bpm_for_tile = float(play_bpm)
+        elif ratio_polyrhythm_timing:
+            # If global event sorting inserted another note before this note's
+            # next pattern hit, encode that real gap as an angle at the same
+            # global BPM instead of changing speed.
+            old_rel = harmony_timing_angle(dt, play_bpm)
+            base_bpm_for_tile = float(play_bpm)
         elif angle_only_timing:
             # In Harmony Angle-only mode, the raw angle itself represents the
             # exact time until the next merged impulse at the global BPM.
@@ -3006,7 +3072,12 @@ def emit_harmony_polyrhythm(
         if abs(rel - old_rel) > 1e-6:
             remapped_angles += 1
 
-        need_setspeed = (not angle_only_timing) or abs(bpm - float(play_bpm)) > 1e-6
+        if ratio_polyrhythm_timing:
+            # Polyrhythm uses angle timing: speed remains the global Harmony BPM.
+            need_setspeed = False
+            bpm = float(play_bpm)
+        else:
+            need_setspeed = (not angle_only_timing) or abs(bpm - float(play_bpm)) > 1e-6
         if need_setspeed:
             actions.append(set_bpm(floor, bpm))
             setspeed_events += 1
@@ -3021,7 +3092,7 @@ def emit_harmony_polyrhythm(
             harmony_pause_events += 1
             harmony_rest_seconds += rest_after
 
-        if angle_only_timing and need_setspeed:
+        if (angle_only_timing and not ratio_polyrhythm_timing) and need_setspeed:
             # Return to the global Harmony BPM for the next raw Angle-only tile.
             actions.append(set_bpm(floor + 1, play_bpm))
             setspeed_events += 1
@@ -3128,6 +3199,7 @@ def build_adofai_level(
                 harmony_epsilon_ms=harmony_epsilon_ms,
                 harmony_tuning=harmony_tuning,
                 harmony_root_mode=harmony_root_mode,
+                play_bpm=play_bpm,
                 max_tiles=max_tiles,
                 max_tiles_per_note=max_tiles_per_note,
                 harmony_poly_cycle_angle=harmony_poly_cycle_angle,
@@ -3202,6 +3274,9 @@ def build_adofai_level(
             "harmony_poly_scratch_merge": str(harmony_ratio_pattern_stats.get("scratch_merge", "")),
             "harmony_poly_unique_positions": int(harmony_ratio_pattern_stats.get("unique_positions", 0) or 0),
             "harmony_poly_duplicate_hits_merged": int(harmony_ratio_pattern_stats.get("duplicate_hits_merged", 0) or 0),
+            "harmony_poly_global_simultaneous_merged": int(harmony_ratio_pattern_stats.get("global_simultaneous_merged", 0) or 0),
+            "harmony_poly_timing_source": str(harmony_ratio_pattern_stats.get("timing_source", "")),
+            "harmony_poly_cycle_seconds": float(harmony_ratio_pattern_stats.get("cycle_seconds", 0.0) or 0.0),
             "harmony_angles_remapped": remapped_angles,
             "harmony_setspeed_events": setspeed_events,
             "harmony_pause_events": harmony_pause_events,

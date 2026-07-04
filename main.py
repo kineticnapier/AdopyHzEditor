@@ -2889,11 +2889,26 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(8)
 
+        def add_translated_items(combo: QtWidgets.QComboBox, items: list[tuple[str, str]]) -> None:
+            for value, label_key in items:
+                combo.addItem(tr(label_key), value)
+
+        def set_combo_value(combo: QtWidgets.QComboBox, value: str) -> None:
+            idx = combo.findData(value)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+
+        def combo_value(combo: QtWidgets.QComboBox) -> str:
+            data = combo.currentData()
+            return str(data) if data is not None else combo.currentText()
+
+        self._combo_value = combo_value
+
         self.method = QtWidgets.QComboBox()
-        self.method.addItems([
-            "Angle Compression: corrected Keycount formula",
-            "Angle-only: one BPM + angle only",
-            "Harmony / Polyrhythm: merged impulse trains",
+        add_translated_items(self.method, [
+            ("rabbit_zip", "export.method.angle_compression"),
+            ("angle_only", "export.method.angle_only"),
+            ("harmony", "export.method.harmony"),
         ])
 
         self.base_bpm = QtWidgets.QDoubleSpinBox()
@@ -2915,20 +2930,20 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         )
 
         self.harmony_mode = QtWidgets.QComboBox()
-        self.harmony_mode.addItems([
-            "off",
-            "octave +12",
-            "fifth +7",
-            "major third +4",
-            "minor third +3",
-            "lower octave -12",
-            "major triad",
-            "minor triad",
-            "sus4",
-            "dominant 7",
-            "custom",
+        add_translated_items(self.harmony_mode, [
+            ("off", "export.harmony_mode.off"),
+            ("octave +12", "export.harmony_mode.octave_up"),
+            ("fifth +7", "export.harmony_mode.fifth"),
+            ("major third +4", "export.harmony_mode.major_third"),
+            ("minor third +3", "export.harmony_mode.minor_third"),
+            ("lower octave -12", "export.harmony_mode.octave_down"),
+            ("major triad", "export.harmony_mode.major_triad"),
+            ("minor triad", "export.harmony_mode.minor_triad"),
+            ("sus4", "export.harmony_mode.sus4"),
+            ("dominant 7", "export.harmony_mode.dominant7"),
+            ("custom", "export.harmony_mode.custom"),
         ])
-        self.harmony_mode.setCurrentText("fifth +7")
+        set_combo_value(self.harmony_mode, "fifth +7")
         self.harmony_mode.setToolTip(
             "Harmony / Polyrhythmモードで追加する和声音。\n"
             "root音の周期列と和声音の周期列をmergeして1本のタイル列にします。"
@@ -2949,11 +2964,11 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_epsilon_ms.setToolTip("完全同時刻になったtileを微小時間ずらす量")
 
         self.harmony_tuning = QtWidgets.QComboBox()
-        self.harmony_tuning.addItems([
-            "equal temperament",
-            "just intonation",
+        add_translated_items(self.harmony_tuning, [
+            ("equal temperament", "export.harmony_tuning.equal"),
+            ("just intonation", "export.harmony_tuning.just"),
         ])
-        self.harmony_tuning.setCurrentText("equal temperament")
+        set_combo_value(self.harmony_tuning, "equal temperament")
         self.harmony_tuning.setToolTip(
             "3音以上のHarmonyで使うチューニング。\n"
             "equal temperamentは元音程に正確。\n"
@@ -2961,13 +2976,13 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         )
 
         self.harmony_root_mode = QtWidgets.QComboBox()
-        self.harmony_root_mode.addItems([
-            "fixed root",
-            "least squares Hz",
-            "least squares cents",
-            "minimax cents",
+        add_translated_items(self.harmony_root_mode, [
+            ("fixed root", "export.harmony_root.fixed"),
+            ("least squares Hz", "export.harmony_root.ls_hz"),
+            ("least squares cents", "export.harmony_root.ls_cents"),
+            ("minimax cents", "export.harmony_root.minimax"),
         ])
-        self.harmony_root_mode.setCurrentText("minimax cents")
+        set_combo_value(self.harmony_root_mode, "minimax cents")
         self.harmony_root_mode.setToolTip(
             "Just Intonation時のroot周波数調整。\n"
             "fixed root: rootを元音程に固定\n"
@@ -2977,12 +2992,12 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         )
 
         self.harmony_timing_mode = QtWidgets.QComboBox()
-        self.harmony_timing_mode.addItems([
-            "setspeed",
-            "angle-only",
-            "ratio-polyrhythm",
+        add_translated_items(self.harmony_timing_mode, [
+            ("setspeed", "export.harmony_timing.setspeed"),
+            ("angle-only", "export.harmony_timing.angle_only"),
+            ("ratio-polyrhythm", "export.harmony_timing.ratio_poly"),
         ])
-        self.harmony_timing_mode.setCurrentText("angle-only")
+        set_combo_value(self.harmony_timing_mode, "angle-only")
         self.harmony_timing_mode.setToolTip(
             "Harmonyのtiming変換方法。\n"
             "setspeed: pitch由来の角度 + SetSpeedでtiming補正。\n"
@@ -2991,16 +3006,16 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         )
 
         self.harmony_visual_mode = QtWidgets.QComboBox()
-        self.harmony_visual_mode.addItems([
-            "raw",
-            "round 45°",
-            "round 90°",
-            "custom step",
+        add_translated_items(self.harmony_visual_mode, [
+            ("raw", "export.harmony_visual.raw"),
+            ("round 45°", "export.harmony_visual.round45"),
+            ("round 90°", "export.harmony_visual.round90"),
+            ("custom step", "export.harmony_visual.custom"),
         ])
-        self.harmony_visual_mode.setCurrentText("round 45°")
+        set_combo_value(self.harmony_visual_mode, "round 45°")
         self.harmony_visual_mode.setToolTip(
             "Harmonyの見た目角度を読みやすい角度へ寄せます。\n"
-            "タイミングは SetSpeed と new_angle / old_angle で補正します。"
+            "setspeed/angle-onlyでは必要に応じてSetSpeed補正します。ratio-polyrhythmでは角度timing優先でSetSpeed連打は出しません。"
         )
 
         self.harmony_visual_step = QtWidgets.QDoubleSpinBox()
@@ -3017,7 +3032,8 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_poly_cycle_angle.setSuffix("°")
         self.harmony_poly_cycle_angle.setToolTip(
             "ratio-polyrhythmで1周期全体に割り当てる相対角度合計。\n"
-            "3:4で720°にすると 180,60,120,120,60,180 のような列になります。"
+            "3:4で720°にすると 180,60,120,120,60,180 のような列になります。\n"
+            "周期の再生時間はHarmony用BPMから決まり、各tileのSetSpeedは使いません。"
         )
 
         self.harmony_poly_pseudo_angle = QtWidgets.QDoubleSpinBox()
@@ -3039,11 +3055,11 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         )
 
         self.harmony_poly_ratio_octave_mode = QtWidgets.QComboBox()
-        self.harmony_poly_ratio_octave_mode.addItems([
-            "octave-folded",
-            "absolute",
+        add_translated_items(self.harmony_poly_ratio_octave_mode, [
+            ("octave-folded", "export.ratio_octave.folded"),
+            ("absolute", "export.ratio_octave.absolute"),
         ])
-        self.harmony_poly_ratio_octave_mode.setCurrentText("octave-folded")
+        set_combo_value(self.harmony_poly_ratio_octave_mode, "octave-folded")
         self.harmony_poly_ratio_octave_mode.setToolTip(
             "ratio-polyrhythmの比率生成でオクターブ差をどう扱うか。\n"
             "octave-folded: 2オクターブ差などを同じ音名として扱い、1:4を1:1にします。\n"
@@ -3051,7 +3067,14 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         )
 
         self.x_mode = QtWidgets.QComboBox()
-        self.x_mode.addItems(["floor", "lowest_floor", "round", "ceil", "fixed", "target_bpm"])
+        add_translated_items(self.x_mode, [
+            ("floor", "export.x_mode.floor"),
+            ("lowest_floor", "export.x_mode.lowest_floor"),
+            ("round", "export.x_mode.round"),
+            ("ceil", "export.x_mode.ceil"),
+            ("fixed", "export.x_mode.fixed"),
+            ("target_bpm", "export.x_mode.target_bpm"),
+        ])
         self.x_mode.setToolTip(
             "変更用xの選び方\n"
             "floor = 各ノートの floor(Keycount)\n"
@@ -3090,16 +3113,26 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.max_tiles_per_note.setSpecialValueText("Unlimited")
 
         self.track_visual = QtWidgets.QComboBox()
-        self.track_visual.addItems(["normal", "faint", "very faint", "hidden"])
-        self.track_visual.setCurrentText("normal")
+        add_translated_items(self.track_visual, [
+            ("normal", "export.track_visual.normal"),
+            ("faint", "export.track_visual.faint"),
+            ("very faint", "export.track_visual.very_faint"),
+            ("hidden", "export.track_visual.hidden"),
+        ])
+        set_combo_value(self.track_visual, "normal")
         self.track_visual.setToolTip(
             "Angle Compression は見た目がスパゲッティ状になりやすいです。\n"
             "faint/hidden にするとトラック線を薄く/非表示にできます。"
         )
 
         self.visual_path_mode = QtWidgets.QComboBox()
-        self.visual_path_mode.addItems(["raw", "upward", "upward avoid", "twirl upward"])
-        self.visual_path_mode.setCurrentText("raw")
+        add_translated_items(self.visual_path_mode, [
+            ("raw", "export.visual_path.raw"),
+            ("upward", "export.visual_path.upward"),
+            ("upward avoid", "export.visual_path.upward_avoid"),
+            ("twirl upward", "export.visual_path.twirl_upward"),
+        ])
+        set_combo_value(self.visual_path_mode, "raw")
         self.visual_path_mode.setToolTip(
             "全export mode共通の見た目パス補正。\n"
             "raw: 角度をそのまま使う\n"
@@ -3116,8 +3149,11 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.visual_path_angle.setToolTip("Visual path upward の絶対方向。90°=上方向")
 
         self.visual_position_mode = QtWidgets.QComboBox()
-        self.visual_position_mode.addItems(["off", "note step"])
-        self.visual_position_mode.setCurrentText("off")
+        add_translated_items(self.visual_position_mode, [
+            ("off", "export.visual_position.off"),
+            ("note step", "export.visual_position.note_step"),
+        ])
+        set_combo_value(self.visual_position_mode, "off")
         self.visual_position_mode.setToolTip(
             "PositionTrackによる見た目調整。\n"
             "note step: 2つ目以降のノート開始floorにPositionTrackを置き、以降のタイルを指定量ずらします。"
@@ -3136,8 +3172,13 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.visual_position_y.setToolTip("PositionTrack positionOffset[1]")
 
         self.final_angle_mode = QtWidgets.QComboBox()
-        self.final_angle_mode.addItems(["scaled", "cardinal", "horizontal", "custom"])
-        self.final_angle_mode.setCurrentText("scaled")
+        add_translated_items(self.final_angle_mode, [
+            ("scaled", "export.final_mode.scaled"),
+            ("cardinal", "export.final_mode.cardinal"),
+            ("horizontal", "export.final_mode.horizontal"),
+            ("custom", "export.final_mode.custom"),
+        ])
+        set_combo_value(self.final_angle_mode, "scaled")
         self.final_angle_mode.setToolTip(
             "最後の端数タイルの見た目補正\n"
             "scaled: 従来通り。angle * frac\n"
@@ -3168,15 +3209,15 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             except Exception:
                 self._auto_song_offset_ms = 0.0
 
-        self.use_project_song = QtWidgets.QCheckBox("Use project audio as ADOFAI song")
+        self.use_project_song = QtWidgets.QCheckBox(tr("export.song.use_project_audio"))
         self.use_project_song.setChecked(bool(self._song_source_path) and bool(getattr(parent, "adofai_use_project_song", True)))
         self.use_project_song.setToolTip("settings.songFilename に現在読み込んでいる音声ファイル名を入れます")
 
-        self.copy_project_song = QtWidgets.QCheckBox("Copy song next to .adofai")
+        self.copy_project_song = QtWidgets.QCheckBox(tr("export.song.copy_next_to_level"))
         self.copy_project_song.setChecked(bool(self._song_source_path) and bool(getattr(parent, "adofai_copy_project_song", True)))
         self.copy_project_song.setToolTip("ADOFAI出力先フォルダへ音声ファイルをコピーします。Release用に便利です。")
 
-        self.song_offset_auto = QtWidgets.QCheckBox("Use first note start")
+        self.song_offset_auto = QtWidgets.QCheckBox(tr("export.song_offset.use_first_note"))
         self.song_offset_auto.setChecked(bool(getattr(parent, "adofai_song_offset_auto", True)))
         self.song_offset_auto.setToolTip("最初のノート開始時刻をADOFAI settings.songOffset に使います")
 
@@ -3245,7 +3286,6 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.harmony_visual_mode"), self.harmony_visual_mode),
             (tr("export.harmony_visual_step"), self.harmony_visual_step),
             (tr("export.harmony_poly_cycle_angle"), self.harmony_poly_cycle_angle),
-            (tr("export.harmony_poly_pseudo_angle"), self.harmony_poly_pseudo_angle),
             (tr("export.harmony_poly_max_denominator"), self.harmony_poly_max_denominator),
             (tr("export.harmony_poly_ratio_octave_mode"), self.harmony_poly_ratio_octave_mode),
         ])
@@ -3337,39 +3377,35 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
 
     def options(self) -> dict:
         return {
-            "method": (
-                "angle_only" if self.method.currentIndex() == 1
-                else "harmony" if self.method.currentIndex() == 2
-                else "rabbit_zip"
-            ),
+            "method": self._combo_value(self.method),
             "base_bpm": float(self.base_bpm.value()),
             "angle_only_bpm": float(self.angle_only_bpm.value()),
-            "harmony_mode": self.harmony_mode.currentText(),
+            "harmony_mode": self._combo_value(self.harmony_mode),
             "harmony_custom_semitone": float(self.harmony_custom_semitone.value()),
             "harmony_epsilon_ms": float(self.harmony_epsilon_ms.value()),
-            "harmony_tuning": self.harmony_tuning.currentText(),
-            "harmony_root_mode": self.harmony_root_mode.currentText(),
-            "harmony_timing_mode": self.harmony_timing_mode.currentText(),
-            "harmony_visual_mode": self.harmony_visual_mode.currentText(),
+            "harmony_tuning": self._combo_value(self.harmony_tuning),
+            "harmony_root_mode": self._combo_value(self.harmony_root_mode),
+            "harmony_timing_mode": self._combo_value(self.harmony_timing_mode),
+            "harmony_visual_mode": self._combo_value(self.harmony_visual_mode),
             "harmony_visual_step": float(self.harmony_visual_step.value()),
             "harmony_poly_cycle_angle": float(self.harmony_poly_cycle_angle.value()),
-            "harmony_poly_pseudo_angle": float(self.harmony_poly_pseudo_angle.value()),
+            "harmony_poly_pseudo_angle": 30.0,
             "harmony_poly_max_denominator": int(self.harmony_poly_max_denominator.value()),
-            "harmony_poly_ratio_octave_mode": self.harmony_poly_ratio_octave_mode.currentText(),
-            "rabbit_x_mode": self.x_mode.currentText(),
+            "harmony_poly_ratio_octave_mode": self._combo_value(self.harmony_poly_ratio_octave_mode),
+            "rabbit_x_mode": self._combo_value(self.x_mode),
             "rabbit_fixed_x": float(self.fixed_x.value()),
             "rabbit_target_bpm": float(self.target_bpm.value()),
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
-            "track_visual": self.track_visual.currentText(),
-            "visual_path_mode": self.visual_path_mode.currentText(),
+            "track_visual": self._combo_value(self.track_visual),
+            "visual_path_mode": self._combo_value(self.visual_path_mode),
             "visual_path_angle": float(self.visual_path_angle.value()),
-            "visual_position_mode": self.visual_position_mode.currentText(),
+            "visual_position_mode": self._combo_value(self.visual_position_mode),
             "visual_position_x": float(self.visual_position_x.value()),
             "visual_position_y": float(self.visual_position_y.value()),
             # Phase-continuous glide is now the standard behavior.
             "phase_continuous_glide": True,
-            "final_angle_mode": self.final_angle_mode.currentText(),
+            "final_angle_mode": self._combo_value(self.final_angle_mode),
             "final_custom_angle": float(self.final_custom_angle.value()),
             "final_cardinal_step": float(self.final_cardinal_step.value()),
             "song_filename": Path(self._song_source_path).name if self.use_project_song.isChecked() and self._song_source_path else None,
