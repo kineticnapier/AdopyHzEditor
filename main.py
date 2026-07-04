@@ -269,8 +269,6 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(tr("menu.export_midi"), self.export_midi_file, QtGui.QKeySequence("Ctrl+M"))
         file_menu.addAction(tr("menu.export_adofai"), self.export_adofai_file, QtGui.QKeySequence("Ctrl+E"))
-        file_menu.addAction(tr("menu.export_selected_midi"), lambda _checked=False: self.export_midi_file(selected_only=True))
-        file_menu.addAction(tr("menu.export_selected_adofai"), lambda _checked=False: self.export_adofai_file(selected_only=True))
 
         edit_menu = menubar.addMenu(tr("menu.edit"))
         edit_menu.addAction(tr("menu.undo"), self.editor.undo)
@@ -2438,13 +2436,7 @@ class MainWindow(QtWidgets.QMainWindow):
         total = self.current_export_pitch_shift()
         return f"Export Oct {oct_shift:+d}, Semi {semi_shift:+d} ({total:+d} semitone)"
 
-    def base_notes_for_export(self, *, selected_only: bool = False) -> list[Note]:
-        if not selected_only:
-            return [n.normalized() for n in self.editor.notes]
-
-        return [self.editor.notes[i].normalized() for i in self.selected_note_indices()]
-
-    def notes_with_export_pitch_offset(self, *, selected_only: bool = False) -> list[Note]:
+    def notes_with_export_pitch_offset(self) -> list[Note]:
         """
         Apply explicit export pitch controls without moving notes on screen.
 
@@ -2455,7 +2447,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         shift = self.current_export_pitch_shift()
         result: list[Note] = []
-        for n in self.base_notes_for_export(selected_only=selected_only):
+        for n in self.editor.notes:
             nn = n.normalized().with_pitch_offset(shift)
             # Clamp only for MIDI-ish note range. Fractional pitch is preserved.
             if nn.is_curve:
@@ -2702,13 +2694,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sync_notes_to_player()
         self.mark_dirty()
 
-    def export_midi_file(self, _checked: bool = False, *, selected_only: bool = False) -> None:
+    def export_midi_file(self) -> None:
         if not self.editor.notes:
             QtWidgets.QMessageBox.information(self, tr("dialog.no_notes.title"), tr("dialog.no_notes.text"))
-            return
-        notes = self.notes_with_export_pitch_offset(selected_only=selected_only)
-        if selected_only and not notes:
-            QtWidgets.QMessageBox.information(self, tr("dialog.no_notes.title"), tr("dialog.no_selected_notes.text"))
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, tr("dialog.export_midi.title"), "", "MIDI File (*.mid);;All Files (*)")
         if not path:
@@ -2716,19 +2704,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path.lower().endswith((".mid", ".midi")):
             path += ".mid"
         try:
-            export_midi(notes, path)
-            scope = f"selected {len(notes)} notes" if selected_only else f"{len(notes)} notes"
-            self.statusBar().showMessage(f"Exported MIDI: {Path(path).name} / {scope} / {self.describe_export_pitch_shift()}")
+            export_midi(self.notes_with_export_pitch_offset(), path)
+            self.statusBar().showMessage(f"Exported MIDI: {Path(path).name} / {self.describe_export_pitch_shift()}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.midi_export_failed"), str(e))
 
-    def export_adofai_file(self, _checked: bool = False, *, selected_only: bool = False) -> None:
+    def export_adofai_file(self) -> None:
         if not self.editor.notes:
             QtWidgets.QMessageBox.information(self, tr("dialog.no_notes.title"), tr("dialog.no_notes.text"))
-            return
-        notes = self.notes_with_export_pitch_offset(selected_only=selected_only)
-        if selected_only and not notes:
-            QtWidgets.QMessageBox.information(self, tr("dialog.no_notes.title"), tr("dialog.no_selected_notes.text"))
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, tr("dialog.export_adofai.title"), "", "ADOFAI Level (*.adofai);;All Files (*)")
         if not path:
@@ -2736,7 +2719,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path.lower().endswith(".adofai"):
             path += ".adofai"
 
-        dialog = ExportAdoFAIDialog(self, selected_only=selected_only)
+        dialog = ExportAdoFAIDialog(self)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         try:
@@ -2747,9 +2730,7 @@ class MainWindow(QtWidgets.QMainWindow):
             copy_song = bool(opts.pop("_copy_song_to_export", False))
             song_source_path = opts.pop("_song_source_path", None)
 
-            stats = export_adofai(notes, path, **opts)
-            if selected_only:
-                stats["export_scope"] = f"selected {len(notes)} notes"
+            stats = export_adofai(self.notes_with_export_pitch_offset(), path, **opts)
 
             if copy_song and song_source_path:
                 src = Path(str(song_source_path))
@@ -2770,8 +2751,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     stats["song_copy_warning"] = repr(copy_error)
 
             QtWidgets.QMessageBox.information(self, tr("dialog.export_complete.title"), "\n".join(f"{k}: {v}" for k, v in stats.items()))
-            scope = f"selected {len(notes)} notes" if selected_only else f"{len(notes)} notes"
-            self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name} / {scope} / {self.describe_export_pitch_shift()}")
+            self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name} / {self.describe_export_pitch_shift()}")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.adofai_export_failed"), str(e))
 
@@ -2900,9 +2880,8 @@ class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
 
 
 class ExportAdoFAIDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None, *, selected_only: bool = False) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.selected_only = bool(selected_only)
         self.setWindowTitle(tr("export.title"))
         self.resize(780, 560)
 
@@ -3046,7 +3025,10 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_poly_pseudo_angle.setDecimals(3)
         self.harmony_poly_pseudo_angle.setValue(30.0)
         self.harmony_poly_pseudo_angle.setSuffix("°")
-        self.harmony_poly_pseudo_angle.setToolTip("ratio-polyrhythmで同時点を疑似同時押しにするときの角度")
+        self.harmony_poly_pseudo_angle.setToolTip(
+            "旧ratio-polyrhythm用設定。\n"
+            "stable97以降のratio-polyrhythmはScratch式に同時点を重複削除するため、通常は使われません。"
+        )
 
         self.harmony_poly_max_denominator = QtWidgets.QSpinBox()
         self.harmony_poly_max_denominator.setRange(1, 256)
@@ -3054,6 +3036,18 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.harmony_poly_max_denominator.setToolTip(
             "音程比を分数近似するときの最大分母。\n"
             "大きくすると精密になりますが、7:11:13系などで密度が増えやすくなります。"
+        )
+
+        self.harmony_poly_ratio_octave_mode = QtWidgets.QComboBox()
+        self.harmony_poly_ratio_octave_mode.addItems([
+            "octave-folded",
+            "absolute",
+        ])
+        self.harmony_poly_ratio_octave_mode.setCurrentText("octave-folded")
+        self.harmony_poly_ratio_octave_mode.setToolTip(
+            "ratio-polyrhythmの比率生成でオクターブ差をどう扱うか。\n"
+            "octave-folded: 2オクターブ差などを同じ音名として扱い、1:4を1:1にします。\n"
+            "absolute: 実周波数比をそのまま使います。"
         )
 
         self.x_mode = QtWidgets.QComboBox()
@@ -3126,7 +3120,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.visual_position_mode.setCurrentText("off")
         self.visual_position_mode.setToolTip(
             "PositionTrackによる見た目調整。\n"
-            "note step: 2つ目以降のノート開始floorの1つ後ろにPositionTrackを置き、以降のタイルを指定量ずらします。"
+            "note step: 2つ目以降のノート開始floorにPositionTrackを置き、以降のタイルを指定量ずらします。"
         )
 
         self.visual_position_x = QtWidgets.QDoubleSpinBox()
@@ -3168,11 +3162,9 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
 
         self._song_source_path = str(getattr(parent, "current_audio", "") or "")
         self._auto_song_offset_ms = 0.0
-        if parent is not None and hasattr(parent, "base_notes_for_export"):
+        if parent is not None and hasattr(parent, "editor") and getattr(parent.editor, "notes", None):
             try:
-                note_source = parent.base_notes_for_export(selected_only=self.selected_only)
-                if note_source:
-                    self._auto_song_offset_ms = round(min(n.normalized().start for n in note_source) * 1000.0, 3)
+                self._auto_song_offset_ms = round(min(n.normalized().start for n in parent.editor.notes) * 1000.0, 3)
             except Exception:
                 self._auto_song_offset_ms = 0.0
 
@@ -3255,6 +3247,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.harmony_poly_cycle_angle"), self.harmony_poly_cycle_angle),
             (tr("export.harmony_poly_pseudo_angle"), self.harmony_poly_pseudo_angle),
             (tr("export.harmony_poly_max_denominator"), self.harmony_poly_max_denominator),
+            (tr("export.harmony_poly_ratio_octave_mode"), self.harmony_poly_ratio_octave_mode),
         ])
 
         add_export_tab(tr("export.tab_advanced"), [
@@ -3315,11 +3308,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             return
 
         try:
-            note_source = (
-                parent.notes_with_export_pitch_offset(selected_only=self.selected_only)
-                if hasattr(parent, "notes_with_export_pitch_offset")
-                else parent.notes_with_output_octave()
-            )
+            note_source = parent.notes_with_export_pitch_offset() if hasattr(parent, "notes_with_export_pitch_offset") else parent.notes_with_output_octave()
             opts = dict(self.options())
             opts.pop("_copy_song_to_export", None)
             opts.pop("_song_source_path", None)
@@ -3339,11 +3328,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             return
 
         try:
-            note_source = (
-                parent.notes_with_export_pitch_offset(selected_only=self.selected_only)
-                if hasattr(parent, "notes_with_export_pitch_offset")
-                else parent.notes_with_output_octave()
-            )
+            note_source = parent.notes_with_export_pitch_offset() if hasattr(parent, "notes_with_export_pitch_offset") else parent.notes_with_output_octave()
             rows = build_adofai_debug_rows(note_source, **self.options())
             dlg = AdoFAIDebugPreviewDialog(rows, self)
             dlg.exec()
@@ -3370,6 +3355,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "harmony_poly_cycle_angle": float(self.harmony_poly_cycle_angle.value()),
             "harmony_poly_pseudo_angle": float(self.harmony_poly_pseudo_angle.value()),
             "harmony_poly_max_denominator": int(self.harmony_poly_max_denominator.value()),
+            "harmony_poly_ratio_octave_mode": self.harmony_poly_ratio_octave_mode.currentText(),
             "rabbit_x_mode": self.x_mode.currentText(),
             "rabbit_fixed_x": float(self.fixed_x.value()),
             "rabbit_target_bpm": float(self.target_bpm.value()),
