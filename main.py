@@ -15,6 +15,7 @@ from audio_player import AudioPlayer, decode_audio_file
 from editor_view import EditorView
 from export_midi import export_midi
 from midi_import import import_midi, MidiImportError, cleanup_imported_midi_notes
+from midi_import_dialog import get_midi_import_options
 from export_adofai import export_adofai
 from project_io import save_project, load_project
 from help_dialog import HelpDialog
@@ -2476,87 +2477,10 @@ class MainWindow(QtWidgets.QMainWindow):
         return self.notes_with_export_pitch_offset()
 
     def _midi_import_options(self) -> dict[str, object] | None:
-        dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle(tr("dialog.import_midi.options_title"))
-        dialog.setModal(True)
-
-        layout = QtWidgets.QVBoxLayout(dialog)
-
-        info = QtWidgets.QLabel(tr("dialog.import_midi.options_text"))
-        info.setWordWrap(True)
-        layout.addWidget(info)
-
-        mode_group = QtWidgets.QGroupBox(tr("dialog.import_midi.apply_group"))
-        mode_layout = QtWidgets.QVBoxLayout(mode_group)
-        replace_radio = QtWidgets.QRadioButton(tr("dialog.import_midi.replace"))
-        append_radio = QtWidgets.QRadioButton(tr("dialog.import_midi.append"))
-        replace_radio.setChecked(True)
-        mode_layout.addWidget(replace_radio)
-        if self.editor.notes:
-            mode_layout.addWidget(append_radio)
-        else:
-            append_radio.setEnabled(False)
-        layout.addWidget(mode_group)
-
-        cleanup_group = QtWidgets.QGroupBox(tr("dialog.import_midi.cleanup_group"))
-        form = QtWidgets.QFormLayout(cleanup_group)
-
-        overlap_combo = QtWidgets.QComboBox()
-        overlap_combo.addItem(tr("dialog.import_midi.overlap_merge"), "merge")
-        overlap_combo.addItem(tr("dialog.import_midi.overlap_trim"), "trim")
-        overlap_combo.addItem(tr("dialog.import_midi.overlap_off"), "off")
-        form.addRow(tr("dialog.import_midi.overlap_mode"), overlap_combo)
-
-        min_duration = QtWidgets.QDoubleSpinBox()
-        min_duration.setRange(0.0, 5000.0)
-        min_duration.setDecimals(1)
-        min_duration.setSingleStep(5.0)
-        min_duration.setSuffix(" ms")
-        min_duration.setValue(20.0)
-        form.addRow(tr("dialog.import_midi.min_duration"), min_duration)
-
-        min_velocity = QtWidgets.QSpinBox()
-        min_velocity.setRange(0, 127)
-        min_velocity.setValue(1)
-        form.addRow(tr("dialog.import_midi.min_velocity"), min_velocity)
-
-        time_scale = QtWidgets.QDoubleSpinBox()
-        time_scale.setRange(0.01, 100.0)
-        time_scale.setDecimals(4)
-        time_scale.setSingleStep(0.1)
-        time_scale.setValue(1.0)
-        time_scale.setSuffix(" x")
-        form.addRow(tr("dialog.import_midi.time_scale"), time_scale)
-
-        apply_tempo = QtWidgets.QCheckBox(tr("dialog.import_midi.apply_tempo"))
-        apply_tempo.setChecked(True)
-        form.addRow("", apply_tempo)
-
-        hint = QtWidgets.QLabel(tr("dialog.import_midi.cleanup_hint"))
-        hint.setWordWrap(True)
-        form.addRow("", hint)
-
-        layout.addWidget(cleanup_group)
-
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
-            parent=dialog,
+        return get_midi_import_options(
+            self,
+            has_existing_notes=bool(self.editor.notes),
         )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return None
-
-        return {
-            "mode": "append" if append_radio.isChecked() and self.editor.notes else "replace",
-            "overlap_mode": overlap_combo.currentData(),
-            "min_duration_seconds": float(min_duration.value()) / 1000.0,
-            "min_velocity": int(min_velocity.value()),
-            "time_scale": float(time_scale.value()),
-            "apply_tempo": bool(apply_tempo.isChecked()),
-        }
 
     def _ensure_workspace_for_imported_midi(self, notes: list[Note], duration_seconds: float, message: str) -> None:
         if self.current_audio is not None and self.editor.spectrogram is not None:
