@@ -20,6 +20,7 @@ from export_adofai import export_adofai
 from project_io import save_project, load_project
 from help_dialog import HelpDialog
 from export_adofai_dialog import ExportAdoFAIDialog
+from quick_hz_tools_dialog import QuickHzToolsDialog
 from note_model import Note
 from i18n import tr, current_language, set_language
 from app_info import APP_VERSION, GITHUB_RELEASES_URL
@@ -268,6 +269,7 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(tr("menu.export_midi"), self.export_midi_file, QtGui.QKeySequence("Ctrl+M"))
         file_menu.addAction(tr("menu.export_adofai"), self.export_adofai_file, QtGui.QKeySequence("Ctrl+E"))
+        file_menu.addAction(tr("menu.quick_hz_tools"), self.open_quick_hz_tools)
 
         edit_menu = menubar.addMenu(tr("menu.edit"))
         edit_menu.addAction(tr("menu.undo"), self.editor.undo)
@@ -2615,6 +2617,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ensure_workspace_for_imported_midi(imported if mode == "replace" else self.editor.notes, imported_duration, message)
         self.sync_notes_to_player()
         self.mark_dirty()
+
+    def open_quick_hz_tools(self) -> None:
+        dialog = QuickHzToolsDialog(self)
+        dialog.exec()
 
     def export_midi_file(self) -> None:
         if not self.editor.notes:
