@@ -79,6 +79,12 @@ def CalculateHzInfo(bpm: float, hz: float) -> HzCalculationInfo:
     interval_ms = 1000.0 / hz
     beat_ms = 60000.0 / bpm
     beats_per_hit = interval_ms / beat_ms
+    if beats_per_hit > 2.0 + 1e-9:
+        minimum_hz = bpm / 120.0
+        raise HzToolError(
+            "The interval is longer than one ADOFAI tile can represent at this BPM. "
+            f"Use Hz >= {minimum_hz:.6f}, or lower the BPM."
+        )
     relative_angle = clean_relative_angle(beats_per_hit * 180.0)
     equivalent_bpm = hz * 60.0
     beat_fraction = Fraction(beats_per_hit).limit_denominator(256)
@@ -182,28 +188,71 @@ def _load_chart(path: str | Path) -> dict[str, Any]:
 
 
 
+def _chart_angle_data(data: dict[str, Any], *, create: bool) -> list[Any]:
+    angle_data = data.get("angleData")
+    if angle_data is None:
+        path_data = data.get("pathData")
+        if path_data not in (None, "", []):
+            raise HzToolError(
+                "This chart uses legacy pathData. Convert it to angleData in ADOFAI before appending."
+            )
+        if not create:
+            return []
+        angle_data = [0]
+        data["angleData"] = angle_data
+    if not isinstance(angle_data, list):
+        raise HzToolError("angleData must be an array.")
+    if create and not angle_data:
+        angle_data.append(0)
+    return angle_data
+
+
 def ReadChartTailFloor(chart_path: str | Path) -> int:
     data = _load_chart(chart_path)
-    angle_data = data.get("angleData")
-    if not isinstance(angle_data, list) or not angle_data:
+    angle_data = _chart_angle_data(data, create=False)
+    if not angle_data:
         return 0
     return max(0, len(angle_data) - 1)
 
 
-def _safe_float_angle(value: Any, fallback: float = 0.0) -> float:
-    try:
-        out = float(value)
-    except Exception:
-        return fallback
-    if not math.isfinite(out):
-        return fallback
-    return out
+def _last_absolute_angle(angle_data: list[Any]) -> float:
+    for value in reversed(angle_data):
+        try:
+            out = float(value)
+        except Exception as exc:
+            raise HzToolError("angleData contains a non-numeric angle.") from exc
+        if not math.isfinite(out):
+            raise HzToolError("angleData contains a non-finite angle.")
+        if abs(out - 999.0) <= 1e-9:
+            continue
+        return out
+    raise HzToolError("angleData does not contain a usable absolute angle.")
 
 
-def _append_relative_angle(angle_data: list[Any], relative_angle: float) -> None:
-    prev = _safe_float_angle(angle_data[-1] if angle_data else 0.0, 0.0)
+def _twirl_active_at_floor(actions: list[Any], floor: int) -> bool:
+    active = False
+    for action in actions:
+        if not isinstance(action, dict) or action.get("eventType") != "Twirl":
+            continue
+        try:
+            action_floor = int(action.get("floor", -1))
+        except (TypeError, ValueError):
+            continue
+        if action_floor <= floor:
+            active = not active
+    return active
+
+
+def _append_relative_angle(
+    angle_data: list[Any],
+    relative_angle: float,
+    *,
+    twirled: bool = False,
+) -> None:
+    prev = _last_absolute_angle(angle_data)
     rel = clean_relative_angle(relative_angle)
-    angle_data.append(clean_angle(prev + 180.0 - rel))
+    current = prev - 180.0 + rel if twirled else prev + 180.0 - rel
+    angle_data.append(clean_angle(current))
 
 
 def AppendGeneratedDataToChart(
@@ -217,14 +266,7 @@ def AppendGeneratedDataToChart(
     source = Path(chart_path)
     data = _load_chart(source)
 
-    angle_data = data.get("angleData")
-    if angle_data is None:
-        angle_data = [0]
-        data["angleData"] = angle_data
-    if not isinstance(angle_data, list):
-        raise HzToolError("angleData must be an array.")
-    if not angle_data:
-        angle_data.append(0)
+    angle_data = _chart_angle_data(data, create=True)
 
     actions = data.get("actions")
     if actions is None:
@@ -233,10 +275,10 @@ def AppendGeneratedDataToChart(
     if not isinstance(actions, list):
         raise HzToolError("actions must be an array.")
 
-    append_start = len(angle_data) - 1 if start_floor is None else _non_negative_int(start_floor, "Start floor")
-    if append_start < len(angle_data) - 1:
-        # This tool is intentionally append-only. Keep the chart safe by writing to the tail.
-        append_start = len(angle_data) - 1
+    tail_floor = len(angle_data) - 1
+    append_start = tail_floor if start_floor is None else _non_negative_int(start_floor, "Start floor")
+    if append_start != tail_floor:
+        raise HzToolError(f"Start floor must match the chart tail floor ({tail_floor}).")
 
     count = ResolveGenerateCount(append_start, count=count)
 
@@ -245,8 +287,9 @@ def AppendGeneratedDataToChart(
         actions.append(set_bpm(append_start, info.bpm))
         actions_added = 1
 
+    twirled = _twirl_active_at_floor(actions, append_start)
     for _ in range(count):
-        _append_relative_angle(angle_data, info.relative_angle)
+        _append_relative_angle(angle_data, info.relative_angle, twirled=twirled)
 
     return data, ChartAppendResult(
         source_path=source,
@@ -261,8 +304,23 @@ def AppendGeneratedDataToChart(
 def default_added_path(source_path: str | Path) -> Path:
     source = Path(source_path)
     if source.suffix:
-        return source.with_name(f"{source.stem}_added{source.suffix}")
-    return source.with_name(f"{source.name}_added.adofai")
+        candidate = source.with_name(f"{source.stem}_added{source.suffix}")
+        stem = source.stem
+        suffix = source.suffix
+    else:
+        candidate = source.with_name(f"{source.name}_added.adofai")
+        stem = source.name
+        suffix = ".adofai"
+
+    if not candidate.exists():
+        return candidate
+
+    index = 2
+    while True:
+        candidate = source.with_name(f"{stem}_added_{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 def SaveChartAs(
@@ -278,7 +336,7 @@ def SaveChartAs(
     else:
         output = Path(output_path)
 
-    if output.exists() and output.resolve() == source.resolve() and not overwrite:
+    if output.exists() and not overwrite:
         raise HzToolError("Overwrite is disabled.")
 
     try:

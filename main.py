@@ -269,6 +269,14 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(tr("menu.export_midi"), self.export_midi_file, QtGui.QKeySequence("Ctrl+M"))
         file_menu.addAction(tr("menu.export_adofai"), self.export_adofai_file, QtGui.QKeySequence("Ctrl+E"))
+        file_menu.addAction(
+            tr("menu.export_selected_midi"),
+            lambda _checked=False: self.export_midi_file(selected_only=True),
+        )
+        file_menu.addAction(
+            tr("menu.export_selected_adofai"),
+            lambda _checked=False: self.export_adofai_file(selected_only=True),
+        )
         file_menu.addAction(tr("menu.quick_hz_tools"), self.open_quick_hz_tools)
 
         edit_menu = menubar.addMenu(tr("menu.edit"))
@@ -2437,7 +2445,12 @@ class MainWindow(QtWidgets.QMainWindow):
         total = self.current_export_pitch_shift()
         return f"Export Oct {oct_shift:+d}, Semi {semi_shift:+d} ({total:+d} semitone)"
 
-    def notes_with_export_pitch_offset(self) -> list[Note]:
+    def base_notes_for_export(self, *, selected_only: bool = False) -> list[Note]:
+        if not selected_only:
+            return [n.normalized() for n in self.editor.notes]
+        return [self.editor.notes[i].normalized() for i in self.selected_note_indices()]
+
+    def notes_with_export_pitch_offset(self, *, selected_only: bool = False) -> list[Note]:
         """
         Apply explicit export pitch controls without moving notes on screen.
 
@@ -2448,7 +2461,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         shift = self.current_export_pitch_shift()
         result: list[Note] = []
-        for n in self.editor.notes:
+        for n in self.base_notes_for_export(selected_only=selected_only):
             nn = n.normalized().with_pitch_offset(shift)
             # Clamp only for MIDI-ish note range. Fractional pitch is preserved.
             if nn.is_curve:
@@ -2622,9 +2635,17 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = QuickHzToolsDialog(self)
         dialog.exec()
 
-    def export_midi_file(self) -> None:
+    def export_midi_file(self, _checked: bool = False, *, selected_only: bool = False) -> None:
         if not self.editor.notes:
             QtWidgets.QMessageBox.information(self, tr("dialog.no_notes.title"), tr("dialog.no_notes.text"))
+            return
+        notes = self.notes_with_export_pitch_offset(selected_only=selected_only)
+        if selected_only and not notes:
+            QtWidgets.QMessageBox.information(
+                self,
+                tr("dialog.no_notes.title"),
+                tr("dialog.no_selected_notes.text"),
+            )
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, tr("dialog.export_midi.title"), "", "MIDI File (*.mid);;All Files (*)")
         if not path:
@@ -2632,14 +2653,25 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path.lower().endswith((".mid", ".midi")):
             path += ".mid"
         try:
-            export_midi(self.notes_with_export_pitch_offset(), path)
-            self.statusBar().showMessage(f"Exported MIDI: {Path(path).name} / {self.describe_export_pitch_shift()}")
+            export_midi(notes, path)
+            scope = f"selected {len(notes)} notes" if selected_only else f"{len(notes)} notes"
+            self.statusBar().showMessage(
+                f"Exported MIDI: {Path(path).name} / {scope} / {self.describe_export_pitch_shift()}"
+            )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.midi_export_failed"), str(e))
 
-    def export_adofai_file(self) -> None:
+    def export_adofai_file(self, _checked: bool = False, *, selected_only: bool = False) -> None:
         if not self.editor.notes:
             QtWidgets.QMessageBox.information(self, tr("dialog.no_notes.title"), tr("dialog.no_notes.text"))
+            return
+        notes = self.notes_with_export_pitch_offset(selected_only=selected_only)
+        if selected_only and not notes:
+            QtWidgets.QMessageBox.information(
+                self,
+                tr("dialog.no_notes.title"),
+                tr("dialog.no_selected_notes.text"),
+            )
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, tr("dialog.export_adofai.title"), "", "ADOFAI Level (*.adofai);;All Files (*)")
         if not path:
@@ -2647,7 +2679,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path.lower().endswith(".adofai"):
             path += ".adofai"
 
-        dialog = ExportAdoFAIDialog(self)
+        dialog = ExportAdoFAIDialog(self, selected_only=selected_only)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         try:
@@ -2658,7 +2690,9 @@ class MainWindow(QtWidgets.QMainWindow):
             copy_song = bool(opts.pop("_copy_song_to_export", False))
             song_source_path = opts.pop("_song_source_path", None)
 
-            stats = export_adofai(self.notes_with_export_pitch_offset(), path, **opts)
+            stats = export_adofai(notes, path, **opts)
+            if selected_only:
+                stats["export_scope"] = f"selected {len(notes)} notes"
 
             if copy_song and song_source_path:
                 src = Path(str(song_source_path))
@@ -2679,7 +2713,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     stats["song_copy_warning"] = repr(copy_error)
 
             QtWidgets.QMessageBox.information(self, tr("dialog.export_complete.title"), "\n".join(f"{k}: {v}" for k, v in stats.items()))
-            self.statusBar().showMessage(f"Exported ADOFAI: {Path(path).name} / {self.describe_export_pitch_shift()}")
+            scope = f"selected {len(notes)} notes" if selected_only else f"{len(notes)} notes"
+            self.statusBar().showMessage(
+                f"Exported ADOFAI: {Path(path).name} / {scope} / {self.describe_export_pitch_shift()}"
+            )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, tr("dialog.adofai_export_failed"), str(e))
 

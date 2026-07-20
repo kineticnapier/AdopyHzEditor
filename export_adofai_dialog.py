@@ -136,8 +136,9 @@ class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
 
 
 class ExportAdoFAIDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, *, selected_only: bool = False) -> None:
         super().__init__(parent)
+        self.selected_only = bool(selected_only)
         self.setWindowTitle(tr("export.title"))
         self.resize(780, 560)
 
@@ -459,9 +460,14 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
 
         self._song_source_path = str(getattr(parent, "current_audio", "") or "")
         self._auto_song_offset_ms = 0.0
-        if parent is not None and hasattr(parent, "editor") and getattr(parent.editor, "notes", None):
+        if parent is not None and hasattr(parent, "base_notes_for_export"):
             try:
-                self._auto_song_offset_ms = round(min(n.normalized().start for n in parent.editor.notes) * 1000.0, 3)
+                note_source = parent.base_notes_for_export(selected_only=self.selected_only)
+                if note_source:
+                    self._auto_song_offset_ms = round(
+                        min(n.normalized().start for n in note_source) * 1000.0,
+                        3,
+                    )
             except Exception:
                 self._auto_song_offset_ms = 0.0
 
@@ -604,7 +610,11 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             return
 
         try:
-            note_source = parent.notes_with_export_pitch_offset() if hasattr(parent, "notes_with_export_pitch_offset") else parent.notes_with_output_octave()
+            note_source = (
+                parent.notes_with_export_pitch_offset(selected_only=self.selected_only)
+                if hasattr(parent, "notes_with_export_pitch_offset")
+                else parent.notes_with_output_octave()
+            )
             opts = dict(self.options())
             opts.pop("_copy_song_to_export", None)
             opts.pop("_song_source_path", None)
@@ -624,7 +634,11 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             return
 
         try:
-            note_source = parent.notes_with_export_pitch_offset() if hasattr(parent, "notes_with_export_pitch_offset") else parent.notes_with_output_octave()
+            note_source = (
+                parent.notes_with_export_pitch_offset(selected_only=self.selected_only)
+                if hasattr(parent, "notes_with_export_pitch_offset")
+                else parent.notes_with_output_octave()
+            )
             rows = build_adofai_debug_rows(note_source, **self.options())
             dlg = AdoFAIDebugPreviewDialog(rows, self)
             dlg.exec()
