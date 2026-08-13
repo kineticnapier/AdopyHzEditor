@@ -32,7 +32,7 @@ QDockWidget { background: #2b3036; color: #f0f3f6; border: 0; }
 QDockWidget::title { background: #343a41; color: #ffffff; border-bottom: 1px solid #1b1f23; padding: 8px 10px; font-weight: 700; }
 QWidget#AudacitySettingsShell { background: #272c32; }
 QFrame#SettingsCategoryRail { background: #2f343a; border-right: 1px solid #171a1e; }
-QFrame#SettingsCategoryRail QPushButton { background: transparent; color: #d6dbe1; border: 0; border-radius: 4px; padding: 8px 10px; min-height: 34px; text-align: left; }
+QFrame#SettingsCategoryRail QPushButton { background: transparent; color: #d6dbe1; border: 0; border-radius: 4px; padding: 8px 8px; min-height: 34px; text-align: left; }
 QFrame#SettingsCategoryRail QPushButton:hover { background: #454d56; }
 QFrame#SettingsCategoryRail QPushButton:checked { background: #1769aa; color: #ffffff; font-weight: 700; }
 QToolBox#AudacitySettingsPages { background: #272c32; border: 0; }
@@ -134,7 +134,15 @@ def _move_navigation_into_central(window) -> None:
     grid.setContentsMargins(10, 6, 10, 7)
     grid.setHorizontalSpacing(7)
     grid.setVerticalSpacing(3)
-    controls = (window.time_slider, window.visible_sec, window.pitch_bottom, window.pitch_down_button, window.pitch_up_button, window.visible_notes, window.fit_button)
+    controls = (
+        window.time_slider,
+        window.visible_sec,
+        window.pitch_bottom,
+        window.pitch_down_button,
+        window.pitch_up_button,
+        window.visible_notes,
+        window.fit_button,
+    )
     old_bar = window.time_slider.parentWidget()
     old_layout = old_bar.layout() if old_bar is not None else None
     for control in controls:
@@ -168,12 +176,12 @@ def _fix_page_form(page: QtWidgets.QWidget) -> None:
     layout = page.layout()
     if not isinstance(layout, QtWidgets.QFormLayout):
         return
-    layout.setContentsMargins(14, 12, 14, 14)
-    layout.setHorizontalSpacing(14)
-    layout.setVerticalSpacing(10)
+    layout.setContentsMargins(12, 10, 12, 12)
+    layout.setHorizontalSpacing(10)
+    layout.setVerticalSpacing(8)
     layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
     layout.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.DontWrapRows)
-    layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+    layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
     layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignTop | QtCore.Qt.AlignmentFlag.AlignLeft)
     for row in range(layout.rowCount()):
         label_item = layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.LabelRole)
@@ -182,12 +190,15 @@ def _fix_page_form(page: QtWidgets.QWidget) -> None:
             label = label_item.widget()
             if isinstance(label, QtWidgets.QLabel):
                 label.setWordWrap(False)
-                label.setMinimumHeight(30)
-                label.setMinimumWidth(118)
+                label.setMinimumHeight(28)
+                label.setMinimumWidth(100)
+                label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
         if field_item is not None:
             field = field_item.widget()
             if field is not None:
-                field.setMinimumHeight(max(30, field.minimumHeight()))
+                field.setMinimumHeight(max(28, field.minimumHeight()))
+                if isinstance(field, QtWidgets.QLabel):
+                    field.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
 
 
 def _build_settings_sidebar(window) -> None:
@@ -208,9 +219,9 @@ def _build_settings_sidebar(window) -> None:
     root.setSpacing(0)
     rail = QtWidgets.QFrame(shell)
     rail.setObjectName("SettingsCategoryRail")
-    rail.setFixedWidth(142)
+    rail.setFixedWidth(122)
     rail_layout = QtWidgets.QVBoxLayout(rail)
-    rail_layout.setContentsMargins(7, 8, 7, 8)
+    rail_layout.setContentsMargins(6, 8, 6, 8)
     rail_layout.setSpacing(4)
     group = QtWidgets.QButtonGroup(shell)
     group.setExclusive(True)
@@ -219,13 +230,15 @@ def _build_settings_sidebar(window) -> None:
         button = QtWidgets.QPushButton(title, rail)
         button.setCheckable(True)
         button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        button.clicked.connect(lambda _checked=False, page_index=index: toolbox.setCurrentIndex(page_index))
+        button.clicked.connect(
+            lambda _checked=False, page_index=index: toolbox.setCurrentIndex(page_index)
+        )
         group.addButton(button, index)
         buttons.append(button)
         rail_layout.addWidget(button)
     rail_layout.addStretch(1)
     toolbox.setObjectName("AudacitySettingsPages")
-    toolbox.setMinimumWidth(330)
+    toolbox.setMinimumWidth(280)
     for index in range(count):
         page = toolbox.widget(index)
         if page is not None:
@@ -236,11 +249,13 @@ def _build_settings_sidebar(window) -> None:
     root.addWidget(toolbox, 1)
     dock.setWidget(shell)
     dock.setAllowedAreas(QtCore.Qt.DockWidgetArea.RightDockWidgetArea)
-    dock.setMinimumWidth(500)
-    dock.resize(520, max(520, dock.height()))
+    dock.setMinimumWidth(400)
+    dock.resize(420, max(500, dock.height()))
+
     def sync_button(index: int) -> None:
         if 0 <= index < len(buttons):
             buttons[index].setChecked(True)
+
     toolbox.currentChanged.connect(sync_button)
     current = min(current, len(buttons) - 1)
     toolbox.setCurrentIndex(current)
@@ -260,7 +275,7 @@ def polish_main_window(window) -> None:
     _mark_toolbar(window)
     _move_navigation_into_central(window)
     _build_settings_sidebar(window)
-    window.setMinimumSize(1180, 680)
+    window.setMinimumSize(1080, 680)
 
 
 def _polish_open_windows(app: QtWidgets.QApplication) -> None:
@@ -279,11 +294,14 @@ def install_modern_ui() -> None:
         _apply_theme(existing)
         QtCore.QTimer.singleShot(0, lambda: _polish_open_windows(existing))
         return
+
     class ModernApplication(original_application):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             _apply_theme(self)
+
         def exec(self) -> int:
             _polish_open_windows(self)
             return super().exec()
+
     QtWidgets.QApplication = ModernApplication
