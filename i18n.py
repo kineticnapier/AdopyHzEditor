@@ -48,6 +48,31 @@ def locale_file(lang: str) -> Path:
     return resource_base_dir() / "locales" / filename
 
 
+def locale_overlay_file(lang: str) -> Path | None:
+    filename = f"{lang}.json"
+    for base in resource_base_dirs():
+        p = base / "locales" / "ui" / filename
+        if p.exists():
+            return p
+    return None
+
+
+def _load_translation_table(lang: str) -> dict[str, str]:
+    table: dict[str, str] = {}
+    try:
+        table.update(json.loads(locale_file(lang).read_text(encoding="utf-8")))
+    except Exception:
+        pass
+
+    overlay = locale_overlay_file(lang)
+    if overlay is not None:
+        try:
+            table.update(json.loads(overlay.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return table
+
+
 def available_languages() -> list[str]:
     langs: set[str] = set()
     for base in resource_base_dirs():
@@ -109,20 +134,13 @@ def load_language(lang: str) -> None:
     path = locale_file(lang)
     if not path.exists():
         lang = "en"
-        path = locale_file("en")
 
     if lang not in _TRANSLATIONS:
-        try:
-            _TRANSLATIONS[lang] = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            _TRANSLATIONS[lang] = {}
+        _TRANSLATIONS[lang] = _load_translation_table(lang)
 
     # Ensure English fallback is loaded.
     if "en" not in _TRANSLATIONS and lang != "en":
-        try:
-            _TRANSLATIONS["en"] = json.loads(locale_file("en").read_text(encoding="utf-8"))
-        except Exception:
-            _TRANSLATIONS["en"] = {}
+        _TRANSLATIONS["en"] = _load_translation_table("en")
 
     _LANG = lang
 
