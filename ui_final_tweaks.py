@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 
 import ui_modern
+from toolbox_fix import apply as apply_toolbox_fix
 
 
 _COMPACT_RAIL_STYLE = r"""
@@ -34,6 +35,8 @@ def install_final_ui_tweaks() -> None:
                 QtWidgets.QSizePolicy.Policy.Expanding,
                 QtWidgets.QSizePolicy.Policy.Fixed,
             )
+
+        apply_toolbox_fix(window.settings_toolbox)
 
         if buttons:
             rail = buttons[0].parentWidget()
