@@ -8,215 +8,224 @@ from i18n import tr
 
 _STYLE_SHEET = r"""
 QWidget {
-    color: #e8ebf2;
+    color: #e8edf3;
     font-size: 10pt;
 }
 QMainWindow, QDialog {
-    background: #0d1015;
+    background: #20242a;
 }
+
+/* Audacity-like application chrome */
 QMenuBar {
-    background: #10141a;
-    color: #b8c0cc;
-    border: 0;
-    padding: 2px 6px;
+    background: #30353c;
+    color: #edf1f5;
+    border-bottom: 1px solid #181b1f;
+    padding: 2px 5px;
 }
 QMenuBar::item {
     background: transparent;
-    border-radius: 6px;
     padding: 5px 8px;
+    border-radius: 3px;
 }
 QMenuBar::item:selected {
-    background: #1a2028;
-    color: #ffffff;
+    background: #46505b;
 }
 QMenu {
-    background: #161b22;
-    color: #e8ebf2;
-    border: 1px solid #262e39;
-    padding: 6px;
+    background: #30353c;
+    color: #f1f4f7;
+    border: 1px solid #171a1e;
+    padding: 5px;
 }
 QMenu::item {
-    border-radius: 5px;
     padding: 6px 24px 6px 10px;
+    border-radius: 3px;
 }
 QMenu::item:selected {
-    background: #242b35;
+    background: #1769aa;
+    color: #ffffff;
 }
 QMenu::separator {
     height: 1px;
-    background: #29313c;
-    margin: 5px 8px;
+    background: #50565e;
+    margin: 5px 7px;
 }
 
+/* Main transport / tools */
 QToolBar#PrimaryToolbar {
-    background: #10141a;
+    background: #3a4047;
     border: 0;
-    border-bottom: 1px solid #1d232c;
-    padding: 7px 10px;
+    border-bottom: 1px solid #191c20;
+    padding: 7px 9px;
     spacing: 4px;
 }
 QToolBar#PrimaryToolbar::separator {
-    background: transparent;
-    width: 10px;
+    background: #59616a;
+    width: 1px;
+    margin: 7px 7px;
 }
 QToolBar#PrimaryToolbar QToolButton {
-    background: transparent;
-    color: #aeb6c2;
-    border: 0;
-    border-radius: 8px;
-    padding: 6px 10px;
-    min-height: 28px;
+    background: #454c54;
+    color: #f0f3f6;
+    border: 1px solid #22262b;
+    border-radius: 5px;
+    padding: 6px 9px;
+    min-height: 30px;
 }
 QToolBar#PrimaryToolbar QToolButton:hover {
-    background: #1a2028;
-    color: #ffffff;
+    background: #555e68;
+    border-color: #68737f;
 }
 QToolBar#PrimaryToolbar QToolButton:pressed {
-    background: #252c36;
+    background: #2c3238;
 }
 QToolBar#PrimaryToolbar QToolButton[role="open"] {
-    background: #1b2029;
-    color: #f3f5f8;
+    background: #3d4650;
 }
 QToolBar#PrimaryToolbar QToolButton[role="play"] {
-    background: #7657ff;
+    background: #2e8b57;
+    border-color: #1f6840;
     color: #ffffff;
-    font-weight: 600;
-    padding-left: 14px;
-    padding-right: 14px;
+    font-weight: 700;
+    min-width: 44px;
 }
 QToolBar#PrimaryToolbar QToolButton[role="play"]:hover {
-    background: #866dff;
+    background: #39a86b;
 }
 QToolBar#PrimaryToolbar QToolButton[role="mode"] {
-    background: #151a21;
-    color: #929ba8;
+    background: #333940;
+    color: #c6cdd5;
 }
 QToolBar#PrimaryToolbar QToolButton[role="mode"]:checked {
-    background: #2b2646;
-    color: #d0c8ff;
+    background: #1769aa;
+    border-color: #0d4f85;
+    color: #ffffff;
+    font-weight: 600;
 }
 QLabel#TransportTime {
-    color: #b4bdc9;
-    background: #151a21;
-    border-radius: 8px;
-    padding: 6px 10px;
+    color: #f6f8fa;
+    background: #23272d;
+    border: 1px solid #171a1e;
+    border-radius: 4px;
+    padding: 7px 10px;
 }
 
+/* Bottom navigation resembles a compact Audacity toolbar strip */
 QToolBar#BottomToolbar {
-    background: #10141a;
+    background: #343a41;
     border: 0;
-    border-top: 1px solid #1d232c;
+    border-top: 1px solid #191c20;
     padding: 0;
 }
 QWidget#BottomSurface {
     background: transparent;
 }
 QWidget#BottomSurface QLabel[muted="true"] {
-    color: #747f8e;
+    color: #c4cbd3;
     font-size: 9pt;
 }
 
+/* Settings / inspector */
 QDockWidget {
-    background: #10141a;
-    color: #dce1e8;
+    background: #2b3036;
+    color: #f0f3f6;
     border: 0;
 }
 QDockWidget::title {
-    background: #10141a;
-    color: #dce1e8;
-    border-bottom: 1px solid #1d232c;
-    padding: 9px 11px;
-    font-weight: 600;
+    background: #343a41;
+    color: #ffffff;
+    border-bottom: 1px solid #1b1f23;
+    padding: 8px 10px;
+    font-weight: 700;
 }
 QToolBox#ModernSettingsToolBox {
-    background: #10141a;
+    background: #2b3036;
 }
 QToolBox#ModernSettingsToolBox::tab {
-    background: transparent;
-    color: #87919f;
-    border: 0;
-    border-radius: 8px;
+    background: #3a4047;
+    color: #e5e9ee;
+    border: 1px solid #22262b;
+    border-radius: 4px;
     padding: 8px 10px;
-    margin: 2px 8px;
-    font-weight: 500;
-}
-QToolBox#ModernSettingsToolBox::tab:hover {
-    background: #181e26;
-    color: #dce1e8;
-}
-QToolBox#ModernSettingsToolBox::tab:selected {
-    background: #292441;
-    color: #d0c8ff;
+    margin: 2px 7px;
+    min-height: 22px;
     font-weight: 600;
 }
+QToolBox#ModernSettingsToolBox::tab:hover {
+    background: #454d56;
+}
+QToolBox#ModernSettingsToolBox::tab:selected {
+    background: #1769aa;
+    border-color: #0d4f85;
+    color: #ffffff;
+}
 QToolBox#ModernSettingsToolBox QWidget[settingsPage="true"] {
-    background: #151a21;
+    background: #272c32;
     border: 0;
-    border-radius: 12px;
 }
 QToolBox#ModernSettingsToolBox QWidget[settingsPage="true"] QLabel {
-    color: #929cab;
+    color: #e3e7ec;
 }
 
+/* Controls */
 QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {
-    background: #1b2028;
-    color: #e8ebf2;
-    border: 1px solid #2a323d;
-    border-radius: 7px;
-    padding: 4px 8px;
-    min-height: 24px;
-    selection-background-color: #7657ff;
+    background: #3a4148;
+    color: #f2f4f7;
+    border: 1px solid #171a1e;
+    border-radius: 4px;
+    padding: 4px 7px;
+    min-height: 26px;
+    selection-background-color: #1769aa;
 }
 QPushButton:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {
-    background: #202630;
-    border-color: #3a4553;
+    background: #48515a;
+    border-color: #697580;
 }
 QPushButton:pressed {
-    background: #272e39;
+    background: #2e343a;
 }
 QPushButton:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
-    border-color: #7657ff;
+    border-color: #4aa8ff;
 }
 QPushButton:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QLineEdit:disabled {
-    background: #15191f;
-    color: #5c6572;
-    border-color: #202630;
+    background: #30353b;
+    color: #7f8994;
+    border-color: #252a2f;
 }
 
 QCheckBox {
     spacing: 7px;
+    min-height: 24px;
 }
 QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
 }
 QCheckBox::indicator:unchecked {
-    background: #181d24;
-    border: 1px solid #3a4350;
-    border-radius: 5px;
+    background: #30363d;
+    border: 1px solid #7b8691;
+    border-radius: 3px;
 }
 QCheckBox::indicator:checked {
-    background: #7657ff;
-    border: 1px solid #7657ff;
-    border-radius: 5px;
+    background: #1769aa;
+    border: 1px solid #4aa8ff;
+    border-radius: 3px;
 }
 
 QSlider::groove:horizontal {
-    height: 4px;
-    background: #262d37;
+    height: 5px;
+    background: #20252a;
+    border: 1px solid #111417;
     border-radius: 2px;
 }
 QSlider::sub-page:horizontal {
-    background: #7657ff;
+    background: #318bd0;
     border-radius: 2px;
 }
 QSlider::handle:horizontal {
     width: 14px;
-    height: 14px;
     margin: -5px 0;
-    background: #d7d2ff;
-    border: 2px solid #7657ff;
+    background: #d9e6f2;
+    border: 1px solid #0c5288;
     border-radius: 7px;
 }
 QSlider::handle:horizontal:hover {
@@ -228,26 +237,26 @@ QComboBox::drop-down {
     width: 22px;
 }
 QComboBox QAbstractItemView {
-    background: #171c23;
-    color: #e8ebf2;
-    border: 1px solid #2a323d;
-    selection-background-color: #2a2545;
+    background: #343a41;
+    color: #eef2f6;
+    border: 1px solid #181b1f;
+    selection-background-color: #1769aa;
     selection-color: #ffffff;
     outline: 0;
 }
 
 QScrollBar:vertical {
-    background: transparent;
-    width: 10px;
-    margin: 2px;
+    background: #252a30;
+    width: 11px;
+    margin: 1px;
 }
 QScrollBar::handle:vertical {
-    background: #303844;
+    background: #58626d;
     min-height: 28px;
-    border-radius: 5px;
+    border-radius: 4px;
 }
 QScrollBar::handle:vertical:hover {
-    background: #414b5a;
+    background: #6b7783;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
@@ -256,15 +265,15 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
 }
 
 QStatusBar {
-    background: #0f1318;
-    color: #778291;
-    border-top: 1px solid #1b2129;
+    background: #30353c;
+    color: #c2c9d1;
+    border-top: 1px solid #191c20;
     font-size: 9pt;
 }
 QToolTip {
-    background: #1a2028;
-    color: #e8ebf2;
-    border: 1px solid #343d49;
+    background: #20252a;
+    color: #ffffff;
+    border: 1px solid #697580;
     padding: 5px 7px;
 }
 """
@@ -273,8 +282,8 @@ QToolTip {
 def _apply_theme(app: QtWidgets.QApplication) -> None:
     app.setStyle("Fusion")
     font = app.font()
-    if font.pointSizeF() < 9.5:
-        font.setPointSizeF(9.5)
+    if font.pointSizeF() < 10.0:
+        font.setPointSizeF(10.0)
         app.setFont(font)
     app.setStyleSheet(_STYLE_SHEET)
 
@@ -295,7 +304,7 @@ def _mark_toolbar(window) -> None:
     toolbar.setMovable(False)
     toolbar.setFloatable(False)
     toolbar.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.PreventContextMenu)
-    toolbar.setMinimumHeight(46)
+    toolbar.setMinimumHeight(50)
 
     for action in toolbar.actions():
         button = toolbar.widgetForAction(action)
@@ -317,8 +326,9 @@ def _mark_toolbar(window) -> None:
     if hasattr(window, "time_label"):
         window.time_label.setObjectName("TransportTime")
         fixed = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.SystemFont.FixedFont)
-        fixed.setPointSizeF(max(9.0, fixed.pointSizeF()))
+        fixed.setPointSizeF(max(10.0, fixed.pointSizeF()))
         window.time_label.setFont(fixed)
+        window.time_label.setMinimumWidth(150)
 
 
 def _mark_bottom_navigation(window) -> None:
@@ -330,7 +340,7 @@ def _mark_bottom_navigation(window) -> None:
     toolbar.setMovable(False)
     toolbar.setFloatable(False)
     toolbar.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.PreventContextMenu)
-    toolbar.setMinimumHeight(72)
+    toolbar.setMinimumHeight(74)
 
     bar = window.time_slider.parentWidget()
     if bar is None:
@@ -339,37 +349,68 @@ def _mark_bottom_navigation(window) -> None:
 
     for label in bar.findChildren(QtWidgets.QLabel):
         label.setProperty("muted", True)
+        label.setMinimumHeight(24)
         _repolish(label)
 
-    window.pitch_down_button.setMinimumWidth(46)
-    window.pitch_up_button.setMinimumWidth(46)
-    window.fit_button.setMinimumWidth(64)
+    window.pitch_down_button.setMinimumWidth(48)
+    window.pitch_up_button.setMinimumWidth(48)
+    window.fit_button.setMinimumWidth(68)
+
+
+def _fix_form_text(layout: QtWidgets.QFormLayout) -> None:
+    layout.setContentsMargins(14, 12, 14, 14)
+    layout.setHorizontalSpacing(14)
+    layout.setVerticalSpacing(9)
+    layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    layout.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.DontWrapRows)
+    layout.setLabelAlignment(
+        QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
+    )
+    layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+
+    for row in range(layout.rowCount()):
+        label_item = layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.LabelRole)
+        field_item = layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.FieldRole)
+
+        if label_item is not None:
+            label = label_item.widget()
+            if isinstance(label, QtWidgets.QLabel):
+                label.setWordWrap(False)
+                label.setMinimumHeight(28)
+                label.setMinimumWidth(112)
+                label.setAlignment(
+                    QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
+                )
+
+        if field_item is not None:
+            field = field_item.widget()
+            if field is not None:
+                field.setMinimumHeight(max(28, field.minimumHeight()))
 
 
 def _mark_settings(window) -> None:
     toolbox = window.settings_toolbox
     toolbox.setObjectName("ModernSettingsToolBox")
-    toolbox.setMinimumWidth(280)
-    window.settings_dock.setMinimumWidth(280)
-    window.settings_dock.resize(300, max(420, window.settings_dock.height()))
+
+    # The old 280 px dock was the main source of crushed form text.
+    toolbox.setMinimumWidth(350)
+    window.settings_dock.setMinimumWidth(350)
+    window.settings_dock.resize(380, max(460, window.settings_dock.height()))
 
     for index in range(toolbox.count()):
         page = toolbox.widget(index)
         if page is None:
             continue
+
         page.setProperty("settingsPage", True)
         page.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+
         layout = page.layout()
         if isinstance(layout, QtWidgets.QFormLayout):
-            layout.setContentsMargins(14, 14, 14, 14)
-            layout.setHorizontalSpacing(12)
-            layout.setVerticalSpacing(10)
-            layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-            layout.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapLongRows)
-            layout.setLabelAlignment(
-                QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
-            )
+            _fix_form_text(layout)
+
         _repolish(page)
+
     _repolish(toolbox)
 
 
@@ -380,10 +421,10 @@ def polish_main_window(window) -> None:
         return
 
     window._modern_ui_polished = True
-    window.setMinimumSize(1000, 640)
+    window.setMinimumSize(1060, 660)
 
-    # Keep the proven-safe UI structure from ui_polish. Modernization below is
-    # visual only: no page removal, reparenting, replacement, or deleteLater().
+    # Keep widget ownership/layout structure intact. This layer only styles and
+    # adjusts safe sizing properties.
     base_ui.polish_main_window(window)
     _mark_toolbar(window)
     _mark_bottom_navigation(window)
@@ -397,7 +438,7 @@ def _polish_open_windows(app: QtWidgets.QApplication) -> None:
 
 
 def install_modern_ui() -> None:
-    """Install a visual-only modern shell without changing widget ownership."""
+    """Install the Audacity-inspired visual shell without reparenting widgets."""
     if getattr(QtWidgets, "_adopy_modern_ui_installed", False):
         return
     QtWidgets._adopy_modern_ui_installed = True
