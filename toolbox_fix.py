@@ -1,6 +1,13 @@
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 
 def apply(box: QtWidgets.QToolBox) -> None:
-    for button in box.findChildren(QtWidgets.QAbstractButton):
+    buttons = box.findChildren(
+        QtWidgets.QAbstractButton,
+        options=QtCore.Qt.FindChildOption.FindDirectChildrenOnly,
+    )
+    for button in buttons:
         button.setFixedHeight(0)
+        button.setMinimumHeight(0)
+        button.setMaximumHeight(0)
+        button.hide()
