@@ -8,7 +8,7 @@ from i18n import tr
 
 _STYLE_SHEET = r"""
 QWidget {
-    color: #e7eaf0;
+    color: #e8ebf2;
     font-size: 10pt;
 }
 QMainWindow, QDialog {
@@ -16,7 +16,7 @@ QMainWindow, QDialog {
 }
 QMenuBar {
     background: #10141a;
-    color: #b9c0cc;
+    color: #b8c0cc;
     border: 0;
     padding: 2px 6px;
 }
@@ -26,14 +26,13 @@ QMenuBar::item {
     padding: 5px 8px;
 }
 QMenuBar::item:selected {
-    background: #1b2029;
+    background: #1a2028;
     color: #ffffff;
 }
 QMenu {
-    background: #161a21;
-    color: #e7eaf0;
-    border: 1px solid #262d38;
-    border-radius: 8px;
+    background: #161b22;
+    color: #e8ebf2;
+    border: 1px solid #262e39;
     padding: 6px;
 }
 QMenu::item {
@@ -41,19 +40,19 @@ QMenu::item {
     padding: 6px 24px 6px 10px;
 }
 QMenu::item:selected {
-    background: #252b36;
+    background: #242b35;
 }
 QMenu::separator {
     height: 1px;
-    background: #272e38;
+    background: #29313c;
     margin: 5px 8px;
 }
 
 QToolBar#PrimaryToolbar {
     background: #10141a;
     border: 0;
-    border-bottom: 1px solid #1c222b;
-    padding: 6px 10px;
+    border-bottom: 1px solid #1d232c;
+    padding: 7px 10px;
     spacing: 4px;
 }
 QToolBar#PrimaryToolbar::separator {
@@ -78,32 +77,27 @@ QToolBar#PrimaryToolbar QToolButton:pressed {
 QToolBar#PrimaryToolbar QToolButton[role="open"] {
     background: #1b2029;
     color: #f3f5f8;
-    padding-left: 12px;
-    padding-right: 12px;
 }
 QToolBar#PrimaryToolbar QToolButton[role="play"] {
     background: #7657ff;
     color: #ffffff;
     font-weight: 600;
-    padding-left: 13px;
-    padding-right: 13px;
+    padding-left: 14px;
+    padding-right: 14px;
 }
 QToolBar#PrimaryToolbar QToolButton[role="play"]:hover {
-    background: #8469ff;
+    background: #866dff;
 }
 QToolBar#PrimaryToolbar QToolButton[role="mode"] {
     background: #151a21;
-    color: #919aa7;
-    border-radius: 7px;
-    padding-left: 9px;
-    padding-right: 9px;
+    color: #929ba8;
 }
 QToolBar#PrimaryToolbar QToolButton[role="mode"]:checked {
-    background: #2a2545;
-    color: #c9c0ff;
+    background: #2b2646;
+    color: #d0c8ff;
 }
 QLabel#TransportTime {
-    color: #aeb6c2;
+    color: #b4bdc9;
     background: #151a21;
     border-radius: 8px;
     padding: 6px 10px;
@@ -112,20 +106,15 @@ QLabel#TransportTime {
 QToolBar#BottomToolbar {
     background: #10141a;
     border: 0;
-    border-top: 1px solid #1c222b;
+    border-top: 1px solid #1d232c;
     padding: 0;
 }
 QWidget#BottomSurface {
     background: transparent;
 }
 QWidget#BottomSurface QLabel[muted="true"] {
-    color: #737d8b;
+    color: #747f8e;
     font-size: 9pt;
-}
-QWidget#BottomSurface QPushButton,
-QWidget#BottomSurface QSpinBox,
-QWidget#BottomSurface QDoubleSpinBox {
-    min-height: 26px;
 }
 
 QDockWidget {
@@ -137,89 +126,67 @@ QDockWidget::title {
     background: #10141a;
     color: #dce1e8;
     border-bottom: 1px solid #1d232c;
-    padding: 8px 10px;
+    padding: 9px 11px;
     font-weight: 600;
 }
-QWidget#SettingsShell {
+QToolBox#ModernSettingsToolBox {
     background: #10141a;
 }
-QFrame#SettingsTabs {
-    background: #151a21;
-    border: 1px solid #202732;
-    border-radius: 11px;
-}
-QFrame#SettingsTabs QPushButton {
+QToolBox#ModernSettingsToolBox::tab {
     background: transparent;
     color: #87919f;
     border: 0;
-    border-radius: 7px;
-    min-height: 28px;
-    padding: 4px 5px;
-    font-size: 9pt;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin: 2px 8px;
+    font-weight: 500;
 }
-QFrame#SettingsTabs QPushButton:hover {
-    background: #1d232c;
+QToolBox#ModernSettingsToolBox::tab:hover {
+    background: #181e26;
     color: #dce1e8;
 }
-QFrame#SettingsTabs QPushButton:checked {
-    background: #2a2545;
-    color: #c9c0ff;
+QToolBox#ModernSettingsToolBox::tab:selected {
+    background: #292441;
+    color: #d0c8ff;
     font-weight: 600;
 }
-QStackedWidget#SettingsStack {
-    background: transparent;
-}
-QScrollArea#SettingsScroll {
-    background: transparent;
-    border: 0;
-}
-QScrollArea#SettingsScroll > QWidget > QWidget {
-    background: transparent;
-}
-QWidget#SettingsPage {
+QToolBox#ModernSettingsToolBox QWidget[settingsPage="true"] {
     background: #151a21;
-    border: 1px solid #202732;
+    border: 0;
     border-radius: 12px;
 }
-QWidget#SettingsPage QLabel {
-    color: #939dab;
-}
-QWidget#SettingsPage QCheckBox {
-    color: #dce1e8;
-    spacing: 7px;
-}
-QWidget#SettingsPage QPushButton,
-QWidget#SettingsPage QComboBox,
-QWidget#SettingsPage QSpinBox,
-QWidget#SettingsPage QDoubleSpinBox,
-QWidget#SettingsPage QLineEdit {
-    min-height: 28px;
+QToolBox#ModernSettingsToolBox QWidget[settingsPage="true"] QLabel {
+    color: #929cab;
 }
 
 QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {
     background: #1b2028;
-    color: #e7eaf0;
+    color: #e8ebf2;
     border: 1px solid #2a323d;
     border-radius: 7px;
     padding: 4px 8px;
+    min-height: 24px;
     selection-background-color: #7657ff;
 }
 QPushButton:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {
     background: #202630;
-    border-color: #394352;
+    border-color: #3a4553;
 }
 QPushButton:pressed {
-    background: #262d38;
+    background: #272e39;
 }
 QPushButton:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
     border-color: #7657ff;
 }
 QPushButton:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QLineEdit:disabled {
     background: #15191f;
-    color: #596271;
+    color: #5c6572;
     border-color: #202630;
 }
 
+QCheckBox {
+    spacing: 7px;
+}
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
@@ -262,7 +229,7 @@ QComboBox::drop-down {
 }
 QComboBox QAbstractItemView {
     background: #171c23;
-    color: #e7eaf0;
+    color: #e8ebf2;
     border: 1px solid #2a323d;
     selection-background-color: #2a2545;
     selection-color: #ffffff;
@@ -296,9 +263,8 @@ QStatusBar {
 }
 QToolTip {
     background: #1a2028;
-    color: #e7eaf0;
+    color: #e8ebf2;
     border: 1px solid #343d49;
-    border-radius: 6px;
     padding: 5px 7px;
 }
 """
@@ -338,13 +304,14 @@ def _mark_toolbar(window) -> None:
 
         text = action.text()
         if text == tr("ui.toolbar.open"):
-            button.setProperty("role", "open")
+            role = "open"
         elif text == "▶":
-            button.setProperty("role", "play")
+            role = "play"
         elif action.isCheckable():
-            button.setProperty("role", "mode")
+            role = "mode"
         else:
-            button.setProperty("role", "normal")
+            role = "normal"
+        button.setProperty("role", role)
         _repolish(button)
 
     if hasattr(window, "time_label"):
@@ -363,7 +330,7 @@ def _mark_bottom_navigation(window) -> None:
     toolbar.setMovable(False)
     toolbar.setFloatable(False)
     toolbar.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.PreventContextMenu)
-    toolbar.setMinimumHeight(74)
+    toolbar.setMinimumHeight(72)
 
     bar = window.time_slider.parentWidget()
     if bar is None:
@@ -374,102 +341,36 @@ def _mark_bottom_navigation(window) -> None:
         label.setProperty("muted", True)
         _repolish(label)
 
-    window.fit_button.setProperty("role", "ghost")
     window.pitch_down_button.setMinimumWidth(46)
     window.pitch_up_button.setMinimumWidth(46)
     window.fit_button.setMinimumWidth(64)
 
 
-def _tune_form_layout(page: QtWidgets.QWidget) -> None:
-    layout = page.layout()
-    if isinstance(layout, QtWidgets.QFormLayout):
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setHorizontalSpacing(12)
-        layout.setVerticalSpacing(10)
-        layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        layout.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapLongRows)
-        layout.setLabelAlignment(
-            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
-        )
-
-
-def _modernize_settings_panel(window) -> None:
-    if getattr(window, "_modern_settings_shell", None) is not None:
-        return
-
+def _mark_settings(window) -> None:
     toolbox = window.settings_toolbox
-    count = toolbox.count()
-    if count <= 0:
-        return
+    toolbox.setObjectName("ModernSettingsToolBox")
+    toolbox.setMinimumWidth(280)
+    window.settings_dock.setMinimumWidth(280)
+    window.settings_dock.resize(300, max(420, window.settings_dock.height()))
 
-    current = max(0, toolbox.currentIndex())
-    titles = [toolbox.itemText(index) for index in range(count)]
-    pages: list[QtWidgets.QWidget] = []
-    for _ in range(count):
-        page = toolbox.widget(0)
-        toolbox.removeItem(0)
-        pages.append(page)
-
-    shell = QtWidgets.QWidget(window.settings_dock)
-    shell.setObjectName("SettingsShell")
-    root = QtWidgets.QVBoxLayout(shell)
-    root.setContentsMargins(10, 10, 10, 10)
-    root.setSpacing(10)
-
-    tabs_frame = QtWidgets.QFrame(shell)
-    tabs_frame.setObjectName("SettingsTabs")
-    tabs_layout = QtWidgets.QGridLayout(tabs_frame)
-    tabs_layout.setContentsMargins(4, 4, 4, 4)
-    tabs_layout.setHorizontalSpacing(4)
-    tabs_layout.setVerticalSpacing(4)
-
-    stack = QtWidgets.QStackedWidget(shell)
-    stack.setObjectName("SettingsStack")
-
-    group = QtWidgets.QButtonGroup(shell)
-    group.setExclusive(True)
-    buttons: list[QtWidgets.QPushButton] = []
-
-    for index, (title, page) in enumerate(zip(titles, pages)):
-        button = QtWidgets.QPushButton(title, tabs_frame)
-        button.setCheckable(True)
-        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        button.clicked.connect(
-            lambda _checked=False, page_index=index: stack.setCurrentIndex(page_index)
-        )
-        group.addButton(button, index)
-        buttons.append(button)
-        tabs_layout.addWidget(button, index // 3, index % 3)
-
-        page.setObjectName("SettingsPage")
+    for index in range(toolbox.count()):
+        page = toolbox.widget(index)
+        if page is None:
+            continue
+        page.setProperty("settingsPage", True)
         page.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
-        _tune_form_layout(page)
-
-        scroll = QtWidgets.QScrollArea(stack)
-        scroll.setObjectName("SettingsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(page)
-        stack.addWidget(scroll)
-
-    if buttons:
-        current = min(current, len(buttons) - 1)
-        buttons[current].setChecked(True)
-        stack.setCurrentIndex(current)
-
-    root.addWidget(tabs_frame)
-    root.addWidget(stack, 1)
-
-    window.settings_dock.setWidget(shell)
-    window.settings_dock.setMinimumWidth(310)
-    window.settings_dock.resize(330, max(440, window.settings_dock.height()))
-    window._modern_settings_shell = shell
-    window._modern_settings_stack = stack
-    window._modern_settings_buttons = buttons
-    window._modern_settings_group = group
-
-    toolbox.deleteLater()
+        layout = page.layout()
+        if isinstance(layout, QtWidgets.QFormLayout):
+            layout.setContentsMargins(14, 14, 14, 14)
+            layout.setHorizontalSpacing(12)
+            layout.setVerticalSpacing(10)
+            layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            layout.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapLongRows)
+            layout.setLabelAlignment(
+                QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
+            )
+        _repolish(page)
+    _repolish(toolbox)
 
 
 def polish_main_window(window) -> None:
@@ -481,15 +382,12 @@ def polish_main_window(window) -> None:
     window._modern_ui_polished = True
     window.setMinimumSize(1000, 640)
 
-    base_ui._polish_toolbar(window)
-    base_ui._polish_bottom_navigation(window)
-    base_ui._split_analysis_page(window)
-    base_ui._localize_settings(window)
-    base_ui._connect_dependencies(window)
-
+    # Keep the proven-safe UI structure from ui_polish. Modernization below is
+    # visual only: no page removal, reparenting, replacement, or deleteLater().
+    base_ui.polish_main_window(window)
     _mark_toolbar(window)
     _mark_bottom_navigation(window)
-    _modernize_settings_panel(window)
+    _mark_settings(window)
 
 
 def _polish_open_windows(app: QtWidgets.QApplication) -> None:
@@ -499,7 +397,7 @@ def _polish_open_windows(app: QtWidgets.QApplication) -> None:
 
 
 def install_modern_ui() -> None:
-    """Install the modern UI shell without changing editor/audio/export behavior."""
+    """Install a visual-only modern shell without changing widget ownership."""
     if getattr(QtWidgets, "_adopy_modern_ui_installed", False):
         return
     QtWidgets._adopy_modern_ui_installed = True
