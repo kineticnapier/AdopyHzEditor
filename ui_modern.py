@@ -31,8 +31,8 @@ QWidget#AudacityNavBar QLabel { color: #c4cbd3; min-height: 24px; }
 QDockWidget { background: #2b3036; color: #f0f3f6; border: 0; }
 QDockWidget::title { background: #343a41; color: #ffffff; border-bottom: 1px solid #1b1f23; padding: 8px 10px; font-weight: 700; }
 QWidget#AudacitySettingsShell { background: #272c32; }
-QFrame#SettingsCategoryRail { background: #2f343a; border-right: 1px solid #171a1e; }
-QFrame#SettingsCategoryRail QPushButton { background: transparent; color: #d6dbe1; border: 0; border-radius: 4px; padding: 8px 8px; min-height: 34px; text-align: left; }
+QFrame#SettingsCategoryRail { background: #2f343a; border-bottom: 1px solid #171a1e; }
+QFrame#SettingsCategoryRail QPushButton { background: transparent; color: #d6dbe1; border: 0; border-radius: 4px; padding: 4px 5px; min-height: 30px; text-align: center; }
 QFrame#SettingsCategoryRail QPushButton:hover { background: #454d56; }
 QFrame#SettingsCategoryRail QPushButton:checked { background: #1769aa; color: #ffffff; font-weight: 700; }
 QToolBox#AudacitySettingsPages { background: #272c32; border: 0; }
@@ -201,6 +201,19 @@ def _fix_page_form(page: QtWidgets.QWidget) -> None:
                     field.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
 
 
+def _short_category_title(text: str) -> str:
+    return {
+        "出力音程": "出力",
+        "グリッド / スナップ": "グリッド",
+        "グリッド/スナップ": "グリッド",
+        "カーブ / 角度": "カーブ",
+        "カーブ/角度": "カーブ",
+        "Export Pitch": "Export",
+        "Grid / Snap": "Grid",
+        "Curve / Angle": "Curve",
+    }.get(text, text)
+
+
 def _build_settings_sidebar(window) -> None:
     if getattr(window, "_audacity_settings_shell", None) is not None:
         return
@@ -214,29 +227,33 @@ def _build_settings_sidebar(window) -> None:
     toolbox.setParent(None)
     shell = QtWidgets.QWidget(dock)
     shell.setObjectName("AudacitySettingsShell")
-    root = QtWidgets.QHBoxLayout(shell)
+    root = QtWidgets.QVBoxLayout(shell)
     root.setContentsMargins(0, 0, 0, 0)
     root.setSpacing(0)
     rail = QtWidgets.QFrame(shell)
     rail.setObjectName("SettingsCategoryRail")
-    rail.setFixedWidth(122)
-    rail_layout = QtWidgets.QVBoxLayout(rail)
-    rail_layout.setContentsMargins(6, 8, 6, 8)
-    rail_layout.setSpacing(4)
+    rail.setFixedHeight(42)
+    rail_layout = QtWidgets.QHBoxLayout(rail)
+    rail_layout.setContentsMargins(4, 4, 4, 4)
+    rail_layout.setSpacing(2)
     group = QtWidgets.QButtonGroup(shell)
     group.setExclusive(True)
     buttons: list[QtWidgets.QPushButton] = []
     for index, title in enumerate(titles):
-        button = QtWidgets.QPushButton(title, rail)
+        button = QtWidgets.QPushButton(_short_category_title(title), rail)
+        button.setToolTip(title)
         button.setCheckable(True)
         button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
         button.clicked.connect(
             lambda _checked=False, page_index=index: toolbox.setCurrentIndex(page_index)
         )
         group.addButton(button, index)
         buttons.append(button)
-        rail_layout.addWidget(button)
-    rail_layout.addStretch(1)
+        rail_layout.addWidget(button, 1)
     toolbox.setObjectName("AudacitySettingsPages")
     toolbox.setMinimumWidth(280)
     for index in range(count):
