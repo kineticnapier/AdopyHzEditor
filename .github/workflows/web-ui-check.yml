@@ -1,0 +1,43 @@
+name: Web UI check
+
+on:
+  push:
+    branches: [ts-ui-prototype]
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "web_ui.py"
+      - "web_backend*.py"
+      - ".github/workflows/web-ui-check.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python syntax
+        run: >-
+          python -m compileall -q
+          web_ui.py
+          web_backend.py
+          web_backend_adofai.py
+          web_backend_io.py
+          web_backend_notes.py
+          web_backend_tools.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
