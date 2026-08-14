@@ -84,7 +84,6 @@ export default function NotePresetPanel({ api, selected, playbackTime, onMutatio
       <input value={name} maxLength={80} placeholder="プリセット名" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
       <button disabled={!api || busy || selected.length !== 1 || !name.trim()} onClick={() => void save()}>選択音を保存</button>
     </div>
-    <div className="preset-suggestions"><span>名前候補:</span><button onClick={() => setName("Zaag")}>Zaag</button><button onClick={() => setName("キック")}>キック</button></div>
     {presets.length === 0 ? <div className="hint">1個のノートを選択して保存すると、別の曲でも同じ音高・長さを再利用できます。</div> : <>
       <div className="preset-use-row">
         <select value={chosen} onChange={(e) => setChosen(e.target.value)}>{presets.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}</select>
