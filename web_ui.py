@@ -14,10 +14,11 @@ except ImportError as exc:
 from i18n import set_language
 from web_backend import Bridge as CoreBridge
 from web_backend_adofai import AdoFAIMixin
+from web_backend_presets import PresetMixin
 from web_backend_tools import ToolsMixin
 
 
-class Bridge(ToolsMixin, AdoFAIMixin, CoreBridge):
+class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
     """Web UI backend with export, workspace and utility APIs layered on the core editor bridge."""
 
     def __init__(self) -> None:
@@ -25,7 +26,7 @@ class Bridge(ToolsMixin, AdoFAIMixin, CoreBridge):
         self._status = "準備完了"
 
     def open_audio(self):
-        state = super().open_audio()
+        super().open_audio()
         with self._lock:
             if self.audio_path:
                 self._status = f"{Path(self.audio_path).name} を読み込みました"
@@ -33,7 +34,7 @@ class Bridge(ToolsMixin, AdoFAIMixin, CoreBridge):
 
     def reanalyze_audio(self):
         had_audio = bool(self.audio_path)
-        state = super().reanalyze_audio()
+        super().reanalyze_audio()
         with self._lock:
             self._status = "解析が完了しました" if had_audio else "先に音声を開いてください"
         return self.get_state()
