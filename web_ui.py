@@ -18,6 +18,11 @@ from web_backend_adofai import AdoFAIMixin
 class Bridge(AdoFAIMixin, CoreBridge):
     """Web UI backend with advanced export/help APIs layered on the core editor bridge."""
 
+    def get_adofai_export_defaults(self, selected_indices=None):
+        defaults = super().get_adofai_export_defaults(selected_indices)
+        defaults["selectedOnly"] = False
+        return defaults
+
 
 ROOT = Path(__file__).resolve().parent
 DIST_INDEX = ROOT / "frontend" / "dist" / "index.html"
