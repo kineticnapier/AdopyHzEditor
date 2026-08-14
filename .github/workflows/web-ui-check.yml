@@ -26,8 +26,10 @@ jobs:
           web_ui.py
           web_backend.py
           web_backend_adofai.py
+          web_backend_editing.py
           web_backend_io.py
           web_backend_notes.py
+          web_backend_presets.py
           web_backend_tools.py
 
       - uses: actions/setup-node@v4
