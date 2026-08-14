@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
+import AdoFAIExportDialog from "./AdoFAIExportDialog";
 import EditorCanvas from "./EditorCanvas";
+import HelpDialog from "./HelpDialog";
 import SettingsPanel from "./SettingsPanel";
 import Timeline from "./Timeline";
 import TopToolbar from "./TopToolbar";
 import useEditorShortcuts from "./useEditorShortcuts";
+import "./dialogs.css";
 import { getBackendApi, type AppState, type BackendApi, type EditorSettings, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./bridge";
 
 const defaultSettings: EditorSettings = { volume: 85, speed: 1, notePreview: true, previewVolume: 20, previewOctave: 0, previewSound: "sine", exportOctave: 0, exportSemitone: 0, gridEnabled: false, metronomeEnabled: false, bpm: 175, offsetMs: 0, metronomeVolume: 35, snapEnabled: false, snapDiv: 1, contrast: 115, gamma: 75, enhance: true, displayMode: "wavetone", harmonics: "off", colormap: "wavetone", analysisProfile: "Normal", cqtResolution: "profile default", curveShape: "ease", curveInterpolation: "bezier_pitch", targetAngle: 165 };
@@ -12,6 +15,7 @@ const defaultPlayback: PlaybackState = { time: 0, duration: 60, playing: false, 
 
 export default function App() {
   const [api, setApi] = useState<BackendApi | null>(null); const [connected, setConnected] = useState(false); const [settings, setSettings] = useState(defaultSettings); const [view, setView] = useState(defaultView); const [playback, setPlayback] = useState(defaultPlayback); const [notes, setNotes] = useState<NoteDto[]>([]); const [selected, setSelected] = useState<number[]>([]); const [spectrum, setSpectrum] = useState<SpectrogramPayload | null>(null); const [analysisAvailable, setAnalysisAvailable] = useState(false); const [audioName, setAudioName] = useState<string | null>(null); const [projectPath, setProjectPath] = useState<string | null>(null); const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false); const [status, setStatus] = useState("Ready");
+  const [adoExportOpen, setAdoExportOpen] = useState(false); const [helpSection, setHelpSection] = useState<string | null>(null);
 
   function applyState(state: AppState) { setSettings(state.settings); setView(state.view); setPlayback(state.playback); setNotes(state.notes); setSelected((old) => old.filter((i) => i >= 0 && i < state.notes.length)); setAnalysisAvailable(state.analysis.available); setAudioName(state.audio.name); setProjectPath(state.projectPath); setDirty(state.dirty); setBusy(state.busy); setStatus(state.status); }
   async function refreshSpectrum(backend = api) { if (!backend) return; const payload = await backend.get_spectrogram(1600); setSpectrum(payload.available ? payload : null); }
@@ -35,11 +39,13 @@ export default function App() {
   async function undo() { if (api) applyMutation(await api.undo(), []); } async function redo() { if (api) applyMutation(await api.redo(), []); }
   const stateAction = (fn: () => Promise<AppState>) => void runStateAction(fn); const nudgeSeconds = settings.snapEnabled ? 60 / Math.max(1, settings.bpm) / Math.max(1, settings.snapDiv) : 0.01;
 
-  useEditorShortcuts({ api, notes, selected, playbackTime: playback.time, view, nudgeSeconds, openAudio: () => api && stateAction(() => api.open_audio()), saveProject: () => api && stateAction(() => api.save_project_dialog()), loadProject: () => api && stateAction(() => api.load_project_dialog()), importMidi: () => api && stateAction(() => api.import_midi_dialog()), setStatus, undo: () => void undo(), redo: () => void redo(), select: setSelected, applyMutation, move: (i, dx, dy) => void moveNotes(i, dx, dy), stop: () => void stopPlayback(), play: () => void togglePlayback(), deleteSelected: () => void deleteNotes(), mode: (v) => void mode(v), seek: (d) => void seekRelative(d), updateView: (c) => void updateView(c) });
+  useEditorShortcuts({ api, notes, selected, playbackTime: playback.time, view, nudgeSeconds, openAudio: () => api && stateAction(() => api.open_audio()), saveProject: () => api && stateAction(() => api.save_project_dialog()), loadProject: () => api && stateAction(() => api.load_project_dialog()), importMidi: () => api && stateAction(() => api.import_midi_dialog()), openAdoExport: () => setAdoExportOpen(true), openHelp: () => setHelpSection("quick_start"), setStatus, undo: () => void undo(), redo: () => void redo(), select: setSelected, applyMutation, move: (i, dx, dy) => void moveNotes(i, dx, dy), stop: () => void stopPlayback(), play: () => void togglePlayback(), deleteSelected: () => void deleteNotes(), mode: (v) => void mode(v), seek: (d) => void seekRelative(d), updateView: (c) => void updateView(c) });
 
   return <div className="app">
-    <TopToolbar connected={connected} busy={busy} audioName={audioName} dirty={dirty} playback={playback} view={view} onOpen={() => api && stateAction(() => api.open_audio())} onLoadProject={() => api && stateAction(() => api.load_project_dialog())} onSaveProject={() => api && stateAction(() => api.save_project_dialog())} onSeek={(t) => void seekTo(t)} onStop={() => void stopPlayback()} onPlay={() => void togglePlayback()} onSeekRelative={(d) => void seekRelative(d)} onImportMidi={() => api && stateAction(() => api.import_midi_dialog())} onExportMidi={() => void api?.export_midi_dialog().then((x) => setStatus(x.status))} onExportAdo={() => void api?.export_adofai_dialog().then((x) => setStatus(x.status))} onMode={(v) => void mode(v)} />
+    <TopToolbar connected={connected} busy={busy} audioName={audioName} dirty={dirty} playback={playback} view={view} onOpen={() => api && stateAction(() => api.open_audio())} onLoadProject={() => api && stateAction(() => api.load_project_dialog())} onSaveProject={() => api && stateAction(() => api.save_project_dialog())} onSeek={(t) => void seekTo(t)} onStop={() => void stopPlayback()} onPlay={() => void togglePlayback()} onSeekRelative={(d) => void seekRelative(d)} onImportMidi={() => api && stateAction(() => api.import_midi_dialog())} onExportMidi={() => void api?.export_midi_dialog().then((x) => setStatus(x.status))} onExportAdo={() => setAdoExportOpen(true)} onHelp={() => setHelpSection("quick_start")} onMode={(v) => void mode(v)} />
     <main className="workspace"><section className="editor"><EditorCanvas notes={notes} selected={selected} settings={settings} view={view} playback={playback} spectrum={spectrum} onSelect={setSelected} onAdd={addNote} onMove={moveNotes} onDelete={deleteNotes} onSeek={seekTo} onView={updateView} /><Timeline view={view} playback={playback} onView={(c) => void updateView(c)} onFit={() => void fitView()} /></section><SettingsPanel api={api} settings={settings} selected={selected} audioName={audioName} busy={busy} onPatch={patch} onStateAction={runStateAction} onMutation={applyMutation} /></main>
     <footer className="statusbar"><span>{busy ? "Working…" : status}</span><span>{projectPath ? projectPath.split(/[\\/]/).pop() : "No project"} · {notes.length} notes</span></footer>
+    {adoExportOpen && api && <AdoFAIExportDialog api={api} selected={selected} onClose={() => setAdoExportOpen(false)} onStatus={setStatus} onHelp={(section) => setHelpSection(section ?? "adofai_export")} />}
+    {helpSection && api && <HelpDialog api={api} initialSection={helpSection} onClose={() => setHelpSection(null)} />}
   </div>;
 }
