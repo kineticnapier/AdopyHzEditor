@@ -13,10 +13,11 @@ except ImportError as exc:
 
 from web_backend import Bridge as CoreBridge
 from web_backend_adofai import AdoFAIMixin
+from web_backend_tools import ToolsMixin
 
 
-class Bridge(AdoFAIMixin, CoreBridge):
-    """Web UI backend with advanced export/help APIs layered on the core editor bridge."""
+class Bridge(ToolsMixin, AdoFAIMixin, CoreBridge):
+    """Web UI backend with export, workspace and utility APIs layered on the core editor bridge."""
 
     def get_adofai_export_defaults(self, selected_indices=None):
         defaults = super().get_adofai_export_defaults(selected_indices)
