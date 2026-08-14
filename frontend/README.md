@@ -1,8 +1,8 @@
 # React / TypeScript UI prototype
 
-Experimental React/TypeScript front end for AdopyHzEditor. The existing PySide6 application stays intact; this version launches separately through `web_ui.py`.
+AdopyHzEditor の React / TypeScript フロントエンドです。既存の PySide6 版はそのまま残し、Web UI は `web_ui.py` から別起動します。
 
-## Build and run
+## ビルドと起動
 
 ```powershell
 cd frontend
@@ -13,48 +13,54 @@ python -m pip install -r requirements-webui.txt
 python web_ui.py
 ```
 
-## Vite development mode
+## Vite 開発モード
 
 ```powershell
 cd frontend
 npm run dev
 ```
 
-In another PowerShell window:
+別の PowerShell で:
 
 ```powershell
 $env:ADOPY_WEB_UI_URL = "http://localhost:5173"
 python web_ui.py
 ```
 
-## Migrated so far
+## 移植済み
 
-- Audio open, playback, stop, seeking and playback speed/volume
-- CQT analysis and spectrogram rendering on an HTML canvas
-- Fixed notes and curve notes, selection, move, delete, undo/redo, copy/cut/paste
-- View navigation, pitch/time zoom and Spec / Notes / Both modes
-- Playback, export, grid/snap, view, analysis and curve settings
-- Project save/load, notes-only project load and project-note merge
-- Blank workspace configuration
-- MIDI import/export and selected-note MIDI export
-- Advanced ADOFAI export options using the existing Python exporter
-- ADOFAI Tile Preview and Debug Preview
-- Project-song copy and automatic/manual songOffset export workflow
-- Help / Quick Start and Releases/update flow
-- Quick Hz Tools, including chart append
-- Harmonic Diagram preview and insertion
-- Language preference selection
-- Existing keyboard shortcuts for the migrated operations
-- Compact File / Edit / Analyze / Tools / Options / Help menus
+- 音声読み込み、再生、一時停止、停止、シーク、速度・音量変更
+- CQT解析とHTML Canvas上のスペクトログラム描画
+- 固定ノート / カーブノートの作成・選択・移動・削除
+- ノート左右端ドラッグによる長さ変更（複数選択対応、スナップ対応）
+- Undo / Redo、コピー / 切り取り / 貼り付け
+- ノートの数値インスペクタ（開始・終了・長さ・音高）
+- ノート複製 (`Ctrl+D`) とクオンタイズ (`Q`)
+- 範囲選択、時間・音高表示範囲の移動 / ズーム
+- スペクトル / ノート / 両方の表示モード
+- 再生、出力、グリッド / スナップ、表示、解析、カーブ設定
+- プロジェクト保存 / 読み込み、ノートのみ読み込み、ノート結合
+- 空のワークスペース
+- MIDI読み込み / 出力、選択ノートMIDI出力
+- 既存Python exporterを利用した詳細ADOFAI出力
+- ADOFAIタイルプレビュー / デバッグプレビュー
+- Web版ADOFAI Harmony出力は平均律固定（純正律UIは削除）
+- プロジェクト音声コピー、自動 / 手動 songOffset
+- ヘルプ / クイックスタート / リリースページ
+- Quick Hz ツールと既存譜面への追記
+- 倍音ダイアグラムのプレビュー / 挿入
+- Web UIの日本語表示
+- 既存主要ショートカット
+- ファイル / 編集 / 解析 / ツール / オプション / ヘルプ メニュー
+- GitHub ActionsによるPython構文チェックとTypeScript/Viteビルドチェック
 
-The Python analysis, audio, MIDI, project, Quick Hz and ADOFAI logic is reused behind the pywebview bridge instead of being rewritten in TypeScript.
+Python側の音声解析・再生・MIDI・プロジェクト・Quick Hz・ADOFAI処理は書き直さず、pywebview bridge経由で再利用します。
 
-## Still to migrate / harden
+## 残っている互換性調整
 
-- The richer legacy MIDI import-options dialog and its cleanup choices
-- The exact legacy missing-project-audio prompt/locate workflow
-- Unsaved-change confirmation when replacing/closing a web-ui document
-- Full React-side localization of every hard-coded web label
-- A few small legacy confirmation/message-box details
+- 旧MIDI読み込み時の詳細cleanupオプション
+- プロジェクト音声が見つからない場合のLocateフロー
+- Web UIでファイルを置き換える / 閉じる際の未保存確認
+- 旧PySide6版に残っている細かい確認ダイアログの差
 
-The PySide6 application remains available while these parity details are finished.
+これらが終わるまではPySide6版も並行して利用できます。
