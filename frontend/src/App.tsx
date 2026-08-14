@@ -1,86 +1,45 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { getBackendApi, type BackendApi, type EditorSettings } from "./bridge";
+import { useEffect, useState } from "react";
+import EditorCanvas from "./EditorCanvas";
+import SettingsPanel from "./SettingsPanel";
+import Timeline from "./Timeline";
+import TopToolbar from "./TopToolbar";
+import useEditorShortcuts from "./useEditorShortcuts";
+import { getBackendApi, type AppState, type BackendApi, type EditorSettings, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./bridge";
 
-const defaults: EditorSettings = {
-  volume: 85,
-  speed: 1,
-  notePreview: true,
-  previewVolume: 20,
-  bpm: 120,
-  snapEnabled: false,
-};
-
-type Page = "playback" | "export" | "grid" | "view" | "analysis" | "curve";
-const pages: Array<[Page, string]> = [
-  ["playback", "再生"], ["export", "出力"], ["grid", "グリッド"],
-  ["view", "表示"], ["analysis", "解析"], ["curve", "カーブ"],
-];
+const defaultSettings: EditorSettings = { volume: 85, speed: 1, notePreview: true, previewVolume: 20, previewOctave: 0, previewSound: "sine", exportOctave: 0, exportSemitone: 0, gridEnabled: false, metronomeEnabled: false, bpm: 175, offsetMs: 0, metronomeVolume: 35, snapEnabled: false, snapDiv: 1, contrast: 115, gamma: 75, enhance: true, displayMode: "wavetone", harmonics: "off", colormap: "wavetone", analysisProfile: "Normal", cqtResolution: "profile default", curveShape: "ease", curveInterpolation: "bezier_pitch", targetAngle: 165 };
+const defaultView: ViewState = { mode: "spec", start: 0, windowSeconds: 12, pitchBottom: 12, visibleNotes: 60 };
+const defaultPlayback: PlaybackState = { time: 0, duration: 60, playing: false, available: false, error: null };
 
 export default function App() {
-  const [api, setApi] = useState<BackendApi | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [page, setPage] = useState<Page>("playback");
-  const [settings, setSettings] = useState(defaults);
+  const [api, setApi] = useState<BackendApi | null>(null); const [connected, setConnected] = useState(false); const [settings, setSettings] = useState(defaultSettings); const [view, setView] = useState(defaultView); const [playback, setPlayback] = useState(defaultPlayback); const [notes, setNotes] = useState<NoteDto[]>([]); const [selected, setSelected] = useState<number[]>([]); const [spectrum, setSpectrum] = useState<SpectrogramPayload | null>(null); const [analysisAvailable, setAnalysisAvailable] = useState(false); const [audioName, setAudioName] = useState<string | null>(null); const [projectPath, setProjectPath] = useState<string | null>(null); const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false); const [status, setStatus] = useState("Ready");
 
-  useEffect(() => {
-    void getBackendApi().then(async (backend) => {
-      if (!backend) return;
-      setApi(backend);
-      setConnected((await backend.ping()).ok);
-      setSettings(await backend.get_settings());
-    });
-  }, []);
+  function applyState(state: AppState) { setSettings(state.settings); setView(state.view); setPlayback(state.playback); setNotes(state.notes); setSelected((old) => old.filter((i) => i >= 0 && i < state.notes.length)); setAnalysisAvailable(state.analysis.available); setAudioName(state.audio.name); setProjectPath(state.projectPath); setDirty(state.dirty); setBusy(state.busy); setStatus(state.status); }
+  async function refreshSpectrum(backend = api) { if (!backend) return; const payload = await backend.get_spectrogram(1600); setSpectrum(payload.available ? payload : null); }
+  useEffect(() => { void getBackendApi().then(async (backend) => { if (!backend) return; setApi(backend); setConnected((await backend.ping()).ok); const state = await backend.get_state(); applyState(state); if (state.analysis.available) await refreshSpectrum(backend); }); }, []);
+  useEffect(() => { if (!api) return; let active = true; const id = window.setInterval(() => void api.get_playback_state().then((x) => { if (active) setPlayback(x); }).catch(() => {}), 50); return () => { active = false; window.clearInterval(id); }; }, [api]);
+  useEffect(() => { if (!api || !analysisAvailable) return; const id = window.setTimeout(() => void refreshSpectrum(api), 140); return () => window.clearTimeout(id); }, [api, analysisAvailable, settings.contrast, settings.gamma, settings.enhance, settings.displayMode, settings.harmonics, settings.colormap]);
 
-  async function patch(changes: Partial<EditorSettings>) {
-    setSettings((value) => ({ ...value, ...changes }));
-    if (api) setSettings(await api.update_settings(changes));
-  }
+  async function patch(changes: Partial<EditorSettings>) { setSettings((v) => ({ ...v, ...changes })); if (api) { setSettings(await api.update_settings(changes)); setDirty(true); } }
+  async function updateView(changes: Partial<ViewState>) { setView((v) => ({ ...v, ...changes })); if (api) setView(await api.set_view(changes)); }
+  async function fitView() { if (api) setView(await api.fit_view()); }
+  async function runStateAction(action: () => Promise<AppState>) { if (!api) return; setBusy(true); try { const state = await action(); applyState(state); if (state.analysis.available) await refreshSpectrum(api); else setSpectrum(null); } catch (error) { setStatus(String(error)); } finally { setBusy(false); } }
+  function applyMutation(result: NoteMutationResult, selection?: number[]) { setNotes(result.notes); setStatus(result.status); setDirty(true); if (selection) setSelected(selection.filter((i) => i >= 0 && i < result.notes.length)); else setSelected((old) => old.filter((i) => i >= 0 && i < result.notes.length)); }
+  async function addNote(start: number, end: number, midi: number, kind: "note" | "curve", endMidi: number) { if (!api) return; const result = await api.add_note(start, end, midi, kind, endMidi); applyMutation(result, result.index === undefined ? [] : [result.index]); }
+  async function moveNotes(indices: number[], dx: number, dy: number) { if (api && indices.length) applyMutation(await api.move_notes(indices, dx, dy), indices); }
+  async function deleteNotes(indices = selected) { if (api && indices.length) applyMutation(await api.delete_notes(indices), []); }
+  async function seekTo(time: number) { if (api) setPlayback(await api.seek_to(time)); else setPlayback((p) => ({ ...p, time })); }
+  async function togglePlayback() { if (api) setPlayback(await api.toggle_playback()); }
+  async function stopPlayback() { if (api) setPlayback(await api.stop_playback()); }
+  async function seekRelative(seconds: number) { if (api) setPlayback(await api.seek_relative(seconds)); }
+  async function mode(value: ViewState["mode"]) { await updateView({ mode: value }); }
+  async function undo() { if (api) applyMutation(await api.undo(), []); } async function redo() { if (api) applyMutation(await api.redo(), []); }
+  const stateAction = (fn: () => Promise<AppState>) => void runStateAction(fn); const nudgeSeconds = settings.snapEnabled ? 60 / Math.max(1, settings.bpm) / Math.max(1, settings.snapDiv) : 0.01;
 
-  return (
-    <div className="app">
-      <header className="titlebar">
-        <strong>AdopyHzEditor</strong>
-        <span className={connected ? "status on" : "status"}>
-          {connected ? "Python connected" : "Browser preview"}
-        </span>
-      </header>
+  useEditorShortcuts({ api, notes, selected, playbackTime: playback.time, view, nudgeSeconds, openAudio: () => api && stateAction(() => api.open_audio()), saveProject: () => api && stateAction(() => api.save_project_dialog()), loadProject: () => api && stateAction(() => api.load_project_dialog()), importMidi: () => api && stateAction(() => api.import_midi_dialog()), setStatus, undo: () => void undo(), redo: () => void redo(), select: setSelected, applyMutation, move: (i, dx, dy) => void moveNotes(i, dx, dy), stop: () => void stopPlayback(), play: () => void togglePlayback(), deleteSelected: () => void deleteNotes(), mode: (v) => void mode(v), seek: (d) => void seekRelative(d), updateView: (c) => void updateView(c) });
 
-      <div className="toolbar">
-        <button>↶</button><button>■</button><button className="play">▶</button>
-        <button>−1s</button><button>+1s</button><i />
-        <button>MIDI ↓</button><button>MIDI ↑</button><button>ADOFAI ↑</button>
-        <span /><button className="selected">Spec</button><button>Notes</button><button>Both</button>
-        <output>0:00.000 / 0:00.000</output>
-      </div>
-
-      <main className="workspace">
-        <section className="editor">
-          <div className="canvas"><div>Editor surface<br /><small>描画部分は次の移植段階</small></div></div>
-          <div className="timeline"><b>Timeline</b><input type="range" /><span>Window</span><input type="number" defaultValue={12} /><span>Pitch</span><input type="number" defaultValue={12} /><button>−12</button><button>+12</button><button>Fit</button></div>
-        </section>
-
-        <aside className="settings">
-          <h2>設定</h2>
-          <nav>{pages.map(([id, label]) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}>{label}</button>)}</nav>
-          <div className="settings-body">
-            {page === "playback" && <>
-              <Row label="Song Vol"><input type="range" min="0" max="100" value={settings.volume} onChange={(e) => void patch({ volume: +e.target.value })} /></Row>
-              <Row label="Speed"><input type="number" min="0.1" max="4" step="0.05" value={settings.speed} onChange={(e) => void patch({ speed: +e.target.value })} /></Row>
-              <Row label="Note Preview"><input type="checkbox" checked={settings.notePreview} onChange={(e) => void patch({ notePreview: e.target.checked })} /></Row>
-              <Row label="Note Vol"><input type="range" min="0" max="100" value={settings.previewVolume} disabled={!settings.notePreview} onChange={(e) => void patch({ previewVolume: +e.target.value })} /></Row>
-            </>}
-            {page === "grid" && <>
-              <Row label="BPM"><input type="number" min="1" max="10000" value={settings.bpm} onChange={(e) => void patch({ bpm: +e.target.value })} /></Row>
-              <Row label="Snap"><input type="checkbox" checked={settings.snapEnabled} onChange={(e) => void patch({ snapEnabled: e.target.checked })} /></Row>
-            </>}
-            {page !== "playback" && page !== "grid" && <div className="placeholder">{pages.find(([id]) => id === page)?.[1]}設定をここへ移植</div>}
-          </div>
-        </aside>
-      </main>
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="row"><span>{label}</span><div>{children}</div></label>;
+  return <div className="app">
+    <TopToolbar connected={connected} busy={busy} audioName={audioName} dirty={dirty} playback={playback} view={view} onOpen={() => api && stateAction(() => api.open_audio())} onLoadProject={() => api && stateAction(() => api.load_project_dialog())} onSaveProject={() => api && stateAction(() => api.save_project_dialog())} onSeek={(t) => void seekTo(t)} onStop={() => void stopPlayback()} onPlay={() => void togglePlayback()} onSeekRelative={(d) => void seekRelative(d)} onImportMidi={() => api && stateAction(() => api.import_midi_dialog())} onExportMidi={() => void api?.export_midi_dialog().then((x) => setStatus(x.status))} onExportAdo={() => void api?.export_adofai_dialog().then((x) => setStatus(x.status))} onMode={(v) => void mode(v)} />
+    <main className="workspace"><section className="editor"><EditorCanvas notes={notes} selected={selected} settings={settings} view={view} playback={playback} spectrum={spectrum} onSelect={setSelected} onAdd={addNote} onMove={moveNotes} onDelete={deleteNotes} onSeek={seekTo} onView={updateView} /><Timeline view={view} playback={playback} onView={(c) => void updateView(c)} onFit={() => void fitView()} /></section><SettingsPanel api={api} settings={settings} selected={selected} audioName={audioName} busy={busy} onPatch={patch} onStateAction={runStateAction} onMutation={applyMutation} /></main>
+    <footer className="statusbar"><span>{busy ? "Working…" : status}</span><span>{projectPath ? projectPath.split(/[\\/]/).pop() : "No project"} · {notes.length} notes</span></footer>
+  </div>;
 }
