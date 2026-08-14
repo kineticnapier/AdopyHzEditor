@@ -12,6 +12,8 @@ export type AnalysisState = { available: boolean; duration: number; midiMin: num
 export type AppState = { settings: EditorSettings; view: ViewState; playback: PlaybackState; audio: { path: string | null; name: string | null; loaded: boolean }; projectPath: string | null; notes: NoteDto[]; analysis: AnalysisState; busy: boolean; status: string; dirty: boolean };
 export type SpectrogramPayload = { available: boolean; rows?: number; cols?: number; data?: string; duration?: number; midiMin?: number; midiMax?: number; pitchStep?: number };
 export type NoteMutationResult = { notes: NoteDto[]; status: string; index?: number; indices?: number[] };
+export type NotePreset = { name: string; note: NoteDto; duration: number; kind: "note" | "curve" };
+export type NotePresetResult = { presets: NotePreset[]; status: string };
 
 export type AdoFAIExportOptions = {
   method: "rabbit_zip" | "angle_only" | "harmony"; baseBpm: number; angleOnlyBpm: number; harmonyMode: string; harmonyCustomSemitone: number;
@@ -36,7 +38,10 @@ export type BackendApi = {
   delete_notes(indices: number[]): Promise<NoteMutationResult>; move_notes(indices: number[], dx: number, dy: number): Promise<NoteMutationResult>;
   resize_notes(indices: number[], edge: "start" | "end", deltaSeconds: number): Promise<NoteMutationResult>;
   set_note_properties(index: number, changes: Partial<{ start: number; end: number; duration: number; midi: number; velocity: number }>): Promise<NoteMutationResult>;
-  duplicate_notes(indices: number[]): Promise<NoteMutationResult>; quantize_notes(indices: number[]): Promise<NoteMutationResult>;
+  duplicate_notes(indices: number[]): Promise<NoteMutationResult>; duplicate_notes_shifted(indices: number[], dx: number, dy: number): Promise<NoteMutationResult>;
+  quantize_notes(indices: number[]): Promise<NoteMutationResult>; split_notes(indices: number[], atTime: number): Promise<NoteMutationResult>;
+  bulk_edit_notes(indices: number[], changes: Partial<{ timeDelta: number; pitchDelta: number; duration: number; align: "start" | "end" | "" }>): Promise<NoteMutationResult>;
+  get_note_presets(): Promise<NotePreset[]>; save_note_preset(name: string, index: number): Promise<NotePresetResult>; delete_note_preset(name: string): Promise<NotePresetResult>; insert_note_preset(name: string, atTime: number): Promise<NoteMutationResult>;
   apply_interpolation(indices: number[]): Promise<NoteMutationResult>; apply_target_angle(indices: number[]): Promise<NoteMutationResult>; clear_target_angle(indices: number[]): Promise<NoteMutationResult>;
   undo(): Promise<NoteMutationResult>; redo(): Promise<NoteMutationResult>; copy_notes(indices: number[]): Promise<{ status: string }>;
   cut_notes(indices: number[]): Promise<NoteMutationResult>; paste_notes(atTime: number): Promise<NoteMutationResult>;
