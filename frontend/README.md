@@ -34,13 +34,27 @@ python web_ui.py
 - Fixed notes and curve notes, selection, move, delete, undo/redo, copy/cut/paste
 - View navigation, pitch/time zoom and Spec / Notes / Both modes
 - Playback, export, grid/snap, view, analysis and curve settings
-- Project save/load
-- MIDI import/export
-- Basic ADOFAI export using the existing `rabbit_zip` backend
+- Project save/load, notes-only project load and project-note merge
+- Blank workspace configuration
+- MIDI import/export and selected-note MIDI export
+- Advanced ADOFAI export options using the existing Python exporter
+- ADOFAI Tile Preview and Debug Preview
+- Project-song copy and automatic/manual songOffset export workflow
+- Help / Quick Start and Releases/update flow
+- Quick Hz Tools, including chart append
+- Harmonic Diagram preview and insertion
+- Language preference selection
 - Existing keyboard shortcuts for the migrated operations
+- Compact File / Edit / Analyze / Tools / Options / Help menus
 
-The Python analysis, audio, MIDI, project and ADOFAI logic is reused behind the pywebview bridge instead of being rewritten in TypeScript.
+The Python analysis, audio, MIDI, project, Quick Hz and ADOFAI logic is reused behind the pywebview bridge instead of being rewritten in TypeScript.
 
-## Still to migrate
+## Still to migrate / harden
 
-The full legacy ADOFAI export dialog/options, help/update dialogs and a few specialized editor operations are still provided only by the PySide6 application. The current ADOFAI button performs a basic/default export.
+- The richer legacy MIDI import-options dialog and its cleanup choices
+- The exact legacy missing-project-audio prompt/locate workflow
+- Unsaved-change confirmation when replacing/closing a web-ui document
+- Full React-side localization of every hard-coded web label
+- A few small legacy confirmation/message-box details
+
+The PySide6 application remains available while these parity details are finished.
