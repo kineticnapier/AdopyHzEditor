@@ -1,14 +1,27 @@
 import { useState, type ReactNode } from "react";
+import NotePresetPanel from "./NotePresetPanel";
 import type { AppState, BackendApi, EditorSettings, NoteDto, NoteMutationResult } from "./bridge";
 
 type Page = "note" | "playback" | "export" | "grid" | "view" | "analysis" | "curve";
 const pages: Array<[Page, string]> = [["note","ノート"],["playback","再生"],["export","出力"],["grid","グリッド"],["view","表示"],["analysis","解析"],["curve","カーブ"]];
-type Props = { api: BackendApi | null; settings: EditorSettings; notes: NoteDto[]; selected: number[]; audioName: string | null; busy: boolean; onPatch(changes: Partial<EditorSettings>): Promise<void>; onStateAction(action:()=>Promise<AppState>):Promise<void>; onMutation(result:NoteMutationResult,nextSelection?:number[]):void };
+type Props = {
+  api: BackendApi | null;
+  settings: EditorSettings;
+  notes: NoteDto[];
+  selected: number[];
+  playbackTime: number;
+  audioName: string | null;
+  busy: boolean;
+  onPatch(changes: Partial<EditorSettings>): Promise<void>;
+  onStateAction(action:()=>Promise<AppState>):Promise<void>;
+  onMutation(result:NoteMutationResult,nextSelection?:number[]):void;
+  onStatus(text:string):void;
+};
 
-export default function SettingsPanel({ api, settings, notes, selected, audioName, busy, onPatch, onStateAction, onMutation }: Props) {
+export default function SettingsPanel({ api, settings, notes, selected, playbackTime, audioName, busy, onPatch, onStateAction, onMutation, onStatus }: Props) {
   const [page,setPage]=useState<Page>("note");
   const one=selected.length===1?notes[selected[0]]:null;
-  const mutate=(p:Promise<NoteMutationResult>,sel=selected)=>void p.then(x=>onMutation(x,sel));
+  const mutate=(p:Promise<NoteMutationResult>,sel=selected)=>void p.then(x=>onMutation(x,sel)).catch(e=>onStatus(String(e)));
   return <aside className="settings"><h2>設定</h2><nav>{pages.map(([id,label])=><button key={id} className={page===id?"active":""} onClick={()=>setPage(id)}>{label}</button>)}</nav><div className="settings-body">
     {page==="note"&&<>
       {selected.length===0&&<div className="hint">ノートを選択すると、位置・長さ・音高を数値でも編集できます。</div>}
@@ -19,11 +32,14 @@ export default function SettingsPanel({ api, settings, notes, selected, audioNam
         <Row label="長さ"><NumberInput value={Math.max(0,one.end-one.start)} min={0.001} max={36000} step={0.001} suffix=" 秒" onChange={v=>mutate(api.set_note_properties(selected[0],{duration:v}),selected)} /></Row>
         <Row label="音高"><NumberInput value={one.midi} min={0} max={127} step={0.01} onChange={v=>mutate(api.set_note_properties(selected[0],{midi:v}),selected)} /></Row>
       </>}
-      <div className="button-row">
+      <div className="note-action-grid">
         <button disabled={!api||selected.length===0} onClick={()=>api&&void api.duplicate_notes(selected).then(x=>onMutation(x,x.indices??[]))}>複製</button>
         <button disabled={!api||selected.length===0} onClick={()=>api&&mutate(api.quantize_notes(selected),selected)}>クオンタイズ</button>
+        <button disabled={!api||selected.length===0} onClick={()=>api&&void api.split_notes(selected,playbackTime).then(x=>onMutation(x,x.indices??selected)).catch(e=>onStatus(String(e)))}>再生位置で分割</button>
       </div>
-      <div className="hint">ノート中央をドラッグ: 移動 / 左右端をドラッグ: 長さ変更 / Ctrl+ドラッグ: 範囲選択 / Alt+ドラッグ: カーブ作成</div>
+      {selected.length>0&&api&&<BulkEditor api={api} selected={selected} onMutation={onMutation} onStatus={onStatus}/>} 
+      <NotePresetPanel api={api} selected={selected} playbackTime={playbackTime} onMutation={onMutation} onStatus={onStatus}/>
+      <div className="hint">中央ドラッグ: 移動 / 左右端: 長さ変更 / Alt+選択音ドラッグ: 複製 / Ctrl+ドラッグ: 範囲選択 / Alt+空白ドラッグ: カーブ作成</div>
     </>}
     {page==="playback"&&<>
       <Row label="楽曲音量"><Range value={settings.volume} onChange={v=>void onPatch({volume:v})}/></Row>
@@ -69,6 +85,20 @@ export default function SettingsPanel({ api, settings, notes, selected, audioNam
     </>}
   </div></aside>;
 }
+
+function BulkEditor({api,selected,onMutation,onStatus}:{api:BackendApi;selected:number[];onMutation(result:NoteMutationResult,nextSelection?:number[]):void;onStatus(text:string):void}){
+  const[timeDelta,setTimeDelta]=useState(0),[pitchDelta,setPitchDelta]=useState(0),[duration,setDuration]=useState(0.25);
+  async function apply(changes:Parameters<BackendApi["bulk_edit_notes"]>[1]){try{const r=await api.bulk_edit_notes(selected,changes);onMutation(r,selected)}catch(e){onStatus(String(e))}}
+  return <details className="note-tools-fold"><summary>一括編集</summary><div className="bulk-note-tools">
+    <Row label="時間移動"><NumberInput value={timeDelta} min={-36000} max={36000} step={0.001} suffix=" 秒" onChange={setTimeDelta}/></Row>
+    <Row label="音高移動"><NumberInput value={pitchDelta} min={-127} max={127} step={0.01} suffix=" 半音" onChange={setPitchDelta}/></Row>
+    <button className="wide" onClick={()=>void apply({timeDelta,pitchDelta})}>移動を適用</button>
+    <Row label="長さを統一"><NumberInput value={duration} min={0.001} max={36000} step={0.001} suffix=" 秒" onChange={setDuration}/></Row>
+    <button className="wide" onClick={()=>void apply({duration})}>長さを適用</button>
+    <div className="button-row"><button onClick={()=>void apply({align:"start"})}>開始を揃える</button><button onClick={()=>void apply({align:"end"})}>終了を揃える</button></div>
+  </div></details>
+}
+
 function Row({label,children}:{label:string;children:ReactNode}){return <label className="row"><span>{label}</span><div>{children}</div></label>}
 function Range({value,min=0,max=100,disabled=false,onChange}:{value:number;min?:number;max?:number;disabled?:boolean;onChange(v:number):void}){return <div className="range-wrap"><input type="range" min={min} max={max} value={value} disabled={disabled} onChange={e=>onChange(+e.target.value)}/><output>{value}</output></div>}
 function NumberInput({value,min,max,step,suffix,disabled=false,onChange}:{value:number;min:number;max:number;step:number;suffix?:string;disabled?:boolean;onChange(v:number):void}){return <div className="number-wrap"><input type="number" value={Number.isFinite(value)?value:0} min={min} max={max} step={step} disabled={disabled} onChange={e=>{const v=+e.target.value;if(Number.isFinite(v))onChange(v)}}/>{suffix&&<span>{suffix}</span>}</div>}
