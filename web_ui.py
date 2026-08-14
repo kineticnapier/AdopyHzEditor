@@ -24,6 +24,20 @@ class Bridge(ToolsMixin, AdoFAIMixin, CoreBridge):
         super().__init__()
         self._status = "準備完了"
 
+    def open_audio(self):
+        state = super().open_audio()
+        with self._lock:
+            if self.audio_path:
+                self._status = f"{Path(self.audio_path).name} を読み込みました"
+        return self.get_state()
+
+    def reanalyze_audio(self):
+        had_audio = bool(self.audio_path)
+        state = super().reanalyze_audio()
+        with self._lock:
+            self._status = "解析が完了しました" if had_audio else "先に音声を開いてください"
+        return self.get_state()
+
     def get_adofai_export_defaults(self, selected_indices=None):
         defaults = super().get_adofai_export_defaults(selected_indices)
         defaults["selectedOnly"] = False
