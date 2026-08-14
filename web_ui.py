@@ -14,11 +14,12 @@ except ImportError as exc:
 from i18n import set_language
 from web_backend import Bridge as CoreBridge
 from web_backend_adofai import AdoFAIMixin
+from web_backend_editing import EditingMixin
 from web_backend_presets import PresetMixin
 from web_backend_tools import ToolsMixin
 
 
-class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
+class Bridge(PresetMixin, EditingMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
     """Web UI backend with export, workspace and utility APIs layered on the core editor bridge."""
 
     def __init__(self) -> None:
