@@ -120,7 +120,8 @@ export default function EditorCanvas(props: Props) {
     if (!decoded) return null;
     const canvas = document.createElement("canvas");
     canvas.width = decoded.cols; canvas.height = decoded.rows;
-    const ctx = canvas.getContext("2d"); if (!ctx) return null;
+    const maybeCtx = canvas.getContext("2d"); if (!maybeCtx) return null;
+    const ctx: CanvasRenderingContext2D = maybeCtx;
     const image = ctx.createImageData(decoded.cols, decoded.rows);
     for (let row = 0; row < decoded.rows; row += 1) for (let col = 0; col < decoded.cols; col += 1) {
       const [r,g,b] = colorFor(decoded.bytes[row * decoded.cols + col] / 255, props.settings.colormap);
@@ -153,7 +154,8 @@ export default function EditorCanvas(props: Props) {
     const dpr = window.devicePixelRatio || 1;
     canvas.width=Math.max(1,Math.round(size.width*dpr)); canvas.height=Math.max(1,Math.round(size.height*dpr));
     canvas.style.width=`${size.width}px`; canvas.style.height=`${size.height}px`;
-    const ctx=canvas.getContext("2d"); if(!ctx)return;
+    const maybeCtx = canvas.getContext("2d"); if (!maybeCtx) return;
+    const ctx: CanvasRenderingContext2D = maybeCtx;
     ctx.setTransform(dpr,0,0,dpr,0,0);
     const w=size.width,h=size.height;
     ctx.fillStyle="#080b0e"; ctx.fillRect(0,0,w,h);
