@@ -9,7 +9,7 @@ function isEditingTarget(target: EventTarget | null) {
 
 type Args = {
   api: BackendApi | null; notes: NoteDto[]; selected: number[]; playbackTime: number; view: ViewState; nudgeSeconds: number;
-  openAudio(): void; saveProject(): void; loadProject(): void; importMidi(): void; setStatus(text: string): void;
+  openAudio(): void; saveProject(): void; loadProject(): void; importMidi(): void; openAdoExport(): void; openHelp(): void; setStatus(text: string): void;
   undo(): void; redo(): void; select(indices: number[]): void; applyMutation(result: any, selection?: number[]): void;
   move(indices: number[], dx: number, dy: number): void; stop(): void; play(): void; deleteSelected(): void;
   mode(value: ViewState["mode"]): void; seek(delta: number): void; updateView(changes: Partial<ViewState>): void;
@@ -23,12 +23,13 @@ export default function useEditorShortcuts(a: Args) {
       if (isEditingTarget(event.target) && event.key !== "Escape") return;
       const key = event.key.toLowerCase();
       const ctrl = event.ctrlKey || event.metaKey;
+      if (event.key === "F1") { event.preventDefault(); a.openHelp(); return; }
       if (ctrl && key === "o") { event.preventDefault(); a.openAudio(); return; }
       if (ctrl && key === "s") { event.preventDefault(); a.saveProject(); return; }
       if (ctrl && key === "l") { event.preventDefault(); a.loadProject(); return; }
       if (ctrl && key === "i") { event.preventDefault(); a.importMidi(); return; }
       if (ctrl && key === "m") { event.preventDefault(); void api.export_midi_dialog().then((x) => a.setStatus(x.status)); return; }
-      if (ctrl && key === "e") { event.preventDefault(); void api.export_adofai_dialog().then((x) => a.setStatus(x.status)); return; }
+      if (ctrl && key === "e") { event.preventDefault(); a.openAdoExport(); return; }
       if (ctrl && key === "z" && !event.shiftKey) { event.preventDefault(); a.undo(); return; }
       if ((ctrl && key === "y") || (ctrl && event.shiftKey && key === "z")) { event.preventDefault(); a.redo(); return; }
       if (ctrl && key === "a") { event.preventDefault(); a.select(a.notes.map((_, i) => i)); return; }
