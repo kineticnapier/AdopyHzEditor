@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 try:
     import webview
@@ -12,37 +11,11 @@ except ImportError as exc:
         "python -m pip install -r requirements-webui.txt"
     ) from exc
 
+from web_backend import Bridge
+
 
 ROOT = Path(__file__).resolve().parent
 DIST_INDEX = ROOT / "frontend" / "dist" / "index.html"
-
-
-class Bridge:
-    """Minimal JS <-> Python bridge for the experimental TypeScript UI."""
-
-    def __init__(self) -> None:
-        self._settings: dict[str, Any] = {
-            "volume": 85,
-            "speed": 1.0,
-            "notePreview": True,
-            "previewVolume": 20,
-            "bpm": 120.0,
-            "snapEnabled": False,
-        }
-
-    def ping(self) -> dict[str, Any]:
-        return {"ok": True, "app": "AdopyHzEditor", "ui": "React + TypeScript"}
-
-    def get_settings(self) -> dict[str, Any]:
-        return dict(self._settings)
-
-    def update_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(changes, dict):
-            raise TypeError("changes must be an object")
-        for key, value in changes.items():
-            if key in self._settings:
-                self._settings[key] = value
-        return dict(self._settings)
 
 
 def _ui_url() -> str:
@@ -61,15 +34,16 @@ def _ui_url() -> str:
 
 def main() -> int:
     bridge = Bridge()
-    webview.create_window(
-        "AdopyHzEditor - Web UI Prototype",
+    window = webview.create_window(
+        "AdopyHzEditor",
         _ui_url(),
         js_api=bridge,
-        width=1360,
-        height=820,
-        min_size=(980, 620),
+        width=1440,
+        height=860,
+        min_size=(1040, 640),
         background_color="#20242a",
     )
+    bridge.attach_window(window)
     webview.start(debug=os.environ.get("ADOPY_WEB_UI_DEBUG") == "1")
     return 0
 
