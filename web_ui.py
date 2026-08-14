@@ -11,7 +11,12 @@ except ImportError as exc:
         "python -m pip install -r requirements-webui.txt"
     ) from exc
 
-from web_backend import Bridge
+from web_backend import Bridge as CoreBridge
+from web_backend_adofai import AdoFAIMixin
+
+
+class Bridge(AdoFAIMixin, CoreBridge):
+    """Web UI backend with advanced export/help APIs layered on the core editor bridge."""
 
 
 ROOT = Path(__file__).resolve().parent
