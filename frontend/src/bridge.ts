@@ -95,6 +95,69 @@ export type NoteMutationResult = {
   indices?: number[];
 };
 
+export type AdoFAIExportOptions = {
+  method: "rabbit_zip" | "angle_only" | "harmony";
+  baseBpm: number;
+  angleOnlyBpm: number;
+  harmonyMode: string;
+  harmonyCustomSemitone: number;
+  harmonyEpsilonMs: number;
+  harmonyTuning: "equal temperament" | "just intonation";
+  harmonyRootMode: string;
+  harmonyTimingMode: "setspeed" | "angle-only" | "ratio-polyrhythm";
+  harmonyVisualMode: string;
+  harmonyVisualStep: number;
+  harmonyPolyCycleAngle: number;
+  harmonyPolyMaxDenominator: number;
+  harmonyPolyRatioOctaveMode: "octave-folded" | "absolute";
+  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm";
+  fixedX: number;
+  targetBpm: number;
+  maxTiles: number;
+  maxTilesPerNote: number;
+  trackVisual: "normal" | "faint" | "very faint" | "hidden";
+  visualPathMode: "raw" | "upward" | "upward avoid" | "twirl upward";
+  visualPathAngle: number;
+  visualPositionMode: "off" | "note step";
+  visualPositionX: number;
+  visualPositionY: number;
+  finalAngleMode: "scaled" | "cardinal" | "horizontal" | "custom";
+  finalCustomAngle: number;
+  finalCardinalStep: number;
+  useProjectSong: boolean;
+  copyProjectSong: boolean;
+  songOffsetAuto: boolean;
+  songOffsetMs: number;
+  selectedOnly: boolean;
+};
+
+export type AdoFAITilePreview = {
+  points: Array<{ x: number; y: number; angle: number }>;
+  stats: Record<string, unknown>;
+  shownTiles: number;
+  totalTiles: number;
+  limited: boolean;
+};
+
+export type AdoFAIDebugPreview = {
+  rows: Array<Record<string, unknown>>;
+  summary: {
+    rows: number;
+    estimatedTiles: number;
+    targetAngleUsed: number;
+    targetAngleIgnored: number;
+    finalVisualCorrections: number;
+    warnings: number;
+  };
+  limited: boolean;
+};
+
+export type HelpPayload = {
+  header: string;
+  sections: Array<{ id: string; title: string; body: string }>;
+  releasesUrl: string;
+};
+
 export type BackendApi = {
   ping(): Promise<{ ok: boolean; app: string; ui: string; capabilities: string[] }>;
   get_state(): Promise<AppState>;
@@ -129,6 +192,13 @@ export type BackendApi = {
   import_midi_dialog(): Promise<AppState>;
   export_midi_dialog(): Promise<{ ok: boolean; path?: string; status: string }>;
   export_adofai_dialog(): Promise<{ ok: boolean; path?: string; stats?: Record<string, unknown>; status: string }>;
+
+  get_adofai_export_defaults(selectedIndices?: number[]): Promise<AdoFAIExportOptions>;
+  preview_adofai_tiles(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<AdoFAITilePreview>;
+  preview_adofai_debug(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<AdoFAIDebugPreview>;
+  export_adofai_advanced(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<{ ok: boolean; path?: string; copiedSong?: string | null; stats?: Record<string, unknown>; status: string }>;
+  get_help_sections(): Promise<HelpPayload>;
+  open_releases_page(): Promise<{ ok: boolean; url: string }>;
 };
 
 declare global {
