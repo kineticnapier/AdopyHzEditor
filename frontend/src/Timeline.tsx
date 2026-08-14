@@ -1,0 +1,6 @@
+import type { PlaybackState, ViewState } from "./bridge";
+type Props = { view: ViewState; playback: PlaybackState; onView(changes: Partial<ViewState>): void; onFit(): void };
+export default function Timeline({ view, playback, onView, onFit }: Props) {
+  const maxViewStart = Math.max(0, playback.duration - view.windowSeconds);
+  return <div className="timeline"><b>Timeline</b><input type="range" min={0} max={Math.max(0.001, maxViewStart)} step={Math.max(0.001, maxViewStart / 1000)} value={Math.min(view.start, maxViewStart)} onChange={(e) => onView({ start: +e.target.value })} /><span>Window</span><input type="number" min={0.2} max={Math.max(0.2, playback.duration)} step={0.1} value={view.windowSeconds} onChange={(e) => onView({ windowSeconds: +e.target.value })} /><span>Pitch</span><input type="number" min={0} max={127} value={view.pitchBottom} onChange={(e) => onView({ pitchBottom: +e.target.value })} /><button onClick={() => onView({ pitchBottom: view.pitchBottom - 12 })}>−12</button><button onClick={() => onView({ pitchBottom: view.pitchBottom + 12 })}>+12</button><span>Range</span><input type="number" min={6} max={128} value={view.visibleNotes} onChange={(e) => onView({ visibleNotes: +e.target.value })} /><button onClick={onFit}>Fit</button></div>;
+}
