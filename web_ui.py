@@ -11,6 +11,7 @@ except ImportError as exc:
         "python -m pip install -r requirements-webui.txt"
     ) from exc
 
+from i18n import set_language
 from web_backend import Bridge as CoreBridge
 from web_backend_adofai import AdoFAIMixin
 from web_backend_tools import ToolsMixin
@@ -19,10 +20,22 @@ from web_backend_tools import ToolsMixin
 class Bridge(ToolsMixin, AdoFAIMixin, CoreBridge):
     """Web UI backend with export, workspace and utility APIs layered on the core editor bridge."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._status = "準備完了"
+
     def get_adofai_export_defaults(self, selected_indices=None):
         defaults = super().get_adofai_export_defaults(selected_indices)
         defaults["selectedOnly"] = False
+        defaults["harmonyTuning"] = "equal temperament"
         return defaults
+
+    def _prepare_adofai_export(self, raw_options, selected_indices):
+        # Web UI no longer exposes just intonation. Force equal temperament here
+        # as well so stale/front-end-crafted values cannot change the result.
+        options = dict(raw_options or {})
+        options["harmonyTuning"] = "equal temperament"
+        return super()._prepare_adofai_export(options, selected_indices)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -44,6 +57,9 @@ def _ui_url() -> str:
 
 
 def main() -> int:
+    # The React/TypeScript shell is currently Japanese-only. Help text and other
+    # Python-side translated strings should match it as well.
+    set_language("ja", save=False)
     bridge = Bridge()
     window = webview.create_window(
         "AdopyHzEditor",
