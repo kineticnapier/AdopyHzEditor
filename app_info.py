@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ui_modern import install_modern_ui
-from ui_final_tweaks import install_final_ui_tweaks
+from desktop.ui_modern import install_modern_ui
+from desktop.ui_final_tweaks import install_final_ui_tweaks
 
 APP_NAME = "AdopyHzEditor"
 APP_VERSION = "0.7.2"

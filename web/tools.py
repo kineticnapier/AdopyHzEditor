@@ -7,11 +7,11 @@ from typing import Any
 
 import webview
 
-from export_midi import export_midi
+from exporters.midi import export_midi
 from i18n import available_languages, current_language, set_language, tr
-from note_model import Note
-from project_io import load_project
-from quick_hz_tools import (
+from core.note_model import Note
+from core.project_io import load_project
+from tools.quick_hz import (
     AppendGeneratedDataToChart,
     CalculateHzInfo,
     GenerateOutputText,

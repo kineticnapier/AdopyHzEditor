@@ -10,7 +10,7 @@ from typing import Any
 
 import webview
 
-from export_adofai import (
+from exporters.adofai import (
     build_adofai_debug_rows,
     build_adofai_level,
     build_tile_preview_points,

@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6 import QtCore, QtWidgets
 
 from i18n import tr
-from quick_hz_tools import (
+from tools.quick_hz import (
     AppendGeneratedDataToChart,
     CalculateHzInfo,
     GenerateOutputText,

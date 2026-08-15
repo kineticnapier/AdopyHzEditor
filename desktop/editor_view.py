@@ -5,8 +5,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 import numpy as np
 
-from audio_analysis import Spectrogram, enhance_spectrogram
-from note_model import Note, note_name, midi_to_hz
+from core.audio_analysis import Spectrogram, enhance_spectrogram
+from core.note_model import Note, note_name, midi_to_hz
 
 
 class EditorPlot(pg.PlotWidget):

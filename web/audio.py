@@ -4,7 +4,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from audio_player import AudioPlayer, decode_audio_file as _decode_audio_file
+from core.audio_player import AudioPlayer, decode_audio_file as _decode_audio_file
 
 
 class DecodedAudio(NamedTuple):

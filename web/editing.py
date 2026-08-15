@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from note_model import Note, hz_to_midi, midi_to_hz
+from core.note_model import Note, hz_to_midi, midi_to_hz
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-import ui_polish as base_ui
+import desktop.ui_polish as base_ui
 from i18n import tr
 
 _STYLE_SHEET = r"""

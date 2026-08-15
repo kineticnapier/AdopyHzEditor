@@ -7,8 +7,8 @@ import math
 from pathlib import Path
 from typing import Any
 
-from adofai_angles import clean_angle, clean_relative_angle
-from export_adofai import set_bpm
+from exporters.adofai_angles import clean_angle, clean_relative_angle
+from exporters.adofai import set_bpm
 
 
 class HzToolError(ValueError):
