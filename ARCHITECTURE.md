@@ -44,3 +44,5 @@ from web.editing import EditingMixin
 Historical root-level compatibility modules have been removed. Do not reintroduce imports such as `from audio_player import ...`, `from export_adofai import ...`, or `from web_backend_editing import ...`.
 
 The Web UI CI scans Python imports and rejects references to the removed module names, so new code should use the package paths above.
+
+The old `rabbit_zip_formula.py` root command is now `python -m exporters.rabbit_zip_formula`.
