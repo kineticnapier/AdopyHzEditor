@@ -7,13 +7,15 @@ on:
     paths:
       - "frontend/**"
       - "web_ui.py"
+      - "main.py"
       - "web/**"
       - "core/**"
       - "exporters/**"
       - "importers/**"
       - "tools/**"
       - "desktop/**"
-      - "*.py"
+      - "tests/**"
+      - "scripts/**"
       - "run-webui.ps1"
       - "run-webui.cmd"
       - ".github/workflows/web-ui-check.yml"
@@ -31,24 +33,60 @@ jobs:
       - name: Python syntax
         run: >-
           python -m compileall -q
-          web_ui.py
           main.py
-          web
+          web_ui.py
           core
           exporters
           importers
           tools
           desktop
-          audio_analysis.py
-          audio_player.py
-          note_model.py
-          project_io.py
-          export_adofai.py
-          export_midi.py
-          midi_import.py
-          quick_hz_tools.py
-          adofai_angles.py
-          rabbit_zip_formula.py
+          web
+          tests
+          scripts
+
+      - name: No legacy root import shims
+        shell: python
+        run: |
+          import ast
+          from pathlib import Path
+
+          legacy_modules = {
+              "audio_analysis", "audio_player", "note_model", "project_io",
+              "export_adofai", "export_midi", "adofai_angles", "rabbit_zip_formula",
+              "midi_import", "quick_hz_tools", "editor_view", "export_adofai_dialog",
+              "help_dialog", "midi_import_dialog", "quick_hz_tools_dialog",
+              "tile_preview_dialog", "toolbox_fix", "ui_final_tweaks", "ui_modern",
+              "ui_polish", "update_manager", "web_backend_editing", "web_backend_io",
+              "web_backend_notes",
+          }
+          root_shims = {
+              "audio_analysis.py", "audio_player.py", "note_model.py", "project_io.py",
+              "export_adofai.py", "export_midi.py", "adofai_angles.py", "rabbit_zip_formula.py",
+              "midi_import.py", "quick_hz_tools.py", "editor_view.py", "export_adofai_dialog.py",
+              "help_dialog.py", "midi_import_dialog.py", "quick_hz_tools_dialog.py",
+              "tile_preview_dialog.py", "toolbox_fix.py", "ui_final_tweaks.py", "ui_modern.py",
+              "ui_polish.py", "update_manager.py",
+          }
+
+          errors = []
+          for name in sorted(root_shims):
+              if Path(name).exists():
+                  errors.append(f"legacy root shim still exists: {name}")
+
+          for path in sorted(Path(".").rglob("*.py")):
+              if ".git" in path.parts:
+                  continue
+              tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom) and node.module in legacy_modules:
+                      errors.append(f"{path}:{node.lineno}: from {node.module} import ...")
+                  elif isinstance(node, ast.Import):
+                      for alias in node.names:
+                          if alias.name in legacy_modules:
+                              errors.append(f"{path}:{node.lineno}: import {alias.name}")
+
+          if errors:
+              raise SystemExit("Legacy imports remain:\n" + "\n".join(errors))
 
       - name: Web UI bridge MRO
         shell: python
@@ -81,43 +119,6 @@ jobs:
 
       - name: Install lightweight Web runtime dependencies
         run: python -m pip install --disable-pip-version-check numpy mido pywebview
-
-      - name: Compatibility module aliases
-        run: |
-          python - <<'PY'
-          import adofai_angles
-          import audio_analysis
-          import audio_player
-          import export_adofai
-          import export_midi
-          import midi_import
-          import note_model
-          import project_io
-          import quick_hz_tools
-          import rabbit_zip_formula
-
-          from core import audio_analysis as core_audio_analysis
-          from core import audio_player as core_audio_player
-          from core import note_model as core_note_model
-          from core import project_io as core_project_io
-          from exporters import adofai as exporters_adofai
-          from exporters import adofai_angles as exporters_adofai_angles
-          from exporters import midi as exporters_midi
-          from exporters import rabbit_zip_formula as exporters_rabbit_zip_formula
-          from importers import midi as importers_midi
-          from tools import quick_hz as tools_quick_hz
-
-          assert audio_analysis is core_audio_analysis
-          assert audio_player is core_audio_player
-          assert note_model is core_note_model
-          assert project_io is core_project_io
-          assert export_adofai is exporters_adofai
-          assert export_midi is exporters_midi
-          assert adofai_angles is exporters_adofai_angles
-          assert rabbit_zip_formula is exporters_rabbit_zip_formula
-          assert midi_import is importers_midi
-          assert quick_hz_tools is tools_quick_hz
-          PY
 
       - name: Web UI bridge initialization
         run: |
