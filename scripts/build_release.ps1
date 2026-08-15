@@ -146,7 +146,15 @@ Set-Location $Root
 Write-Step "AdopyHzEditor build"
 Write-Host "Root: $Root"
 
-foreach ($required in @("main.py", "audio_analysis.py", "audio_player.py", "editor_view.py", "export_adofai.py", "requirements.txt", "locales")) {
+foreach ($required in @(
+    "main.py",
+    "core\audio_analysis.py",
+    "core\audio_player.py",
+    "desktop\editor_view.py",
+    "exporters\adofai.py",
+    "requirements.txt",
+    "locales"
+)) {
     if (-not (Test-Path (Join-Path $Root $required))) {
         Fail "Required file/folder not found: $required"
     }
@@ -258,12 +266,3 @@ if (-not $NoZip) {
 
     Write-Ok "Release zip: $ZipPath"
 }
-
-Write-Step "Done"
-
-Write-Host ""
-Write-Host "Run:"
-Write-Host "  $Exe"
-Write-Host ""
-Write-Host "Release asset should usually be:"
-Write-Host "  releases\AdopyHzEditor_Windows_$VersionTag.zip"
