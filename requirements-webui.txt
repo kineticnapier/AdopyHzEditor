@@ -1,2 +1,2 @@
--r requirements.txt
+-r requirements-core.txt
 pywebview>=6.0,<7
