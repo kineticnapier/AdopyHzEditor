@@ -8,6 +8,8 @@ on:
       - "frontend/**"
       - "web_ui.py"
       - "web_backend*.py"
+      - "run-webui.ps1"
+      - "run-webui.cmd"
       - ".github/workflows/web-ui-check.yml"
 
 jobs:
@@ -31,6 +33,29 @@ jobs:
           web_backend_notes.py
           web_backend_presets.py
           web_backend_tools.py
+
+      - name: Launcher is Windows PowerShell 5.1 safe
+        shell: python
+        run: |
+          from pathlib import Path
+          data = Path("run-webui.ps1").read_bytes()
+          if any(byte >= 0x80 for byte in data):
+              raise SystemExit("run-webui.ps1 must stay ASCII-only for Windows PowerShell 5.1")
+
+      - name: PowerShell launcher syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "run-webui.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
 
       - uses: actions/setup-node@v4
         with:
