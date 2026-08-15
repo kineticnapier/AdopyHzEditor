@@ -2,13 +2,12 @@ name: Web UI check
 
 on:
   push:
-    branches: [ts-ui-prototype]
+    branches: [main, "refactor/**"]
   pull_request:
     paths:
       - "frontend/**"
       - "web_ui.py"
-      - "web_audio_compat.py"
-      - "web_backend*.py"
+      - "web/**"
       - "run-webui.ps1"
       - "run-webui.cmd"
       - ".github/workflows/web-ui-check.yml"
@@ -24,17 +23,7 @@ jobs:
           python-version: "3.12"
 
       - name: Python syntax
-        run: >-
-          python -m compileall -q
-          web_ui.py
-          web_audio_compat.py
-          web_backend.py
-          web_backend_adofai.py
-          web_backend_editing.py
-          web_backend_io.py
-          web_backend_notes.py
-          web_backend_presets.py
-          web_backend_tools.py
+        run: python -m compileall -q web_ui.py web
 
       - name: Web UI bridge MRO
         shell: python
@@ -57,7 +46,7 @@ jobs:
                       return result
               raise SystemExit(f"Class {class_name} not found in {path}")
 
-          core_names = class_bases("web_backend.py", "Bridge")
+          core_names = class_bases("web/backend.py", "Bridge")
           web_names = class_bases("web_ui.py", "Bridge")
           leaf_names = set(core_names + web_names) - {"CoreBridge"}
           leaf = {name: type(name, (), {}) for name in leaf_names}
