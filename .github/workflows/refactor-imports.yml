@@ -1,0 +1,160 @@
+name: Refactor legacy imports
+
+on:
+  push:
+    branches: ["refactor/project-structure"]
+    paths:
+      - ".github/workflows/refactor-imports.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Replace legacy imports and remove root shims
+        shell: python
+        run: |
+          from __future__ import annotations
+
+          import ast
+          from pathlib import Path
+          import re
+
+          module_map = {
+              "audio_analysis": "core.audio_analysis",
+              "audio_player": "core.audio_player",
+              "note_model": "core.note_model",
+              "project_io": "core.project_io",
+              "export_adofai": "exporters.adofai",
+              "export_midi": "exporters.midi",
+              "adofai_angles": "exporters.adofai_angles",
+              "rabbit_zip_formula": "exporters.rabbit_zip_formula",
+              "midi_import": "importers.midi",
+              "quick_hz_tools": "tools.quick_hz",
+              "editor_view": "desktop.editor_view",
+              "export_adofai_dialog": "desktop.export_adofai_dialog",
+              "help_dialog": "desktop.help_dialog",
+              "midi_import_dialog": "desktop.midi_import_dialog",
+              "quick_hz_tools_dialog": "desktop.quick_hz_tools_dialog",
+              "tile_preview_dialog": "desktop.tile_preview_dialog",
+              "toolbox_fix": "desktop.toolbox_fix",
+              "ui_final_tweaks": "desktop.ui_final_tweaks",
+              "ui_modern": "desktop.ui_modern",
+              "ui_polish": "desktop.ui_polish",
+              "update_manager": "desktop.update_manager",
+              "web_backend_editing": "web.editing",
+              "web_backend_io": "web.io",
+              "web_backend_notes": "web.notes",
+          }
+
+          root_shims = [
+              "audio_analysis.py",
+              "audio_player.py",
+              "note_model.py",
+              "project_io.py",
+              "export_adofai.py",
+              "export_midi.py",
+              "adofai_angles.py",
+              "rabbit_zip_formula.py",
+              "midi_import.py",
+              "quick_hz_tools.py",
+              "editor_view.py",
+              "export_adofai_dialog.py",
+              "help_dialog.py",
+              "midi_import_dialog.py",
+              "quick_hz_tools_dialog.py",
+              "tile_preview_dialog.py",
+              "toolbox_fix.py",
+              "ui_final_tweaks.py",
+              "ui_modern.py",
+              "ui_polish.py",
+              "update_manager.py",
+          ]
+
+          root = Path(".")
+          changed = []
+
+          for path in sorted(root.rglob("*.py")):
+              if any(part.startswith(".") for part in path.parts):
+                  continue
+              text = path.read_text(encoding="utf-8")
+              original = text
+              for old, new in module_map.items():
+                  text = re.sub(
+                      rf"(?m)^(?P<indent>[ \t]*)from[ \t]+{re.escape(old)}(?P<tail>[ \t]+import[ \t]+)",
+                      rf"\g<indent>from {new}\g<tail>",
+                      text,
+                  )
+                  text = re.sub(
+                      rf"(?m)^(?P<indent>[ \t]*)import[ \t]+{re.escape(old)}(?P<alias>[ \t]+as[ \t]+[A-Za-z_][A-Za-z0-9_]*)?[ \t]*$",
+                      lambda m, new=new, old=old: (
+                          f"{m.group('indent')}import {new}{m.group('alias')}"
+                          if m.group("alias")
+                          else f"{m.group('indent')}import {new} as {old}"
+                      ),
+                      text,
+                  )
+              if text != original:
+                  path.write_text(text, encoding="utf-8")
+                  changed.append(str(path))
+
+          # web/__init__.py no longer needs to manufacture historical module names.
+          Path("web/__init__.py").write_text('"""React/pywebview backend package."""\n', encoding="utf-8")
+
+          for name in root_shims:
+              path = Path(name)
+              if path.exists():
+                  path.unlink()
+
+          # Verify there are no import statements left that rely on a removed root module.
+          bad = []
+          legacy = set(module_map)
+          for path in sorted(root.rglob("*.py")):
+              if any(part.startswith(".") for part in path.parts):
+                  continue
+              try:
+                  tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+              except SyntaxError as exc:
+                  raise SystemExit(f"Syntax error after migration in {path}: {exc}") from exc
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom) and node.module in legacy:
+                      bad.append(f"{path}:{node.lineno}: from {node.module} import ...")
+                  elif isinstance(node, ast.Import):
+                      for alias in node.names:
+                          if alias.name in legacy:
+                              bad.append(f"{path}:{node.lineno}: import {alias.name}")
+
+          leftovers = [name for name in root_shims if Path(name).exists()]
+          if bad or leftovers:
+              raise SystemExit("Legacy migration incomplete:\n" + "\n".join(bad + leftovers))
+
+          print("Updated imports:")
+          for path in changed:
+              print(" -", path)
+          print(f"Removed {len(root_shims)} root compatibility files.")
+
+      - name: Compile migrated Python sources
+        run: python -m compileall -q main.py web_ui.py core exporters importers tools desktop web tests scripts
+
+      - name: Commit migration
+        run: |
+          if git diff --quiet; then
+            echo "No migration changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Replace legacy imports and remove root shims"
+          git push origin HEAD:${{ github.ref_name }}
