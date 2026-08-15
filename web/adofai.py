@@ -15,12 +15,11 @@ from exporters.adofai import (
     build_adofai_level,
     build_tile_preview_points,
 )
+from app_metadata import APP_VERSION, GITHUB_RELEASES_URL
 from i18n import tr
 
 
 ADOF_FILE_TYPES = ("ADOFAI Level (*.adofai)", "All files (*.*)")
-APP_VERSION = "0.7.2"
-GITHUB_RELEASES_URL = "https://github.com/kineticnapier/AdopyHzEditor/releases"
 
 _HELP_SECTIONS: list[tuple[str, str, str]] = [
     ("quick_start", "help.quick_start.title", "help.quick_start.body"),
