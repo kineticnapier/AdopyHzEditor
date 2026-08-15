@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 try:
@@ -62,7 +63,9 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         return super()._prepare_adofai_export(options, selected_indices)
 
 
-ROOT = Path(__file__).resolve().parent
+# In a PyInstaller build, bundled data lives under sys._MEIPASS. In a source
+# checkout, keep using the repository root next to this file.
+ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DIST_INDEX = ROOT / "frontend" / "dist" / "index.html"
 
 
