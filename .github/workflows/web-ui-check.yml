@@ -34,6 +34,36 @@ jobs:
           web_backend_presets.py
           web_backend_tools.py
 
+      - name: Web UI bridge MRO
+        shell: python
+        run: |
+          import ast
+          from pathlib import Path
+
+          def class_bases(path, class_name):
+              tree = ast.parse(Path(path).read_text(encoding="utf-8"), filename=path)
+              for node in tree.body:
+                  if isinstance(node, ast.ClassDef) and node.name == class_name:
+                      result = []
+                      for base in node.bases:
+                          if isinstance(base, ast.Name):
+                              result.append(base.id)
+                          elif isinstance(base, ast.Attribute):
+                              result.append(base.attr)
+                          else:
+                              raise SystemExit(f"Unsupported base expression in {path}: {ast.dump(base)}")
+                      return result
+              raise SystemExit(f"Class {class_name} not found in {path}")
+
+          core_names = class_bases("web_backend.py", "Bridge")
+          web_names = class_bases("web_ui.py", "Bridge")
+          leaf_names = set(core_names + web_names) - {"CoreBridge"}
+          leaf = {name: type(name, (), {}) for name in leaf_names}
+          CoreBridge = type("CoreBridge", tuple(leaf[name] for name in core_names), {})
+          resolved = {**leaf, "CoreBridge": CoreBridge}
+          # Creating the class is enough to make Python validate C3 MRO consistency.
+          type("WebBridge", tuple(resolved[name] for name in web_names), {})
+
       - name: Launcher is Windows PowerShell 5.1 safe
         shell: python
         run: |
