@@ -5,7 +5,7 @@ AdopyHzEditor has two UI entry points that share the same editor/domain code.
 ## Entry points
 
 - `main.py` — legacy PySide6 desktop application entry point.
-- `web_ui.py` — React / TypeScript + pywebview application entry point.
+- `web_ui.py` — React / TypeScript + pywebview application entry point and current distributable UI.
 
 ## Python packages
 
@@ -27,22 +27,23 @@ AdopyHzEditor has two UI entry points that share the same editor/domain code.
 - `settings/` — settings and note-preset panels.
 - `App.tsx` / `main.tsx` — React composition and entry point.
 
-## Python import rules
+## Imports
 
-Implementation code imports modules directly from their package. Examples:
+Python application code imports implementation modules through their package paths, for example:
 
-```python
-from core.audio_player import AudioPlayer
-from core.note_model import Note
-from exporters.adofai import export_adofai
-from importers.midi import import_midi
-from tools.quick_hz import CalculateHzInfo
-from desktop.editor_view import EditorView
-from web.editing import EditingMixin
-```
+- `core.audio_player`
+- `exporters.adofai`
+- `importers.midi`
+- `tools.quick_hz`
+- `desktop.editor_view`
+- `web.editing`
 
-Historical root-level compatibility modules have been removed. Do not reintroduce imports such as `from audio_player import ...`, `from export_adofai import ...`, or `from web_backend_editing import ...`.
+The historical root-level compatibility modules were removed. Do not recreate aliases such as `audio_player.py`, `export_adofai.py`, or `editor_view.py` at the repository root, and do not add imports that depend on those old names.
 
-The Web UI CI scans Python imports and rejects references to the removed module names, so new code should use the package paths above.
+## Application metadata
 
-The old `rabbit_zip_formula.py` root command is now `python -m exporters.rabbit_zip_formula`.
+`app_metadata.py` is the side-effect-free source of truth for application name, version, and GitHub repository metadata. Both UI stacks should import metadata from there rather than defining their own version constants.
+
+## Builds and releases
+
+The release package targets `web_ui.py` and bundles the built React frontend. See `RELEASING.md` for the local build and tagged GitHub Release workflow.
