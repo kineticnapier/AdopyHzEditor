@@ -59,11 +59,18 @@ function Invoke-Python {
 
 function Test-PythonDependencies {
     Push-Location $Root
+    $previousErrorActionPreference = $ErrorActionPreference
     try {
-        & $Python.Exe @($Python.Prefix + @("-c", "import web_ui")) *> $null
-        return $LASTEXITCODE -eq 0
+        # Windows PowerShell 5.1 turns redirected native stderr into
+        # NativeCommandError records. Dependency probing is expected to fail
+        # before the first install, so do not let that abort the launcher.
+        $ErrorActionPreference = "Continue"
+        & $Python.Exe @($Python.Prefix + @("-c", "import web_ui")) 1>$null 2>$null
+        $exitCode = $LASTEXITCODE
+        return $exitCode -eq 0
     }
     finally {
+        $ErrorActionPreference = $previousErrorActionPreference
         Pop-Location
     }
 }
