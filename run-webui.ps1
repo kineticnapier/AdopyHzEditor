@@ -33,6 +33,17 @@ function Resolve-PythonCommand {
     throw "Python 3 was not found. Create .venv or add Python to PATH."
 }
 
+function Resolve-Command {
+    param([Parameter(Mandatory = $true)][string[]]$Names)
+    foreach ($name in $Names) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) {
+            return $cmd
+        }
+    }
+    return $null
+}
+
 function Invoke-Checked {
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
@@ -75,6 +86,28 @@ function Test-PythonDependencies {
     }
 }
 
+function Install-PythonDependencies {
+    if ($uv) {
+        Write-Host "[1/3] Installing Python dependencies with uv..." -ForegroundColor Yellow
+        $uvArgs = @("pip", "install")
+
+        $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
+        if (Test-Path $venvPython) {
+            $uvArgs += @("--python", $venvPython)
+        }
+        elseif ($Python.Prefix.Count -eq 0) {
+            $uvArgs += @("--python", $Python.Exe)
+        }
+
+        $uvArgs += @("-r", "requirements-webui.txt")
+        Invoke-Checked -Exe $uv.Source -Arguments $uvArgs -WorkingDirectory $Root
+        return
+    }
+
+    Write-Host "[1/3] uv was not found; falling back to pip..." -ForegroundColor Yellow
+    Invoke-Python -Arguments @("-m", "pip", "install", "-r", "requirements-webui.txt")
+}
+
 function Wait-Vite {
     param([string]$Url)
     for ($i = 0; $i -lt 60; $i++) {
@@ -93,16 +126,20 @@ function Wait-Vite {
 
 Set-Location $Root
 $Python = Resolve-PythonCommand
-$npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
-if (-not $npm) {
-    $npm = Get-Command npm -ErrorAction SilentlyContinue
-}
+$npm = Resolve-Command -Names @("npm.cmd", "npm")
 if (-not $npm) {
     throw "npm was not found. Install Node.js and add npm to PATH."
 }
+$uv = Resolve-Command -Names @("uv.exe", "uv")
 
 Write-Host "AdopyHzEditor Web UI" -ForegroundColor Cyan
 Write-Host "Python: $($Python.Exe)"
+if ($uv) {
+    Write-Host "Python packages: uv ($($uv.Source))"
+}
+else {
+    Write-Host "Python packages: pip fallback"
+}
 
 if (-not $NoInstall) {
     if (-not (Test-Path (Join-Path $Frontend "node_modules"))) {
@@ -111,8 +148,7 @@ if (-not $NoInstall) {
     }
 
     if (-not (Test-PythonDependencies)) {
-        Write-Host "[1/3] Installing Python dependencies..." -ForegroundColor Yellow
-        Invoke-Python -Arguments @("-m", "pip", "install", "-r", "requirements-webui.txt")
+        Install-PythonDependencies
         if (-not (Test-PythonDependencies)) {
             Write-Host "Python import still fails after install:" -ForegroundColor Red
             Invoke-Python -Arguments @("-c", "import web_ui")
