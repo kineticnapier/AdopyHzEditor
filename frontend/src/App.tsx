@@ -1,0 +1,73 @@
+import { useEffect, useState } from "react";
+import AdoFAIExportDialog from "./AdoFAIExportDialogJa";
+import AppMenus from "./AppMenus";
+import EditorCanvas from "./EditorCanvas";
+import HelpDialog from "./HelpDialog";
+import SettingsPanel from "./SettingsPanel";
+import { BlankWorkspaceDialog, HarmonicDiagramDialog, QuickHzDialog, UpdateDialog } from "./ToolDialogs";
+import Timeline from "./Timeline";
+import TopToolbar from "./TopToolbar";
+import useEditorShortcuts from "./useEditorShortcuts";
+import "./dialogs.css";
+import { getBackendApi, type AppState, type BackendApi, type EditorSettings, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./bridge";
+import type { ToolBackendApi } from "./toolsBridge";
+
+const defaultSettings:EditorSettings={volume:85,speed:1,notePreview:true,previewVolume:20,previewOctave:0,previewSound:"sine",exportOctave:0,exportSemitone:0,gridEnabled:false,metronomeEnabled:false,bpm:175,offsetMs:0,metronomeVolume:35,snapEnabled:false,snapDiv:1,contrast:115,gamma:75,enhance:true,displayMode:"wavetone",harmonics:"off",colormap:"wavetone",analysisProfile:"Normal",cqtResolution:"profile default",curveShape:"ease",curveInterpolation:"bezier_pitch",targetAngle:165};
+const defaultView:ViewState={mode:"spec",start:0,windowSeconds:12,pitchBottom:12,visibleNotes:60};
+const defaultPlayback:PlaybackState={time:0,duration:60,playing:false,available:false,error:null};
+type ToolDialog="blank"|"quickHz"|"harmonic"|"update"|null;
+
+export default function App(){
+  const[api,setApi]=useState<BackendApi|null>(null),[connected,setConnected]=useState(false),[settings,setSettings]=useState(defaultSettings),[view,setView]=useState(defaultView),[playback,setPlayback]=useState(defaultPlayback),[notes,setNotes]=useState<NoteDto[]>([]),[selected,setSelected]=useState<number[]>([]),[spectrum,setSpectrum]=useState<SpectrogramPayload|null>(null),[analysisAvailable,setAnalysisAvailable]=useState(false),[audioName,setAudioName]=useState<string|null>(null),[projectPath,setProjectPath]=useState<string|null>(null),[dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[status,setStatus]=useState("準備完了");
+  const[adoExportOpen,setAdoExportOpen]=useState(false),[helpSection,setHelpSection]=useState<string|null>(null),[toolDialog,setToolDialog]=useState<ToolDialog>(null),[followPlayback,setFollowPlayback]=useState(true);
+  const toolsApi=api as ToolBackendApi|null;
+
+  function applyState(state:AppState){setSettings(state.settings);setView(state.view);setPlayback(state.playback);setNotes(state.notes);setSelected(old=>old.filter(i=>i>=0&&i<state.notes.length));setAnalysisAvailable(state.analysis.available);setAudioName(state.audio.name);setProjectPath(state.projectPath);setDirty(state.dirty);setBusy(state.busy);setStatus(state.status||"準備完了")}
+  async function refreshSpectrum(backend=api){if(!backend)return;const p=await backend.get_spectrogram(1600);setSpectrum(p.available?p:null)}
+
+  useEffect(()=>{void getBackendApi().then(async backend=>{if(!backend)return;setApi(backend);setConnected((await backend.ping()).ok);const state=await backend.get_state();applyState(state);if(state.analysis.available)await refreshSpectrum(backend)})},[]);
+  useEffect(()=>{if(!api)return;let active=true;const id=window.setInterval(()=>void api.get_playback_state().then(x=>{if(active)setPlayback(x)}).catch(()=>{}),50);return()=>{active=false;window.clearInterval(id)}},[api]);
+  useEffect(()=>{if(!api||!analysisAvailable)return;const id=window.setTimeout(()=>void refreshSpectrum(api),140);return()=>window.clearTimeout(id)},[api,analysisAvailable,settings.contrast,settings.gamma,settings.enhance,settings.displayMode,settings.harmonics,settings.colormap]);
+  useEffect(()=>{
+    if(!followPlayback||!playback.playing||view.windowSeconds<=0)return;
+    const trigger=view.start+view.windowSeconds*.82;
+    if(playback.time<view.start||playback.time>trigger){
+      const max=Math.max(0,playback.duration-view.windowSeconds);
+      const next=Math.max(0,Math.min(max,playback.time-view.windowSeconds*.2));
+      if(Math.abs(next-view.start)>.001){setView(v=>({...v,start:next}));void api?.set_view({start:next});}
+    }
+  },[api,followPlayback,playback.duration,playback.playing,playback.time,view.start,view.windowSeconds]);
+
+  async function patch(changes:Partial<EditorSettings>){setSettings(v=>({...v,...changes}));if(api){setSettings(await api.update_settings(changes));setDirty(true)}}
+  async function updateView(changes:Partial<ViewState>){setView(v=>({...v,...changes}));if(api)setView(await api.set_view(changes))}
+  async function fitView(){if(api)setView(await api.fit_view())}
+  async function runStateAction(action:()=>Promise<AppState>){if(!api)return;setBusy(true);try{const state=await action();applyState(state);if(state.analysis.available)await refreshSpectrum(api);else setSpectrum(null)}catch(e){setStatus(String(e))}finally{setBusy(false)}}
+  function applyMutation(result:NoteMutationResult,selection?:number[]){setNotes(result.notes);setStatus(result.status);setDirty(true);if(selection)setSelected(selection.filter(i=>i>=0&&i<result.notes.length));else setSelected(old=>old.filter(i=>i>=0&&i<result.notes.length))}
+  async function addNote(start:number,end:number,midi:number,kind:"note"|"curve",endMidi:number){if(!api)return;const r=await api.add_note(start,end,midi,kind,endMidi);applyMutation(r,r.index===undefined?[]:[r.index])}
+  async function moveNotes(indices:number[],dx:number,dy:number){if(api&&indices.length)applyMutation(await api.move_notes(indices,dx,dy),indices)}
+  async function duplicateMove(indices:number[],dx:number,dy:number){if(api&&indices.length){const r=await api.duplicate_notes_shifted(indices,dx,dy);applyMutation(r,r.indices??[])}}
+  async function resizeNotes(indices:number[],edge:"start"|"end",delta:number){if(api&&indices.length)applyMutation(await api.resize_notes(indices,edge,delta),indices)}
+  async function deleteNotes(indices=selected){if(api&&indices.length)applyMutation(await api.delete_notes(indices),[])}
+  async function duplicate(){if(api&&selected.length){const r=await api.duplicate_notes(selected);applyMutation(r,r.indices??[])}}
+  async function quantize(){if(api&&selected.length)applyMutation(await api.quantize_notes(selected),selected)}
+  async function splitSelected(){if(api&&selected.length){const r=await api.split_notes(selected,playback.time);applyMutation(r,r.indices?.length?r.indices:selected)}}
+  async function seekTo(t:number){if(api)setPlayback(await api.seek_to(t));else setPlayback(p=>({...p,time:t}))}
+  async function togglePlayback(){if(api)setPlayback(await api.toggle_playback())}
+  async function stopPlayback(){if(api)setPlayback(await api.stop_playback())}
+  async function seekRelative(s:number){if(api)setPlayback(await api.seek_relative(s))}
+  async function mode(v:ViewState["mode"]){await updateView({mode:v})}
+  async function undo(){if(api)applyMutation(await api.undo(),[])}
+  async function redo(){if(api)applyMutation(await api.redo(),[])}
+
+  const stateAction=(fn:()=>Promise<AppState>)=>void runStateAction(fn),nudgeSeconds=settings.snapEnabled?60/Math.max(1,settings.bpm)/Math.max(1,settings.snapDiv):.01;
+  useEditorShortcuts({api,notes,selected,playbackTime:playback.time,view,nudgeSeconds,openAudio:()=>api&&stateAction(()=>api.open_audio()),saveProject:()=>api&&stateAction(()=>api.save_project_dialog()),loadProject:()=>api&&stateAction(()=>api.load_project_dialog()),importMidi:()=>api&&stateAction(()=>api.import_midi_dialog()),openAdoExport:()=>setAdoExportOpen(true),openHelp:()=>setHelpSection("quick_start"),setStatus,undo:()=>void undo(),redo:()=>void redo(),duplicate:()=>void duplicate(),quantize:()=>void quantize(),select:setSelected,applyMutation,move:(i,dx,dy)=>void moveNotes(i,dx,dy),stop:()=>void stopPlayback(),play:()=>void togglePlayback(),deleteSelected:()=>void deleteNotes(),mode:v=>void mode(v),seek:d=>void seekRelative(d),updateView:c=>void updateView(c)});
+
+  const menus=toolsApi?<AppMenus hasSelection={selected.length>0} onBlankWorkspace={()=>setToolDialog("blank")} onLoadNotesOnly={()=>stateAction(()=>toolsApi.load_project_notes_only_dialog())} onMergeProject={()=>stateAction(()=>toolsApi.merge_project_notes_dialog())} onExportSelectedMidi={()=>void toolsApi.export_selected_midi_dialog(selected).then(x=>setStatus(x.status))} onExportSelectedAdo={()=>{setAdoExportOpen(true);setStatus("ADOFAI出力で「選択ノートのみ」を使用できます")}} onDuplicate={()=>void duplicate()} onQuantize={()=>void quantize()} onSplit={()=>void splitSelected()} onHarmonicDiagram={()=>setToolDialog("harmonic")} onReanalyze={()=>stateAction(()=>toolsApi.reanalyze_audio())} onQuickHz={()=>setToolDialog("quickHz")} onUpdates={()=>setToolDialog("update")} onHelp={()=>setHelpSection("quick_start")}/>:null;
+
+  return <div className="app">
+    <TopToolbar connected={connected} busy={busy} audioName={audioName} dirty={dirty} playback={playback} view={view} menus={menus} onOpen={()=>api&&stateAction(()=>api.open_audio())} onLoadProject={()=>api&&stateAction(()=>api.load_project_dialog())} onSaveProject={()=>api&&stateAction(()=>api.save_project_dialog())} onSeek={t=>void seekTo(t)} onStop={()=>void stopPlayback()} onPlay={()=>void togglePlayback()} onSeekRelative={d=>void seekRelative(d)} onImportMidi={()=>api&&stateAction(()=>api.import_midi_dialog())} onExportMidi={()=>void api?.export_midi_dialog().then(x=>setStatus(x.status))} onExportAdo={()=>setAdoExportOpen(true)} onHelp={()=>setHelpSection("quick_start")} onMode={v=>void mode(v)}/>
+    <main className="workspace"><section className="editor"><EditorCanvas notes={notes} selected={selected} settings={settings} view={view} playback={playback} spectrum={spectrum} onSelect={setSelected} onAdd={addNote} onMove={moveNotes} onDuplicateMove={duplicateMove} onResize={resizeNotes} onDelete={deleteNotes} onSeek={seekTo} onView={updateView}/><Timeline view={view} playback={playback} followPlayback={followPlayback} onFollowPlayback={setFollowPlayback} onView={c=>void updateView(c)} onFit={()=>void fitView()}/></section><SettingsPanel api={api} settings={settings} notes={notes} selected={selected} playbackTime={playback.time} audioName={audioName} busy={busy} onPatch={patch} onStateAction={runStateAction} onMutation={applyMutation} onStatus={setStatus}/></main>
+    <footer className="statusbar"><span>{busy?"処理中…":status}</span><span>{projectPath?projectPath.split(/[\\/]/).pop():"プロジェクトなし"} · ノート {notes.length}個</span></footer>
+    {adoExportOpen&&api&&<AdoFAIExportDialog api={api} selected={selected} onClose={()=>setAdoExportOpen(false)} onStatus={setStatus} onHelp={s=>setHelpSection(s??"adofai_export")}/>} {helpSection&&api&&<HelpDialog api={api} initialSection={helpSection} onClose={()=>setHelpSection(null)}/>} {toolDialog==="blank"&&toolsApi&&<BlankWorkspaceDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus} onState={state=>{applyState(state);setSpectrum(null)}}/>} {toolDialog==="quickHz"&&toolsApi&&<QuickHzDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus}/>} {toolDialog==="harmonic"&&toolsApi&&<HarmonicDiagramDialog api={toolsApi} selected={selected} onClose={()=>setToolDialog(null)} onStatus={setStatus} onMutation={applyMutation}/>} {toolDialog==="update"&&toolsApi&&<UpdateDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus}/>} 
+  </div>
+}

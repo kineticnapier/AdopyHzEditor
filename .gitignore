@@ -17,6 +17,10 @@ dist/
 *.egg-info/
 .eggs/
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
 # Test / coverage
 .pytest_cache/
 .coverage
