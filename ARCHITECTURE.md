@@ -27,8 +27,20 @@ AdopyHzEditor has two UI entry points that share the same editor/domain code.
 - `settings/` — settings and note-preset panels.
 - `App.tsx` / `main.tsx` — React composition and entry point.
 
-## Compatibility modules
+## Python import rules
 
-Several small Python files remain at the repository root with historical names such as `audio_player.py`, `export_adofai.py`, or `editor_view.py`. They are compatibility aliases only; new implementation changes should be made in the package listed above instead of in those root aliases.
+Implementation code imports modules directly from their package. Examples:
 
-Do not add new application logic to compatibility aliases. They exist so older imports, scripts, packaging configuration, and external callers continue to work while the project structure is migrated incrementally.
+```python
+from core.audio_player import AudioPlayer
+from core.note_model import Note
+from exporters.adofai import export_adofai
+from importers.midi import import_midi
+from tools.quick_hz import CalculateHzInfo
+from desktop.editor_view import EditorView
+from web.editing import EditingMixin
+```
+
+Historical root-level compatibility modules have been removed. Do not reintroduce imports such as `from audio_player import ...`, `from export_adofai import ...`, or `from web_backend_editing import ...`.
+
+The Web UI CI scans Python imports and rejects references to the removed module names, so new code should use the package paths above.
