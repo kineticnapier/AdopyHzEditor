@@ -4,28 +4,35 @@ AdopyHzEditor の React / TypeScript フロントエンドです。既存の PyS
 
 ## ビルドと起動
 
+Windowsではリポジトリ直下からこれだけで起動できます。
+
 ```powershell
-cd frontend
-npm install
-npm run build
-cd ..
-python -m pip install -r requirements-webui.txt
-python web_ui.py
+.\run-webui.cmd
+```
+
+初回は必要に応じて frontend / Python の依存関係を導入し、その後 `npm run build` → `web_ui.py` を自動実行します。`.venv\Scripts\python.exe` がある場合はそれを優先します。
+
+ビルド済みUIをそのまま起動したい場合:
+
+```powershell
+.\run-webui.cmd -SkipBuild
+```
+
+依存関係の自動導入を行わない場合:
+
+```powershell
+.\run-webui.cmd -NoInstall
 ```
 
 ## Vite 開発モード
 
 ```powershell
-cd frontend
-npm run dev
+.\run-webui.cmd -Dev
 ```
 
-別の PowerShell で:
+Vite (`127.0.0.1:5173`) を自動起動して `web_ui.py` を接続します。Web UIを閉じるとVite側も終了します。
 
-```powershell
-$env:ADOPY_WEB_UI_URL = "http://localhost:5173"
-python web_ui.py
-```
+手動で起動する場合は従来どおり `frontend` で `npm run dev` を実行し、`ADOPY_WEB_UI_URL` を設定して `python web_ui.py` を起動できます。
 
 ## 移植済み
 
@@ -38,7 +45,7 @@ python web_ui.py
 - 再生位置でのノート分割（カーブ対応）
 - 複数ノートの一括時間 / 音高移動、長さ統一、開始 / 終了揃え
 - 再生ヘッドの自動追従（ON/OFF可能）
-- アプリ共通の単音プリセット（例: Zaag / キック）保存・削除・再生位置への挿入
+- アプリ共通の単音プリセット保存・削除・再生位置への挿入
 - Undo / Redo、コピー / 切り取り / 貼り付け
 - ノートの数値インスペクタ（開始・終了・長さ・音高）
 - ノート複製 (`Ctrl+D`) とクオンタイズ (`Q`)
@@ -60,7 +67,7 @@ python web_ui.py
 - ファイル / 編集 / 解析 / ツール / オプション / ヘルプ メニュー
 - GitHub ActionsによるPython構文チェックとTypeScript/Viteビルドチェック
 
-単音プリセットはプロジェクトファイルとは別に保存されるため、曲をまたいで再利用できます。固定の「Zaag = ○Hz」のような値は持たず、選択したノートの音高・長さ・カーブ・補間・目標角度をそのままテンプレートとして保存します。
+単音プリセットはプロジェクトファイルとは別に保存されるため、曲をまたいで再利用できます。選択したノートの音高・長さ・カーブ・補間・目標角度をそのままテンプレートとして保存します。
 
 Python側の音声解析・再生・MIDI・プロジェクト・Quick Hz・ADOFAI処理は書き直さず、pywebview bridge経由で再利用します。
 
