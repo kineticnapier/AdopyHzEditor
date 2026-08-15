@@ -12,6 +12,15 @@ except ImportError as exc:
     ) from exc
 
 from i18n import set_language
+import web_backend as web_backend_module
+from web_audio_compat import WebAudioPlayer, decode_audio_file as decode_audio_file_compat
+
+# Keep the shared/PySide6 audio player untouched. The React Web backend was
+# written against an older AudioPlayer-facing API, so install a small adapter
+# only in the web_backend module before CoreBridge instances are created.
+web_backend_module.AudioPlayer = WebAudioPlayer
+web_backend_module.decode_audio_file = decode_audio_file_compat
+
 from web_backend import Bridge as CoreBridge
 from web_backend_adofai import AdoFAIMixin
 from web_backend_presets import PresetMixin
