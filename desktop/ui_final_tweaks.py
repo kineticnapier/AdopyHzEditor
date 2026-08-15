@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
 
-import ui_modern
-from toolbox_fix import apply as apply_toolbox_fix
+import desktop.ui_modern as ui_modern
+from desktop.toolbox_fix import apply as apply_toolbox_fix
 
 
 _COMPACT_RAIL_STYLE = r"""

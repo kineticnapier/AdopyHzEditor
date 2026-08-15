@@ -10,18 +10,18 @@ from fractions import Fraction
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_cache, Spectrogram
-from audio_player import AudioPlayer, decode_audio_file
-from editor_view import EditorView
-from export_midi import export_midi
-from midi_import import import_midi, MidiImportError, cleanup_imported_midi_notes
-from midi_import_dialog import get_midi_import_options
-from export_adofai import export_adofai
-from project_io import save_project, load_project
-from help_dialog import HelpDialog
-from export_adofai_dialog import ExportAdoFAIDialog
-from quick_hz_tools_dialog import QuickHzToolsDialog
-from note_model import Note
+from core.audio_analysis import analyze_cqt, analysis_profile_options, has_analysis_cache, Spectrogram
+from core.audio_player import AudioPlayer, decode_audio_file
+from desktop.editor_view import EditorView
+from exporters.midi import export_midi
+from importers.midi import import_midi, MidiImportError, cleanup_imported_midi_notes
+from desktop.midi_import_dialog import get_midi_import_options
+from exporters.adofai import export_adofai
+from core.project_io import save_project, load_project
+from desktop.help_dialog import HelpDialog
+from desktop.export_adofai_dialog import ExportAdoFAIDialog
+from desktop.quick_hz_tools_dialog import QuickHzToolsDialog
+from core.note_model import Note
 from i18n import tr, current_language, set_language
 from app_info import APP_VERSION, GITHUB_RELEASES_URL
 

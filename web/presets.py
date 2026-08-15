@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from note_model import Note
+from core.note_model import Note
 
 
 class PresetMixin:

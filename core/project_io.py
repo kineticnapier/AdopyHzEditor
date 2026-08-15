@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 import os
-from note_model import Note
+from core.note_model import Note
 
 
 PROJECT_VERSION = 3

@@ -2,13 +2,20 @@ name: Web UI check
 
 on:
   push:
-    branches: [ts-ui-prototype]
+    branches: [main, "refactor/**"]
   pull_request:
     paths:
       - "frontend/**"
       - "web_ui.py"
-      - "web_audio_compat.py"
-      - "web_backend*.py"
+      - "main.py"
+      - "web/**"
+      - "core/**"
+      - "exporters/**"
+      - "importers/**"
+      - "tools/**"
+      - "desktop/**"
+      - "tests/**"
+      - "scripts/**"
       - "run-webui.ps1"
       - "run-webui.cmd"
       - ".github/workflows/web-ui-check.yml"
@@ -26,15 +33,60 @@ jobs:
       - name: Python syntax
         run: >-
           python -m compileall -q
+          main.py
           web_ui.py
-          web_audio_compat.py
-          web_backend.py
-          web_backend_adofai.py
-          web_backend_editing.py
-          web_backend_io.py
-          web_backend_notes.py
-          web_backend_presets.py
-          web_backend_tools.py
+          core
+          exporters
+          importers
+          tools
+          desktop
+          web
+          tests
+          scripts
+
+      - name: No legacy root import shims
+        shell: python
+        run: |
+          import ast
+          from pathlib import Path
+
+          legacy_modules = {
+              "audio_analysis", "audio_player", "note_model", "project_io",
+              "export_adofai", "export_midi", "adofai_angles", "rabbit_zip_formula",
+              "midi_import", "quick_hz_tools", "editor_view", "export_adofai_dialog",
+              "help_dialog", "midi_import_dialog", "quick_hz_tools_dialog",
+              "tile_preview_dialog", "toolbox_fix", "ui_final_tweaks", "ui_modern",
+              "ui_polish", "update_manager", "web_backend_editing", "web_backend_io",
+              "web_backend_notes",
+          }
+          root_shims = {
+              "audio_analysis.py", "audio_player.py", "note_model.py", "project_io.py",
+              "export_adofai.py", "export_midi.py", "adofai_angles.py", "rabbit_zip_formula.py",
+              "midi_import.py", "quick_hz_tools.py", "editor_view.py", "export_adofai_dialog.py",
+              "help_dialog.py", "midi_import_dialog.py", "quick_hz_tools_dialog.py",
+              "tile_preview_dialog.py", "toolbox_fix.py", "ui_final_tweaks.py", "ui_modern.py",
+              "ui_polish.py", "update_manager.py",
+          }
+
+          errors = []
+          for name in sorted(root_shims):
+              if Path(name).exists():
+                  errors.append(f"legacy root shim still exists: {name}")
+
+          for path in sorted(Path(".").rglob("*.py")):
+              if ".git" in path.parts:
+                  continue
+              tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom) and node.module in legacy_modules:
+                      errors.append(f"{path}:{node.lineno}: from {node.module} import ...")
+                  elif isinstance(node, ast.Import):
+                      for alias in node.names:
+                          if alias.name in legacy_modules:
+                              errors.append(f"{path}:{node.lineno}: import {alias.name}")
+
+          if errors:
+              raise SystemExit("Legacy imports remain:\n" + "\n".join(errors))
 
       - name: Web UI bridge MRO
         shell: python
@@ -57,7 +109,7 @@ jobs:
                       return result
               raise SystemExit(f"Class {class_name} not found in {path}")
 
-          core_names = class_bases("web_backend.py", "Bridge")
+          core_names = class_bases("web/backend.py", "Bridge")
           web_names = class_bases("web_ui.py", "Bridge")
           leaf_names = set(core_names + web_names) - {"CoreBridge"}
           leaf = {name: type(name, (), {}) for name in leaf_names}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from mido import MidiFile, MidiTrack, Message, MetaMessage, bpm2tempo
-from note_model import Note
+from core.note_model import Note
 
 
 def export_midi(notes: list[Note], path: str | Path, *, bpm: float = 120.0, ticks_per_beat: int = 480) -> None:

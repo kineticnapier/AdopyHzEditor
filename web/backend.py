@@ -8,17 +8,17 @@ from typing import Any
 
 import numpy as np
 import webview
-from audio_analysis import (
+from core.audio_analysis import (
     Spectrogram,
     analysis_profile_options,
     analyze_cqt,
     enhance_spectrogram,
 )
-from audio_player import AudioPlayer, decode_audio_file
-from note_model import Note
-from web_backend_editing import EditingMixin
-from web_backend_io import IOMixin
-from web_backend_notes import NoteMixin
+from core.audio_player import AudioPlayer, decode_audio_file
+from core.note_model import Note
+from web.editing import EditingMixin
+from web.io import IOMixin
+from web.notes import NoteMixin
 
 
 AUDIO_FILE_TYPES = (

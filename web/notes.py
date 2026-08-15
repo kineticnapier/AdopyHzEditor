@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from note_model import Note
+from core.note_model import Note
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

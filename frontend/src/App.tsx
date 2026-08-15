@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
-import AdoFAIExportDialog from "./AdoFAIExportDialogJa";
-import AppMenus from "./AppMenus";
-import EditorCanvas from "./EditorCanvas";
-import HelpDialog from "./HelpDialog";
-import SettingsPanel from "./SettingsPanel";
-import { BlankWorkspaceDialog, HarmonicDiagramDialog, QuickHzDialog, UpdateDialog } from "./ToolDialogs";
-import Timeline from "./Timeline";
-import TopToolbar from "./TopToolbar";
-import useEditorShortcuts from "./useEditorShortcuts";
+import AdoFAIExportDialog from "./dialogs/AdoFAIExportDialogJa";
+import AppMenus from "./components/AppMenus";
+import EditorCanvas from "./editor/EditorCanvas";
+import HelpDialog from "./dialogs/HelpDialog";
+import SettingsPanel from "./settings/SettingsPanel";
+import { BlankWorkspaceDialog, HarmonicDiagramDialog, QuickHzDialog, UpdateDialog } from "./dialogs/ToolDialogs";
+import Timeline from "./editor/Timeline";
+import TopToolbar from "./components/TopToolbar";
+import useEditorShortcuts from "./editor/useEditorShortcuts";
 import "./dialogs.css";
-import { getBackendApi, type AppState, type BackendApi, type EditorSettings, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./bridge";
-import type { ToolBackendApi } from "./toolsBridge";
+import { getBackendApi, type AppState, type BackendApi, type EditorSettings, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./api/bridge";
+import type { ToolBackendApi } from "./api/toolsBridge";
 
 const defaultSettings:EditorSettings={volume:85,speed:1,notePreview:true,previewVolume:20,previewOctave:0,previewSound:"sine",exportOctave:0,exportSemitone:0,gridEnabled:false,metronomeEnabled:false,bpm:175,offsetMs:0,metronomeVolume:35,snapEnabled:false,snapDiv:1,contrast:115,gamma:75,enhance:true,displayMode:"wavetone",harmonics:"off",colormap:"wavetone",analysisProfile:"Normal",cqtResolution:"profile default",curveShape:"ease",curveInterpolation:"bezier_pitch",targetAngle:165};
 const defaultView:ViewState={mode:"spec",start:0,windowSeconds:12,pitchBottom:12,visibleNotes:60};

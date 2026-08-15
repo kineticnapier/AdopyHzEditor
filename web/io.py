@@ -7,10 +7,10 @@ from typing import Any
 import webview
 from mido import MidiFile, merge_tracks, tick2second
 
-from export_adofai import build_adofai_level
-from export_midi import export_midi
-from note_model import Note
-from project_io import load_project, save_project
+from exporters.adofai import build_adofai_level
+from exporters.midi import export_midi
+from core.note_model import Note
+from core.project_io import load_project, save_project
 
 PROJECT_FILE_TYPES = ("AdopyHzEditorプロジェクト (*.adopyhz;*.ahe.json)", "JSON (*.json)", "すべてのファイル (*.*)")
 MIDI_FILE_TYPES = ("MIDIファイル (*.mid;*.midi)", "すべてのファイル (*.*)")

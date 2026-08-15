@@ -5,8 +5,8 @@ from fractions import Fraction
 import json
 import math
 from typing import Any
-from note_model import Note, note_name
-from adofai_angles import (
+from core.note_model import Note, note_name
+from exporters.adofai_angles import (
     abs_angle_diff,
     clean_angle,
     clean_relative_angle,

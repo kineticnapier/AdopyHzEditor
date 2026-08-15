@@ -6,7 +6,7 @@ from typing import Any
 import bisect
 import struct
 
-from note_model import Note
+from core.note_model import Note
 
 
 @dataclass

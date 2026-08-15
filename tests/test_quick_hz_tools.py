@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from quick_hz_tools import (
+from tools.quick_hz import (
     AppendGeneratedDataToChart,
     CalculateHzInfo,
     HzToolError,

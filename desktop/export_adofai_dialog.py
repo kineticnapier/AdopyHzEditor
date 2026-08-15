@@ -6,10 +6,10 @@ from pathlib import Path
 
 from PySide6 import QtGui, QtWidgets
 
-from export_adofai import build_adofai_debug_rows, build_adofai_level, build_tile_preview_points
-from help_dialog import HelpDialog
+from exporters.adofai import build_adofai_debug_rows, build_adofai_level, build_tile_preview_points
+from desktop.help_dialog import HelpDialog
 from i18n import tr
-from tile_preview_dialog import TilePreviewDialog
+from desktop.tile_preview_dialog import TilePreviewDialog
 
 
 class AdoFAIDebugPreviewDialog(QtWidgets.QDialog):
