@@ -114,6 +114,8 @@ if (-not $NoInstall) {
         Write-Host "[1/3] Installing Python dependencies..." -ForegroundColor Yellow
         Invoke-Python -Arguments @("-m", "pip", "install", "-r", "requirements-webui.txt")
         if (-not (Test-PythonDependencies)) {
+            Write-Host "Python import still fails after install:" -ForegroundColor Red
+            Invoke-Python -Arguments @("-c", "import web_ui")
             throw "Python dependencies were installed, but importing web_ui still failed."
         }
     }
