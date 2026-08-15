@@ -30,7 +30,7 @@ function Resolve-PythonCommand {
         return @{ Exe = $py.Source; Prefix = @("-3") }
     }
 
-    throw "Python 3 が見つかりません。.venv を作成するか Python を PATH に追加してください。"
+    throw "Python 3 was not found. Create .venv or add Python to PATH."
 }
 
 function Invoke-Checked {
@@ -44,7 +44,7 @@ function Invoke-Checked {
     try {
         & $Exe @Arguments
         if ($LASTEXITCODE -ne 0) {
-            throw "コマンドが終了コード $LASTEXITCODE で失敗しました: $Exe $($Arguments -join ' ')"
+            throw "Command failed with exit code $LASTEXITCODE : $Exe $($Arguments -join ' ')"
         }
     }
     finally {
@@ -81,7 +81,7 @@ function Wait-Vite {
             Start-Sleep -Milliseconds 250
         }
     }
-    throw "Vite 開発サーバーが起動しませんでした: $Url"
+    throw "Vite dev server did not start: $Url"
 }
 
 Set-Location $Root
@@ -91,7 +91,7 @@ if (-not $npm) {
     $npm = Get-Command npm -ErrorAction SilentlyContinue
 }
 if (-not $npm) {
-    throw "npm が見つかりません。Node.js をインストールして PATH に追加してください。"
+    throw "npm was not found. Install Node.js and add npm to PATH."
 }
 
 Write-Host "AdopyHzEditor Web UI" -ForegroundColor Cyan
@@ -99,27 +99,27 @@ Write-Host "Python: $($Python.Exe)"
 
 if (-not $NoInstall) {
     if (-not (Test-Path (Join-Path $Frontend "node_modules"))) {
-        Write-Host "[1/3] frontend 依存関係をインストールしています..." -ForegroundColor Yellow
+        Write-Host "[1/3] Installing frontend dependencies..." -ForegroundColor Yellow
         Invoke-Checked -Exe $npm.Source -Arguments @("install", "--no-audit", "--no-fund") -WorkingDirectory $Frontend
     }
 
     if (-not (Test-PythonDependencies)) {
-        Write-Host "[1/3] Python 依存関係をインストールしています..." -ForegroundColor Yellow
+        Write-Host "[1/3] Installing Python dependencies..." -ForegroundColor Yellow
         Invoke-Python -Arguments @("-m", "pip", "install", "-r", "requirements-webui.txt")
         if (-not (Test-PythonDependencies)) {
-            throw "Python 依存関係をインストールしましたが web_ui を読み込めませんでした。"
+            throw "Python dependencies were installed, but importing web_ui still failed."
         }
     }
 }
 
 if ($Dev) {
     $url = "http://127.0.0.1:5173"
-    Write-Host "[2/3] Vite 開発サーバーを起動しています..." -ForegroundColor Yellow
+    Write-Host "[2/3] Starting Vite dev server..." -ForegroundColor Yellow
     $vite = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm run dev -- --host 127.0.0.1" -WorkingDirectory $Frontend -PassThru
     try {
         Wait-Vite -Url $url
         $env:ADOPY_WEB_UI_URL = $url
-        Write-Host "[3/3] web_ui.py を起動します ($url)" -ForegroundColor Green
+        Write-Host "[3/3] Starting web_ui.py ($url)" -ForegroundColor Green
         Invoke-Python -Arguments @("web_ui.py")
     }
     finally {
@@ -137,12 +137,12 @@ if ($Dev) {
 }
 
 if (-not $SkipBuild) {
-    Write-Host "[2/3] React / TypeScript UI をビルドしています..." -ForegroundColor Yellow
+    Write-Host "[2/3] Building React / TypeScript UI..." -ForegroundColor Yellow
     Invoke-Checked -Exe $npm.Source -Arguments @("run", "build") -WorkingDirectory $Frontend
 }
 elseif (-not (Test-Path (Join-Path $Frontend "dist\index.html"))) {
-    throw "-SkipBuild が指定されていますが frontend/dist/index.html がありません。"
+    throw "-SkipBuild was specified, but frontend/dist/index.html does not exist."
 }
 
-Write-Host "[3/3] web_ui.py を起動します..." -ForegroundColor Green
+Write-Host "[3/3] Starting web_ui.py..." -ForegroundColor Green
 Invoke-Python -Arguments @("web_ui.py")
