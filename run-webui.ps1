@@ -14,12 +14,18 @@ function Resolve-PythonCommand {
         return @{ Exe = $venvPython; Prefix = @() }
     }
 
-    $python = Get-Command python -ErrorAction SilentlyContinue
+    $python = Get-Command python.exe -ErrorAction SilentlyContinue
+    if (-not $python) {
+        $python = Get-Command python -ErrorAction SilentlyContinue
+    }
     if ($python) {
         return @{ Exe = $python.Source; Prefix = @() }
     }
 
-    $py = Get-Command py -ErrorAction SilentlyContinue
+    $py = Get-Command py.exe -ErrorAction SilentlyContinue
+    if (-not $py) {
+        $py = Get-Command py -ErrorAction SilentlyContinue
+    }
     if ($py) {
         return @{ Exe = $py.Source; Prefix = @("-3") }
     }
@@ -80,7 +86,10 @@ function Wait-Vite {
 
 Set-Location $Root
 $Python = Resolve-PythonCommand
-$npm = Get-Command npm -ErrorAction SilentlyContinue
+$npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $npm) {
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+}
 if (-not $npm) {
     throw "npm が見つかりません。Node.js をインストールして PATH に追加してください。"
 }
@@ -116,7 +125,12 @@ if ($Dev) {
     finally {
         Remove-Item Env:ADOPY_WEB_UI_URL -ErrorAction SilentlyContinue
         if ($vite -and -not $vite.HasExited) {
-            Stop-Process -Id $vite.Id -Force -ErrorAction SilentlyContinue
+            try {
+                & taskkill.exe /PID $vite.Id /T /F *> $null
+            }
+            catch {
+                Stop-Process -Id $vite.Id -Force -ErrorAction SilentlyContinue
+            }
         }
     }
     exit 0
