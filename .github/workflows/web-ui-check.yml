@@ -7,6 +7,7 @@ on:
     paths:
       - "frontend/**"
       - "web_ui.py"
+      - "web_audio_compat.py"
       - "web_backend*.py"
       - "run-webui.ps1"
       - "run-webui.cmd"
@@ -26,6 +27,7 @@ jobs:
         run: >-
           python -m compileall -q
           web_ui.py
+          web_audio_compat.py
           web_backend.py
           web_backend_adofai.py
           web_backend_editing.py
@@ -61,8 +63,22 @@ jobs:
           leaf = {name: type(name, (), {}) for name in leaf_names}
           CoreBridge = type("CoreBridge", tuple(leaf[name] for name in core_names), {})
           resolved = {**leaf, "CoreBridge": CoreBridge}
-          # Creating the class is enough to make Python validate C3 MRO consistency.
           type("WebBridge", tuple(resolved[name] for name in web_names), {})
+
+      - name: Install lightweight Web runtime dependencies
+        run: python -m pip install --disable-pip-version-check numpy mido pywebview
+
+      - name: Web UI bridge initialization
+        run: |
+          python - <<'PY'
+          from web_ui import Bridge
+
+          bridge = Bridge()
+          state = bridge.get_state()
+          assert bridge.ping()["ok"] is True
+          assert state["playback"]["duration"] > 0
+          assert state["settings"]["speed"] == 1.0
+          PY
 
       - name: Launcher is Windows PowerShell 5.1 safe
         shell: python
