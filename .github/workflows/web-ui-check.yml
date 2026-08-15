@@ -8,6 +8,12 @@ on:
       - "frontend/**"
       - "web_ui.py"
       - "web/**"
+      - "core/**"
+      - "exporters/**"
+      - "importers/**"
+      - "tools/**"
+      - "desktop/**"
+      - "*.py"
       - "run-webui.ps1"
       - "run-webui.cmd"
       - ".github/workflows/web-ui-check.yml"
@@ -23,7 +29,26 @@ jobs:
           python-version: "3.12"
 
       - name: Python syntax
-        run: python -m compileall -q web_ui.py web
+        run: >-
+          python -m compileall -q
+          web_ui.py
+          main.py
+          web
+          core
+          exporters
+          importers
+          tools
+          desktop
+          audio_analysis.py
+          audio_player.py
+          note_model.py
+          project_io.py
+          export_adofai.py
+          export_midi.py
+          midi_import.py
+          quick_hz_tools.py
+          adofai_angles.py
+          rabbit_zip_formula.py
 
       - name: Web UI bridge MRO
         shell: python
@@ -56,6 +81,43 @@ jobs:
 
       - name: Install lightweight Web runtime dependencies
         run: python -m pip install --disable-pip-version-check numpy mido pywebview
+
+      - name: Compatibility module aliases
+        run: |
+          python - <<'PY'
+          import adofai_angles
+          import audio_analysis
+          import audio_player
+          import export_adofai
+          import export_midi
+          import midi_import
+          import note_model
+          import project_io
+          import quick_hz_tools
+          import rabbit_zip_formula
+
+          from core import audio_analysis as core_audio_analysis
+          from core import audio_player as core_audio_player
+          from core import note_model as core_note_model
+          from core import project_io as core_project_io
+          from exporters import adofai as exporters_adofai
+          from exporters import adofai_angles as exporters_adofai_angles
+          from exporters import midi as exporters_midi
+          from exporters import rabbit_zip_formula as exporters_rabbit_zip_formula
+          from importers import midi as importers_midi
+          from tools import quick_hz as tools_quick_hz
+
+          assert audio_analysis is core_audio_analysis
+          assert audio_player is core_audio_player
+          assert note_model is core_note_model
+          assert project_io is core_project_io
+          assert export_adofai is exporters_adofai
+          assert export_midi is exporters_midi
+          assert adofai_angles is exporters_adofai_angles
+          assert rabbit_zip_formula is exporters_rabbit_zip_formula
+          assert midi_import is importers_midi
+          assert quick_hz_tools is tools_quick_hz
+          PY
 
       - name: Web UI bridge initialization
         run: |
