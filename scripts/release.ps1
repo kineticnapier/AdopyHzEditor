@@ -52,6 +52,13 @@ if ($status) {
     Fail "Working tree is not clean. Commit or stash changes before releasing."
 }
 
+Invoke-GitChecked @("fetch", "origin", "main")
+$localHead = (& git rev-parse HEAD).Trim()
+$remoteHead = (& git rev-parse origin/main).Trim()
+if ($localHead -ne $remoteHead) {
+    Fail "Local main is not exactly origin/main. Pull or resolve local commits before releasing."
+}
+
 & git rev-parse --verify --quiet "refs/tags/$Tag" *> $null
 if ($LASTEXITCODE -eq 0) {
     Fail "Tag already exists locally: $Tag"
@@ -84,7 +91,8 @@ if ($updatedMetadata -eq $originalMetadata -and $originalMetadata -notmatch "APP
 
 try {
     Write-Host "Preflight build for $Tag" -ForegroundColor Cyan
-    & (Join-Path $scriptDir "build_release.ps1") -Clean -Version $Version
+    $buildScript = Join-Path $scriptDir "build_release.ps1"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $buildScript -Clean -Version $Version
     if ($LASTEXITCODE -ne 0) {
         throw "Release build failed."
     }
