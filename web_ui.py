@@ -87,9 +87,8 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         super().__init__()
         self._status = "準備完了"
 
-    # IOMixin was written against these helper names before the Web backend
-    # consolidation. Keep them here until that mixin is rewritten directly
-    # against CoreBridge's current helpers.
+    # IOMixin still references helper names from before the backend merge.
+    # Keep the compatibility surface local to the Web entry point for now.
     def _dialog(self, mode, *, file_types, save_filename=None):
         paths = self._file_dialog(
             mode,
