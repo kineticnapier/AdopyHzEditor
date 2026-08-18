@@ -16,6 +16,7 @@ type Props = {
   onDelete(indices: number[]): Promise<void>;
   onSeek(time: number): Promise<void>;
   onView(changes: Partial<ViewState>): Promise<void>;
+  onCursorMove?(time: number, midi: number): void;
 };
 
 type DragMode = "create" | "curve" | "region" | "move" | "duplicate-move" | "resize-start" | "resize-end";
@@ -112,7 +113,7 @@ function resizeNote(note: NoteDto, edge: "start" | "end", delta: number, setting
 }
 
 export default function EditorCanvas(props: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null), containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null), containerRef = useRef<HTMLDivElement>(null), lastCursorReport = useRef(0);
   const [size, setSize] = useState({ width: 800, height: 500 });
   const [drag, setDrag] = useState<DragState | null>(null);
   const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
@@ -256,6 +257,8 @@ export default function EditorCanvas(props: Props) {
   function onPointerMove(event:ReactPointerEvent<HTMLCanvasElement>){
     const p=eventPosition(event);
     if(drag){setDrag({...drag,nowTime:p.time,nowMidi:p.midi});return;}
+    const now=performance.now();
+    if(props.onCursorMove&&now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove(p.time,p.midi);}
     const hit=hitNote(props.notes,p.time,p.midi,props.spectrum?.pitchStep??1);
     event.currentTarget.style.cursor=hit!==null&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":"crosshair";
   }
