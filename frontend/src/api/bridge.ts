@@ -20,7 +20,7 @@ export type AdoFAIExportOptions = {
   method: "rabbit_zip" | "angle_only" | "harmony"; baseBpm: number; angleOnlyBpm: number; harmonyMode: string; harmonyCustomSemitone: number;
   harmonyEpsilonMs: number; harmonyTuning: "equal temperament"; harmonyRootMode: string; harmonyTimingMode: "setspeed" | "angle-only" | "ratio-polyrhythm";
   harmonyVisualMode: string; harmonyVisualStep: number; harmonyPolyCycleAngle: number; harmonyPolyMaxDenominator: number; harmonyPolyRatioOctaveMode: "octave-folded" | "absolute";
-  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; maxTiles: number; maxTilesPerNote: number;
+  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; angleCompressionMode: "auto" | "fixed"; angleCompressionFixedAngle: number; maxTiles: number; maxTilesPerNote: number;
   trackVisual: "normal" | "faint" | "very faint" | "hidden"; visualPathMode: "raw" | "upward" | "upward avoid" | "twirl upward"; visualPathAngle: number;
   visualPositionMode: "off" | "note step"; visualPositionX: number; visualPositionY: number; finalAngleMode: "scaled" | "cardinal" | "horizontal" | "custom";
   finalCustomAngle: number; finalCardinalStep: number; useProjectSong: boolean; copyProjectSong: boolean; songOffsetAuto: boolean; songOffsetMs: number; selectedOnly: boolean;
