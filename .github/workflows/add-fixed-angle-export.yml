@@ -1,0 +1,95 @@
+name: Add fixed Angle Compression export
+
+on:
+  push:
+    branches: ["fix/windows-packaged-webview"]
+    paths:
+      - ".github/workflows/add-fixed-angle-export.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Add fixed Angle Compression mode
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # Backend options and fixed target application.
+          p = Path("web/adofai.py")
+          s = p.read_text(encoding="utf-8")
+          old = '''            "xMode": "floor",\n            "fixedX": 8.0,\n            "targetBpm": max(1000.0, bpm * 10.0),\n'''
+          new = '''            "xMode": "floor",\n            "fixedX": 8.0,\n            "targetBpm": max(1000.0, bpm * 10.0),\n            "angleCompressionMode": "auto",\n            "angleCompressionFixedAngle": 165.0,\n'''
+          if old not in s:
+              raise SystemExit("web/adofai.py defaults marker not found")
+          s = s.replace(old, new, 1)
+
+          marker = '''        song_offset_ms = auto_offset_ms if auto_song_offset else _as_float(raw.get("songOffsetMs"), auto_offset_ms, -3600000.0, 3600000.0)\n\n        opts = {\n'''
+          replacement = '''        song_offset_ms = auto_offset_ms if auto_song_offset else _as_float(raw.get("songOffsetMs"), auto_offset_ms, -3600000.0, 3600000.0)\n\n        method = _choice(raw.get("method"), {"rabbit_zip", "angle_only", "harmony"}, "rabbit_zip")\n        angle_compression_mode = _choice(raw.get("angleCompressionMode"), {"auto", "fixed"}, "auto")\n        angle_compression_fixed_angle = _as_float(raw.get("angleCompressionFixedAngle"), 165.0, 0.001, 359.999)\n        if method == "rabbit_zip" and angle_compression_mode == "fixed":\n            # Fixed Angle Compression is a global output constraint. It intentionally\n            # overrides per-note target_angle values for this export only.\n            for note in notes:\n                note.target_angle = angle_compression_fixed_angle\n\n        opts = {\n'''
+          if marker not in s:
+              raise SystemExit("web/adofai.py prepare marker not found")
+          s = s.replace(marker, replacement, 1)
+          s = s.replace('''            "method": _choice(raw.get("method"), {"rabbit_zip", "angle_only", "harmony"}, "rabbit_zip"),''', '''            "method": method,''', 1)
+          p.write_text(s, encoding="utf-8")
+
+          # TypeScript bridge contract.
+          p = Path("frontend/src/api/bridge.ts")
+          s = p.read_text(encoding="utf-8")
+          old = '''  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; maxTiles: number; maxTilesPerNote: number;\n'''
+          new = '''  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; angleCompressionMode: "auto" | "fixed"; angleCompressionFixedAngle: number; maxTiles: number; maxTilesPerNote: number;\n'''
+          if old not in s:
+              raise SystemExit("bridge.ts export options marker not found")
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding="utf-8")
+
+          # Export dialog UI.
+          p = Path("frontend/src/dialogs/AdoFAIExportDialogJa.tsx")
+          s = p.read_text(encoding="utf-8")
+          old = '''        {isZip&&<><Field label="Xの決め方"><Select value={options.xMode} options={[["floor","切り捨て"],["lowest_floor","最小切り捨て"],["round","四捨五入"],["ceil","切り上げ"],["fixed","固定"],["target_bpm","目標BPM"]]} onChange={v=>patch("xMode",v as AdoFAIExportOptions["xMode"])}/></Field>{options.xMode==="fixed"&&<Field label="固定X"><Num value={options.fixedX} min={.000001} max={100000} step={.1} onChange={v=>patch("fixedX",v)}/></Field>}{options.xMode==="target_bpm"&&<Field label="目標BPM"><Num value={options.targetBpm} min={1} max={999999} step={1} onChange={v=>patch("targetBpm",v)}/></Field>}</>}\n'''
+          new = '''        {isZip&&<><Field label="圧縮角度"><Select value={options.angleCompressionMode} options={[["auto","自動"],["fixed","固定角度"]]} onChange={v=>patch("angleCompressionMode",v as AdoFAIExportOptions["angleCompressionMode"])}/></Field>{options.angleCompressionMode==="fixed"&&<Field label="固定角度"><Num value={options.angleCompressionFixedAngle} min={.001} max={359.999} step={1} suffix="°" onChange={v=>patch("angleCompressionFixedAngle",v)}/></Field>}<Field label="Xの決め方"><Select value={options.xMode} options={[["floor","切り捨て"],["lowest_floor","最小切り捨て"],["round","四捨五入"],["ceil","切り上げ"],["fixed","固定"],["target_bpm","目標BPM"]]} onChange={v=>patch("xMode",v as AdoFAIExportOptions["xMode"])}/></Field>{options.xMode==="fixed"&&<Field label="固定X"><Num value={options.fixedX} min={.000001} max={100000} step={.1} onChange={v=>patch("fixedX",v)}/></Field>}{options.xMode==="target_bpm"&&<Field label="目標BPM"><Num value={options.targetBpm} min={1} max={999999} step={1} onChange={v=>patch("targetBpm",v)}/></Field>}</>}\n'''
+          if old not in s:
+              raise SystemExit("AdoFAIExportDialogJa.tsx Angle Compression marker not found")
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding="utf-8")
+
+          # Regression test: fixed mode overrides note target angle; auto preserves it.
+          p = Path("tests/test_web_ui_compat.py")
+          s = p.read_text(encoding="utf-8")
+          marker = '''    def test_spectrogram_render_contract(self):\n'''
+          test = '''    def test_fixed_angle_compression_overrides_note_target_angle(self):\n        bridge = Bridge()\n        from core.note_model import Note\n        bridge.notes = [Note(0.0, 1.0, 69.0, target_angle=90.0)]\n        notes, opts, _ = bridge._prepare_adofai_export(\n            {\n                "method": "rabbit_zip",\n                "angleCompressionMode": "fixed",\n                "angleCompressionFixedAngle": 165.0,\n                "baseBpm": 175.0,\n            },\n            None,\n        )\n        self.assertEqual(opts["method"], "rabbit_zip")\n        self.assertAlmostEqual(notes[0].target_angle, 165.0)\n\n    def test_spectrogram_render_contract(self):\n'''
+          if marker not in s:
+              raise SystemExit("tests marker not found")
+          s = s.replace(marker, test, 1)
+          p.write_text(s, encoding="utf-8")
+
+      - name: Check Python syntax and regression test
+        run: |
+          python -m py_compile web/adofai.py
+          python -m pip install --disable-pip-version-check numpy mido pywebview
+          python -m unittest tests.test_web_ui_compat
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Commit migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/adofai.py frontend/src/api/bridge.ts frontend/src/dialogs/AdoFAIExportDialogJa.tsx tests/test_web_ui_compat.py
+          git commit -m "Add fixed Angle Compression output angle"
+          git push origin HEAD:${{ github.ref_name }}
