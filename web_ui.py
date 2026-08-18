@@ -22,6 +22,58 @@ from web.audio import WebAudioPlayer, decode_audio_file as decode_audio_file_com
 web_backend_module.AudioPlayer = WebAudioPlayer
 web_backend_module.decode_audio_file = decode_audio_file_compat
 
+# The Web backend still uses the older analysis-facing contract in a few
+# places. Adapt it to core.audio_analysis without changing the shared API.
+_core_analyze_cqt = web_backend_module.analyze_cqt
+_core_enhance_spectrogram = web_backend_module.enhance_spectrogram
+
+
+def _analyze_cqt_compat(audio_path, *, profile="Normal", resolution="profile default", **kwargs):
+    options = web_backend_module.analysis_profile_options(str(profile))
+    resolution_bins = {
+        "100 cents": 12,
+        "50 cents": 24,
+        "25 cents": 48,
+        "12.5 cents": 96,
+        "41 EDO": 41,
+        "53 EDO": 53,
+    }.get(str(resolution))
+    if resolution_bins is not None:
+        options["cqt_bins_per_octave"] = resolution_bins
+        options["fold_to_semitone"] = False
+    options.update(kwargs)
+    return _core_analyze_cqt(audio_path, **options)
+
+
+def _enhance_spectrogram_compat(
+    data,
+    *,
+    contrast=0.72,
+    gamma=0.75,
+    enhance=True,
+    display_mode="smooth",
+    harmonics="off",
+    **kwargs,
+):
+    return _core_enhance_spectrogram(
+        data,
+        contrast=contrast,
+        gamma=gamma,
+        per_bin=bool(enhance),
+        display_mode=display_mode,
+        harmonic_mode=harmonics,
+        **kwargs,
+    )
+
+
+web_backend_module.analyze_cqt = _analyze_cqt_compat
+web_backend_module.enhance_spectrogram = _enhance_spectrogram_compat
+
+# Spectrogram used to expose its dB matrix as .data. Keep the Web backend's
+# existing read path working while core uses the clearer .db field.
+if not hasattr(web_backend_module.Spectrogram, "data"):
+    web_backend_module.Spectrogram.data = property(lambda self: self.db)
+
 from web.backend import Bridge as CoreBridge
 from web.adofai import AdoFAIMixin
 from web.presets import PresetMixin
@@ -34,6 +86,54 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
     def __init__(self) -> None:
         super().__init__()
         self._status = "準備完了"
+
+    # IOMixin was written against these helper names before the Web backend
+    # consolidation. Keep them here until that mixin is rewritten directly
+    # against CoreBridge's current helpers.
+    def _dialog(self, mode, *, file_types, save_filename=None):
+        paths = self._file_dialog(
+            mode,
+            file_types=file_types,
+            allow_multiple=False,
+            save_filename=save_filename,
+        )
+        return str(paths[0]) if paths else None
+
+    def _state_dict(self):
+        return self.get_state()
+
+    def _load_audio_path(self, path, *, analyze=True):
+        decoded = decode_audio_file_compat(path)
+        with self._lock:
+            self._set_audio_data(str(path), decoded)
+        if analyze:
+            self._analyze_current_audio()
+        return self.get_state()
+
+    def _normalize_setting(self, key, value):
+        if key in {"volume", "previewVolume", "metronomeVolume"}:
+            return max(0, min(100, int(round(float(value)))))
+        if key == "speed":
+            return max(0.1, min(4.0, float(value)))
+        if key in {"previewOctave", "exportOctave"}:
+            return max(-4, min(4, int(round(float(value)))))
+        if key == "exportSemitone":
+            return max(-12, min(12, int(round(float(value)))))
+        if key == "bpm":
+            return max(1.0, min(10000.0, float(value)))
+        if key == "offsetMs":
+            return max(-600000.0, min(600000.0, float(value)))
+        if key == "snapDiv":
+            return max(1, min(64, int(round(float(value)))))
+        if key == "contrast":
+            return max(0, min(300, int(round(float(value)))))
+        if key == "gamma":
+            return max(5, min(500, int(round(float(value)))))
+        if key == "targetAngle":
+            return max(0.001, min(359.999, float(value)))
+        if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
+            return bool(value)
+        return str(value)
 
     def open_audio(self):
         super().open_audio()
