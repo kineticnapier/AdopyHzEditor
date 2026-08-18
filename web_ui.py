@@ -83,6 +83,19 @@ def _ui_url() -> str:
     return "frontend/dist/index.html"
 
 
+def _packaged_gui() -> str | None:
+    """Avoid pythonnet/WinForms in the frozen Windows package.
+
+    pythonnet's .NET Framework loader has known failure modes after freezing
+    where Python.Runtime.dll is present but Loader.Initialize cannot be resolved.
+    The packaged Windows build therefore uses pywebview's Qt/PySide6 backend.
+    Source/dev runs keep pywebview's normal platform selection.
+    """
+    if sys.platform.startswith("win") and getattr(sys, "frozen", False):
+        return "qt"
+    return None
+
+
 def main() -> int:
     # The React/TypeScript shell is currently Japanese-only. Help text and other
     # Python-side translated strings should match it as well.
@@ -98,7 +111,10 @@ def main() -> int:
         background_color="#20242a",
     )
     bridge.attach_window(window)
-    webview.start(debug=os.environ.get("ADOPY_WEB_UI_DEBUG") == "1")
+    webview.start(
+        gui=_packaged_gui(),
+        debug=os.environ.get("ADOPY_WEB_UI_DEBUG") == "1",
+    )
     return 0
 
 
