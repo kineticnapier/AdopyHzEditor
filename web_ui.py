@@ -29,6 +29,10 @@ _core_enhance_spectrogram = web_backend_module.enhance_spectrogram
 
 
 def _analyze_cqt_compat(audio_path, *, profile="Normal", resolution="profile default", **kwargs):
+    # If callers already use the current core API, pass it through unchanged.
+    if "cqt_bins_per_octave" in kwargs or "fold_to_semitone" in kwargs:
+        return _core_analyze_cqt(audio_path, **kwargs)
+
     options = web_backend_module.analysis_profile_options(str(profile))
     resolution_bins = {
         "100 cents": 12,
@@ -50,18 +54,23 @@ def _enhance_spectrogram_compat(
     *,
     contrast=0.72,
     gamma=0.75,
-    enhance=True,
+    enhance=None,
     display_mode="smooth",
-    harmonics="off",
+    harmonics=None,
     **kwargs,
 ):
+    # New callers already provide per_bin/harmonic_mode. Translate only the
+    # legacy names so we do not pass duplicate keyword arguments to core.
+    if "per_bin" not in kwargs and enhance is not None:
+        kwargs["per_bin"] = bool(enhance)
+    if "harmonic_mode" not in kwargs and harmonics is not None:
+        kwargs["harmonic_mode"] = harmonics
+
     return _core_enhance_spectrogram(
         data,
         contrast=contrast,
         gamma=gamma,
-        per_bin=bool(enhance),
         display_mode=display_mode,
-        harmonic_mode=harmonics,
         **kwargs,
     )
 
