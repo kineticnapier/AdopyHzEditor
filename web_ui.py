@@ -161,6 +161,8 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         defaults = super().get_adofai_export_defaults(selected_indices)
         defaults["selectedOnly"] = False
         defaults["harmonyTuning"] = "equal temperament"
+        defaults["angleCompressionMode"] = "auto"
+        defaults["angleCompressionFixedAngle"] = 165.0
         return defaults
 
     def _prepare_adofai_export(self, raw_options, selected_indices):
@@ -168,7 +170,19 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         # as well so stale/front-end-crafted values cannot change the result.
         options = dict(raw_options or {})
         options["harmonyTuning"] = "equal temperament"
-        return super()._prepare_adofai_export(options, selected_indices)
+        notes, build_opts, workflow = super()._prepare_adofai_export(options, selected_indices)
+
+        mode = str(options.get("angleCompressionMode", "auto"))
+        if build_opts.get("method") == "rabbit_zip" and mode == "fixed":
+            try:
+                fixed_angle = float(options.get("angleCompressionFixedAngle", 165.0))
+            except (TypeError, ValueError):
+                fixed_angle = 165.0
+            fixed_angle = max(0.001, min(359.999, fixed_angle))
+            for note in notes:
+                note.target_angle = fixed_angle
+
+        return notes, build_opts, workflow
 
 
 # In a PyInstaller build, bundled data lives under sys._MEIPASS. In a source
