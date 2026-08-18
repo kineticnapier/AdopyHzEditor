@@ -1,0 +1,152 @@
+name: Fix Web backend API drift
+
+on:
+  push:
+    branches: ["fix/windows-packaged-webview"]
+    paths:
+      - ".github/workflows/fix-web-api-drift.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Fix Web/core API drift
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("web/backend.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_analysis = '''        profile = str(self.settings["analysisProfile"])
+        resolution = str(self.settings["cqtResolution"])
+        try:
+            spec = analyze_cqt(
+                self.audio_path,
+                profile=profile,
+                resolution=resolution,
+            )
+'''
+          new_analysis = '''        profile = str(self.settings["analysisProfile"])
+        resolution = str(self.settings["cqtResolution"])
+        options = analysis_profile_options(profile)
+        resolution_bins = {
+            "100 cents": 12,
+            "50 cents": 24,
+            "25 cents": 48,
+            "12.5 cents": 96,
+            "41 EDO": 41,
+            "53 EDO": 53,
+        }.get(resolution)
+        if resolution_bins is not None:
+            options["cqt_bins_per_octave"] = resolution_bins
+            options["fold_to_semitone"] = False
+        try:
+            spec = analyze_cqt(self.audio_path, **options)
+'''
+          if old_analysis not in text:
+              raise SystemExit("Expected stale analyze_cqt call was not found")
+          text = text.replace(old_analysis, new_analysis, 1)
+
+          if "np.asarray(spec.data, dtype=np.float32)" not in text:
+              raise SystemExit("Expected stale Spectrogram.data access was not found")
+          text = text.replace(
+              "np.asarray(spec.data, dtype=np.float32)",
+              "np.asarray(spec.db, dtype=np.float32)",
+              1,
+          )
+
+          old_enhance = '''            enhanced = enhance_spectrogram(
+                data,
+                contrast=float(self.settings["contrast"]) / 100.0,
+                gamma=float(self.settings["gamma"]) / 100.0,
+                enhance=bool(self.settings["enhance"]),
+                display_mode=str(self.settings["displayMode"]),
+                harmonics=str(self.settings["harmonics"]),
+            )
+'''
+          new_enhance = '''            enhanced = enhance_spectrogram(
+                data,
+                contrast=float(self.settings["contrast"]) / 100.0,
+                gamma=float(self.settings["gamma"]) / 100.0,
+                per_bin=bool(self.settings["enhance"]),
+                display_mode=str(self.settings["displayMode"]),
+                harmonic_mode=str(self.settings["harmonics"]),
+            )
+'''
+          if old_enhance not in text:
+              raise SystemExit("Expected stale enhance_spectrogram call was not found")
+          text = text.replace(old_enhance, new_enhance, 1)
+
+          marker = '''    def attach_window(self, window) -> None:
+        self._window = window
+'''
+          helpers = '''    def attach_window(self, window) -> None:
+        self._window = window
+
+    def _dialog(self, mode, *, file_types, save_filename: str | None = None):
+        """Compatibility helper used by Web I/O mixins; returns one selected path."""
+        paths = self._file_dialog(
+            mode,
+            file_types=file_types,
+            allow_multiple=False,
+            save_filename=save_filename,
+        )
+        return str(paths[0]) if paths else None
+
+    def _state_dict(self) -> dict[str, Any]:
+        return self.get_state()
+
+    def _load_audio_path(self, path: str, *, analyze: bool = True) -> dict[str, Any]:
+        decoded = decode_audio_file(path)
+        with self._lock:
+            self._set_audio_data(path, decoded)
+        if analyze:
+            self._analyze_current_audio()
+        return self.get_state()
+
+    def _normalize_setting(self, key: str, value: Any) -> Any:
+        if key in {"volume", "previewVolume", "metronomeVolume"}:
+            return _int_clamp(value, 0, 100)
+        if key == "speed":
+            return _clamp(value, 0.1, 4.0)
+        if key in {"previewOctave", "exportOctave"}:
+            return _int_clamp(value, -4, 4)
+        if key == "exportSemitone":
+            return _int_clamp(value, -12, 12)
+        if key == "bpm":
+            return _clamp(value, 1.0, 10000.0)
+        if key == "offsetMs":
+            return _clamp(value, -600000.0, 600000.0)
+        if key == "snapDiv":
+            return _int_clamp(value, 1, 64)
+        if key == "contrast":
+            return _int_clamp(value, 0, 300)
+        if key == "gamma":
+            return _int_clamp(value, 5, 500)
+        if key == "targetAngle":
+            return _clamp(value, 0.001, 359.999)
+        if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
+            return bool(value)
+        return str(value)
+'''
+          if marker not in text:
+              raise SystemExit("attach_window marker was not found")
+          text = text.replace(marker, helpers, 1)
+          path.write_text(text, encoding="utf-8")
+
+      - name: Commit migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/backend.py
+          git commit -m "Fix Web backend core API drift"
+          git push origin HEAD:${{ github.ref_name }}
