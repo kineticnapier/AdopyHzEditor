@@ -5,6 +5,7 @@ from unittest import mock
 
 import numpy as np
 
+import web.backend as web_backend
 from core.audio_analysis import Spectrogram
 from web_ui import Bridge
 
@@ -47,8 +48,7 @@ class WebUiCompatibilityTests(unittest.TestCase):
         bridge.settings["analysisProfile"] = "Normal"
         bridge.settings["cqtResolution"] = "50 cents"
 
-        import web_ui
-        with mock.patch.object(web_ui, "_core_analyze_cqt", side_effect=fake_analyze):
+        with mock.patch.object(web_backend, "analyze_cqt", side_effect=fake_analyze):
             bridge._analyze_current_audio()
 
         self.assertEqual(captured["cqt_bins_per_octave"], 24)
@@ -70,6 +70,31 @@ class WebUiCompatibilityTests(unittest.TestCase):
         self.assertTrue(result["available"])
         self.assertEqual(result["rows"], 2)
         self.assertEqual(result["cols"], 3)
+
+    def test_cursor_peak_uses_strongest_nearby_bin(self):
+        db = np.full((9, 3), -80.0, dtype=np.float32)
+        db[5, 1] = -12.5
+        bridge = Bridge()
+        bridge.spectrogram = Spectrogram(
+            audio_path="fake.wav",
+            db=db,
+            duration=1.0,
+            midi_min=60,
+            midi_max=64,
+            frame_times=np.array([0.0, 0.5, 1.0], dtype=np.float32),
+            sr=22050,
+            bins_per_semitone=2,
+            folded_to_semitone=False,
+            bins_per_octave=24,
+            pitch_step=0.5,
+        )
+
+        result = bridge.get_cursor_peak(0.5, 62.0, 2.0)
+        self.assertTrue(result["available"])
+        self.assertAlmostEqual(result["peakMidi"], 62.5)
+        self.assertAlmostEqual(result["peakDb"], -12.5)
+        self.assertEqual(result["peakName"], "D#4")
+        self.assertAlmostEqual(result["peakCents"], -50.0)
 
 
 if __name__ == "__main__":
