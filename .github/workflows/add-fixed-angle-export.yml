@@ -60,7 +60,7 @@ jobs:
           s = s.replace(old, new, 1)
           p.write_text(s, encoding="utf-8")
 
-          # Regression test: fixed mode overrides note target angle; auto preserves it.
+          # Regression test: fixed mode overrides note target angle.
           p = Path("tests/test_web_ui_compat.py")
           s = p.read_text(encoding="utf-8")
           marker = '''    def test_spectrogram_render_contract(self):\n'''
@@ -93,3 +93,5 @@ jobs:
           git add web/adofai.py frontend/src/api/bridge.ts frontend/src/dialogs/AdoFAIExportDialogJa.tsx tests/test_web_ui_compat.py
           git commit -m "Add fixed Angle Compression output angle"
           git push origin HEAD:${{ github.ref_name }}
+
+# retrigger: apply implementation now
