@@ -6,7 +6,9 @@ from unittest import mock
 import numpy as np
 
 import web.backend as web_backend
+import web.io as web_io
 from core.audio_analysis import Spectrogram
+from core.note_model import Note
 from web_ui import Bridge
 
 
@@ -23,6 +25,24 @@ class WebUiCompatibilityTests(unittest.TestCase):
         self.assertEqual(path, "example.adopyhz")
         self.assertEqual(bridge._state_dict()["settings"]["speed"], 1.0)
         self.assertEqual(bridge._normalize_setting("volume", 150), 100)
+
+    def test_project_load_with_audio_syncs_preview_notes(self):
+        bridge = Bridge()
+        note = Note(0.25, 1.0, 69.0).normalized()
+
+        with (
+            mock.patch.object(bridge, "_dialog", return_value="project.adopyhz"),
+            mock.patch.object(bridge, "_load_audio_path"),
+            mock.patch.object(web_io, "load_project", return_value=("song.wav", [note], {})),
+            mock.patch.object(web_io.Path, "exists", return_value=True),
+        ):
+            bridge.load_project_dialog()
+
+        self.assertEqual(len(bridge.player.preview_notes), 1)
+        start, end, midi = bridge.player.preview_notes[0]
+        self.assertEqual(start, int(0.25 * bridge.player.sr))
+        self.assertEqual(end, int(1.0 * bridge.player.sr))
+        self.assertAlmostEqual(midi, 69.0)
 
     def test_analysis_adapter_maps_profile_and_resolution(self):
         captured = {}
