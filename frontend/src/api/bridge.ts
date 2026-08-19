@@ -11,6 +11,7 @@ export type NoteDto = { start: number; end: number; midi: number; velocity?: num
 export type AnalysisState = { available: boolean; duration: number; midiMin: number; midiMax: number; pitchStep: number };
 export type AppState = { settings: EditorSettings; view: ViewState; playback: PlaybackState; audio: { path: string | null; name: string | null; loaded: boolean }; projectPath: string | null; notes: NoteDto[]; analysis: AnalysisState; busy: boolean; status: string; dirty: boolean };
 export type SpectrogramPayload = { available: boolean; rows?: number; cols?: number; data?: string; duration?: number; midiMin?: number; midiMax?: number; pitchStep?: number };
+export type CursorPeakPayload = { available: boolean; time?: number; cursorMidi?: number; cursorHz?: number; cursorName?: string; cursorCents?: number; peakMidi?: number; peakHz?: number; peakName?: string; peakCents?: number; peakDb?: number };
 export type NoteMutationResult = { notes: NoteDto[]; status: string; index?: number; indices?: number[] };
 export type NotePreset = { name: string; note: NoteDto; duration: number; kind: "note" | "curve" };
 export type NotePresetResult = { presets: NotePreset[]; status: string };
@@ -19,7 +20,7 @@ export type AdoFAIExportOptions = {
   method: "rabbit_zip" | "angle_only" | "harmony"; baseBpm: number; angleOnlyBpm: number; harmonyMode: string; harmonyCustomSemitone: number;
   harmonyEpsilonMs: number; harmonyTuning: "equal temperament"; harmonyRootMode: string; harmonyTimingMode: "setspeed" | "angle-only" | "ratio-polyrhythm";
   harmonyVisualMode: string; harmonyVisualStep: number; harmonyPolyCycleAngle: number; harmonyPolyMaxDenominator: number; harmonyPolyRatioOctaveMode: "octave-folded" | "absolute";
-  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; maxTiles: number; maxTilesPerNote: number;
+  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; angleCompressionMode: "auto" | "fixed"; angleCompressionFixedAngle: number; maxTiles: number; maxTilesPerNote: number;
   trackVisual: "normal" | "faint" | "very faint" | "hidden"; visualPathMode: "raw" | "upward" | "upward avoid" | "twirl upward"; visualPathAngle: number;
   visualPositionMode: "off" | "note step"; visualPositionX: number; visualPositionY: number; finalAngleMode: "scaled" | "cardinal" | "horizontal" | "custom";
   finalCustomAngle: number; finalCardinalStep: number; useProjectSong: boolean; copyProjectSong: boolean; songOffsetAuto: boolean; songOffsetMs: number; selectedOnly: boolean;
@@ -32,7 +33,7 @@ export type BackendApi = {
   ping(): Promise<{ ok: boolean; app: string; ui: string; capabilities: string[] }>;
   get_state(): Promise<AppState>; get_settings(): Promise<EditorSettings>; update_settings(changes: Partial<EditorSettings>): Promise<EditorSettings>;
   set_view(changes: Partial<ViewState>): Promise<ViewState>; fit_view(): Promise<ViewState>;
-  open_audio(): Promise<AppState>; reanalyze_audio(): Promise<AppState>; get_spectrogram(maxColumns?: number): Promise<SpectrogramPayload>;
+  open_audio(): Promise<AppState>; reanalyze_audio(): Promise<AppState>; get_spectrogram(maxColumns?: number): Promise<SpectrogramPayload>; get_cursor_peak(seconds: number, midi: number, searchRange?: number): Promise<CursorPeakPayload>;
   get_playback_state(): Promise<PlaybackState>; toggle_playback(): Promise<PlaybackState>; stop_playback(): Promise<PlaybackState>; seek_to(seconds: number): Promise<PlaybackState>; seek_relative(seconds: number): Promise<PlaybackState>;
   add_note(start: number, end: number, midi: number, kind?: string, endMidi?: number | null): Promise<NoteMutationResult>;
   delete_notes(indices: number[]): Promise<NoteMutationResult>; move_notes(indices: number[], dx: number, dy: number): Promise<NoteMutationResult>;

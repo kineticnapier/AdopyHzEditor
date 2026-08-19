@@ -114,7 +114,7 @@ function Ensure-PythonDependencies([string]$Python, [string]$Uv, [string]$Root) 
 
     if ($SkipInstall) {
         Write-Step "Skipping Python dependency installation"
-        & $Python -c "import webview, PyInstaller" 2>$null
+        & $Python -c "import webview, PyInstaller, PySide6.QtWebEngineWidgets" 2>$null
         if ($LASTEXITCODE -ne 0) {
             Fail "Required Python build packages are missing. Re-run without -SkipInstall."
         }
@@ -259,13 +259,21 @@ $pyiArgs = @(
     "--noconfirm",
     "--add-data", $addFrontend,
     "--add-data", $addLocales,
-    "--collect-all", "webview",
+    "--hidden-import", "webview.platforms.qt",
+    "--hidden-import", "PySide6.QtCore",
+    "--hidden-import", "PySide6.QtGui",
+    "--hidden-import", "PySide6.QtWidgets",
+    "--hidden-import", "PySide6.QtWebChannel",
+    "--hidden-import", "PySide6.QtWebEngineCore",
+    "--hidden-import", "PySide6.QtWebEngineWidgets",
     "--collect-all", "librosa",
     "--collect-all", "soundfile",
     "--collect-all", "sounddevice",
     "--collect-all", "audioread",
     "--collect-all", "mido",
-    "--exclude-module", "PySide6",
+    "--exclude-module", "clr",
+    "--exclude-module", "pythonnet",
+    "--exclude-module", "clr_loader",
     "--exclude-module", "PyQt5",
     "--exclude-module", "PyQt6",
     "--exclude-module", "pyqtgraph"
@@ -288,7 +296,13 @@ $bundledIndexes = @(
 if (-not ($bundledIndexes | Where-Object { Test-Path $_ } | Select-Object -First 1)) {
     Fail "Build finished but the bundled React UI was not found."
 }
-Write-Ok "Current Web UI exe built: $Exe"
+
+$pythonnetRuntime = Join-Path $DistApp "_internal\pythonnet\runtime\Python.Runtime.dll"
+if (Test-Path $pythonnetRuntime) {
+    Fail "Packaged build unexpectedly contains pythonnet runtime DLL: $pythonnetRuntime"
+}
+
+Write-Ok "Current Web UI exe built with Qt/PySide6 backend: $Exe"
 
 if (-not $NoZip) {
     Write-Step "Creating release zip"

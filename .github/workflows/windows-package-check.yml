@@ -72,3 +72,18 @@ jobs:
           if (-not ($indexes | Where-Object { Test-Path $_ } | Select-Object -First 1)) {
             throw "Packaged React UI is missing."
           }
+          if (Test-Path "dist\AdopyHzEditor\_internal\pythonnet\runtime\Python.Runtime.dll") {
+            throw "Packaged executable still contains the pythonnet runtime DLL."
+          }
+
+      - name: Smoke-test packaged executable
+        shell: powershell
+        run: |
+          $exe = (Resolve-Path "dist\AdopyHzEditor\AdopyHzEditor.exe").Path
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $process.Refresh()
+          if ($process.HasExited) {
+            throw "Packaged Web UI exited during startup with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force

@@ -22,6 +22,67 @@ from web.audio import WebAudioPlayer, decode_audio_file as decode_audio_file_com
 web_backend_module.AudioPlayer = WebAudioPlayer
 web_backend_module.decode_audio_file = decode_audio_file_compat
 
+# The Web backend still uses the older analysis-facing contract in a few
+# places. Adapt it to core.audio_analysis without changing the shared API.
+_core_analyze_cqt = web_backend_module.analyze_cqt
+_core_enhance_spectrogram = web_backend_module.enhance_spectrogram
+
+
+def _analyze_cqt_compat(audio_path, *, profile="Normal", resolution="profile default", **kwargs):
+    # If callers already use the current core API, pass it through unchanged.
+    if "cqt_bins_per_octave" in kwargs or "fold_to_semitone" in kwargs:
+        return _core_analyze_cqt(audio_path, **kwargs)
+
+    options = web_backend_module.analysis_profile_options(str(profile))
+    resolution_bins = {
+        "100 cents": 12,
+        "50 cents": 24,
+        "25 cents": 48,
+        "12.5 cents": 96,
+        "41 EDO": 41,
+        "53 EDO": 53,
+    }.get(str(resolution))
+    if resolution_bins is not None:
+        options["cqt_bins_per_octave"] = resolution_bins
+        options["fold_to_semitone"] = False
+    options.update(kwargs)
+    return _core_analyze_cqt(audio_path, **options)
+
+
+def _enhance_spectrogram_compat(
+    data,
+    *,
+    contrast=0.72,
+    gamma=0.75,
+    enhance=None,
+    display_mode="smooth",
+    harmonics=None,
+    **kwargs,
+):
+    # New callers already provide per_bin/harmonic_mode. Translate only the
+    # legacy names so we do not pass duplicate keyword arguments to core.
+    if "per_bin" not in kwargs and enhance is not None:
+        kwargs["per_bin"] = bool(enhance)
+    if "harmonic_mode" not in kwargs and harmonics is not None:
+        kwargs["harmonic_mode"] = harmonics
+
+    return _core_enhance_spectrogram(
+        data,
+        contrast=contrast,
+        gamma=gamma,
+        display_mode=display_mode,
+        **kwargs,
+    )
+
+
+web_backend_module.analyze_cqt = _analyze_cqt_compat
+web_backend_module.enhance_spectrogram = _enhance_spectrogram_compat
+
+# Spectrogram used to expose its dB matrix as .data. Keep the Web backend's
+# existing read path working while core uses the clearer .db field.
+if not hasattr(web_backend_module.Spectrogram, "data"):
+    web_backend_module.Spectrogram.data = property(lambda self: self.db)
+
 from web.backend import Bridge as CoreBridge
 from web.adofai import AdoFAIMixin
 from web.presets import PresetMixin
@@ -34,6 +95,53 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
     def __init__(self) -> None:
         super().__init__()
         self._status = "準備完了"
+
+    # IOMixin still references helper names from before the backend merge.
+    # Keep the compatibility surface local to the Web entry point for now.
+    def _dialog(self, mode, *, file_types, save_filename=None):
+        paths = self._file_dialog(
+            mode,
+            file_types=file_types,
+            allow_multiple=False,
+            save_filename=save_filename,
+        )
+        return str(paths[0]) if paths else None
+
+    def _state_dict(self):
+        return self.get_state()
+
+    def _load_audio_path(self, path, *, analyze=True):
+        decoded = decode_audio_file_compat(path)
+        with self._lock:
+            self._set_audio_data(str(path), decoded)
+        if analyze:
+            self._analyze_current_audio()
+        return self.get_state()
+
+    def _normalize_setting(self, key, value):
+        if key in {"volume", "previewVolume", "metronomeVolume"}:
+            return max(0, min(100, int(round(float(value)))))
+        if key == "speed":
+            return max(0.1, min(4.0, float(value)))
+        if key in {"previewOctave", "exportOctave"}:
+            return max(-4, min(4, int(round(float(value)))))
+        if key == "exportSemitone":
+            return max(-12, min(12, int(round(float(value)))))
+        if key == "bpm":
+            return max(1.0, min(10000.0, float(value)))
+        if key == "offsetMs":
+            return max(-600000.0, min(600000.0, float(value)))
+        if key == "snapDiv":
+            return max(1, min(64, int(round(float(value)))))
+        if key == "contrast":
+            return max(0, min(300, int(round(float(value)))))
+        if key == "gamma":
+            return max(5, min(500, int(round(float(value)))))
+        if key == "targetAngle":
+            return max(0.001, min(359.999, float(value)))
+        if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
+            return bool(value)
+        return str(value)
 
     def open_audio(self):
         super().open_audio()
@@ -53,6 +161,8 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         defaults = super().get_adofai_export_defaults(selected_indices)
         defaults["selectedOnly"] = False
         defaults["harmonyTuning"] = "equal temperament"
+        defaults["angleCompressionMode"] = "auto"
+        defaults["angleCompressionFixedAngle"] = 165.0
         return defaults
 
     def _prepare_adofai_export(self, raw_options, selected_indices):
@@ -60,7 +170,19 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         # as well so stale/front-end-crafted values cannot change the result.
         options = dict(raw_options or {})
         options["harmonyTuning"] = "equal temperament"
-        return super()._prepare_adofai_export(options, selected_indices)
+        notes, build_opts, workflow = super()._prepare_adofai_export(options, selected_indices)
+
+        mode = str(options.get("angleCompressionMode", "auto"))
+        if build_opts.get("method") == "rabbit_zip" and mode == "fixed":
+            try:
+                fixed_angle = float(options.get("angleCompressionFixedAngle", 165.0))
+            except (TypeError, ValueError):
+                fixed_angle = 165.0
+            fixed_angle = max(0.001, min(359.999, fixed_angle))
+            for note in notes:
+                note.target_angle = fixed_angle
+
+        return notes, build_opts, workflow
 
 
 # In a PyInstaller build, bundled data lives under sys._MEIPASS. In a source
@@ -83,6 +205,19 @@ def _ui_url() -> str:
     return "frontend/dist/index.html"
 
 
+def _packaged_gui() -> str | None:
+    """Avoid pythonnet/WinForms in the frozen Windows package.
+
+    pythonnet's .NET Framework loader has known failure modes after freezing
+    where Python.Runtime.dll is present but Loader.Initialize cannot be resolved.
+    The packaged Windows build therefore uses pywebview's Qt/PySide6 backend.
+    Source/dev runs keep pywebview's normal platform selection.
+    """
+    if sys.platform.startswith("win") and getattr(sys, "frozen", False):
+        return "qt"
+    return None
+
+
 def main() -> int:
     # The React/TypeScript shell is currently Japanese-only. Help text and other
     # Python-side translated strings should match it as well.
@@ -98,7 +233,10 @@ def main() -> int:
         background_color="#20242a",
     )
     bridge.attach_window(window)
-    webview.start(debug=os.environ.get("ADOPY_WEB_UI_DEBUG") == "1")
+    webview.start(
+        gui=_packaged_gui(),
+        debug=os.environ.get("ADOPY_WEB_UI_DEBUG") == "1",
+    )
     return 0
 
 

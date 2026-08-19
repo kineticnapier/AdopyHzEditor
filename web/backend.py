@@ -15,7 +15,7 @@ from core.audio_analysis import (
     enhance_spectrogram,
 )
 from core.audio_player import AudioPlayer, decode_audio_file
-from core.note_model import Note
+from core.note_model import Note, midi_to_hz, note_name
 from web.editing import EditingMixin
 from web.io import IOMixin
 from web.notes import NoteMixin
@@ -111,6 +111,51 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
     def attach_window(self, window) -> None:
         self._window = window
 
+    def _dialog(self, mode, *, file_types, save_filename: str | None = None):
+        paths = self._file_dialog(
+            mode,
+            file_types=file_types,
+            allow_multiple=False,
+            save_filename=save_filename,
+        )
+        return str(paths[0]) if paths else None
+
+    def _state_dict(self) -> dict[str, Any]:
+        return self.get_state()
+
+    def _load_audio_path(self, path: str, *, analyze: bool = True) -> dict[str, Any]:
+        decoded = decode_audio_file(path)
+        with self._lock:
+            self._set_audio_data(path, decoded)
+        if analyze:
+            self._analyze_current_audio()
+        return self.get_state()
+
+    def _normalize_setting(self, key: str, value: Any) -> Any:
+        if key in {"volume", "previewVolume", "metronomeVolume"}:
+            return _int_clamp(value, 0, 100)
+        if key == "speed":
+            return _clamp(value, 0.1, 4.0)
+        if key in {"previewOctave", "exportOctave"}:
+            return _int_clamp(value, -4, 4)
+        if key == "exportSemitone":
+            return _int_clamp(value, -12, 12)
+        if key == "bpm":
+            return _clamp(value, 1.0, 10000.0)
+        if key == "offsetMs":
+            return _clamp(value, -600000.0, 600000.0)
+        if key == "snapDiv":
+            return _int_clamp(value, 1, 64)
+        if key == "contrast":
+            return _int_clamp(value, 0, 300)
+        if key == "gamma":
+            return _int_clamp(value, 5, 500)
+        if key == "targetAngle":
+            return _clamp(value, 0.001, 359.999)
+        if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
+            return bool(value)
+        return str(value)
+
     # ------------------------------------------------------------------
     # State / serialization
     # ------------------------------------------------------------------
@@ -127,6 +172,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "project",
                 "midi",
                 "adofai",
+                "cursor-peak",
             ],
         }
 
@@ -181,30 +227,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             for key, value in changes.items():
                 if key not in self.settings:
                     continue
-                if key in {"volume", "previewVolume", "metronomeVolume"}:
-                    self.settings[key] = _int_clamp(value, 0, 100)
-                elif key == "speed":
-                    self.settings[key] = _clamp(value, 0.1, 4.0)
-                elif key in {"previewOctave", "exportOctave"}:
-                    self.settings[key] = _int_clamp(value, -4, 4)
-                elif key == "exportSemitone":
-                    self.settings[key] = _int_clamp(value, -12, 12)
-                elif key == "bpm":
-                    self.settings[key] = _clamp(value, 1.0, 10000.0)
-                elif key == "offsetMs":
-                    self.settings[key] = _clamp(value, -600000.0, 600000.0)
-                elif key == "snapDiv":
-                    self.settings[key] = _int_clamp(value, 1, 64)
-                elif key == "contrast":
-                    self.settings[key] = _int_clamp(value, 0, 300)
-                elif key == "gamma":
-                    self.settings[key] = _int_clamp(value, 5, 500)
-                elif key == "targetAngle":
-                    self.settings[key] = _clamp(value, 0.001, 359.999)
-                elif key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
-                    self.settings[key] = bool(value)
-                else:
-                    self.settings[key] = str(value)
+                self.settings[key] = self._normalize_setting(key, value)
             self._apply_player_settings()
             self._dirty = True
             return dict(self.settings)
@@ -291,18 +314,28 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         finally:
             self._busy = False
 
+    def _analysis_options(self) -> dict[str, Any]:
+        options = analysis_profile_options(str(self.settings["analysisProfile"]))
+        resolution = str(self.settings["cqtResolution"])
+        bins_per_octave = {
+            "100 cents": 12,
+            "50 cents": 24,
+            "25 cents": 48,
+            "12.5 cents": 96,
+            "41 EDO": 41,
+            "53 EDO": 53,
+        }.get(resolution)
+        if bins_per_octave is not None:
+            options["cqt_bins_per_octave"] = bins_per_octave
+            options["fold_to_semitone"] = False
+        return options
+
     def _analyze_current_audio(self) -> None:
         if not self.audio_path:
             return
         self._busy = True
-        profile = str(self.settings["analysisProfile"])
-        resolution = str(self.settings["cqtResolution"])
         try:
-            spec = analyze_cqt(
-                self.audio_path,
-                profile=profile,
-                resolution=resolution,
-            )
+            spec = analyze_cqt(self.audio_path, **self._analysis_options())
             with self._lock:
                 self.spectrogram = spec
                 self.duration = max(0.001, float(spec.duration))
@@ -322,12 +355,56 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self._analyze_current_audio()
         return self.get_state()
 
+    def get_cursor_peak(self, seconds: float, midi: float, search_range: float = 5.0) -> dict[str, Any]:
+        """Return the strongest CQT bin near the cursor, matching the legacy editor helper."""
+        with self._lock:
+            spec = self.spectrogram
+            if spec is None or spec.db.size == 0 or len(spec.frame_times) == 0:
+                return {"available": False}
+
+            t = _clamp(seconds, 0.0, float(spec.duration))
+            cursor_midi = _clamp(midi, float(spec.midi_min), float(spec.midi_max))
+            idx = int(np.searchsorted(spec.frame_times, t, side="left"))
+            idx = max(0, min(idx, spec.db.shape[1] - 1))
+
+            pitch_step = max(1e-9, float(getattr(spec, "pitch_step", 1.0) or 1.0))
+            center_row = int(round((cursor_midi - float(spec.midi_min)) / pitch_step))
+            radius_rows = max(1, int(math.ceil(max(0.0, float(search_range)) / pitch_step)))
+            lo = max(0, center_row - radius_rows)
+            hi = min(spec.db.shape[0] - 1, center_row + radius_rows)
+            rows = np.arange(lo, hi + 1, dtype=np.int32)
+            if rows.size == 0:
+                return {"available": False}
+
+            values = spec.db[rows, idx]
+            local_index = int(np.argmax(values))
+            best_row = int(rows[local_index])
+            peak_midi = float(spec.midi_min) + best_row * pitch_step
+            peak_db = float(values[local_index])
+            nearest = int(round(peak_midi))
+            cents = (peak_midi - nearest) * 100.0
+            cursor_nearest = int(round(cursor_midi))
+
+            return {
+                "available": True,
+                "time": t,
+                "cursorMidi": cursor_midi,
+                "cursorHz": midi_to_hz(cursor_midi),
+                "cursorName": note_name(cursor_nearest),
+                "cursorCents": (cursor_midi - cursor_nearest) * 100.0,
+                "peakMidi": peak_midi,
+                "peakHz": midi_to_hz(peak_midi),
+                "peakName": note_name(nearest),
+                "peakCents": cents,
+                "peakDb": peak_db,
+            }
+
     def get_spectrogram(self, max_columns: int = 1600) -> dict[str, Any]:
         with self._lock:
             spec = self.spectrogram
             if spec is None:
                 return {"available": False}
-            data = np.asarray(spec.data, dtype=np.float32)
+            data = np.asarray(spec.db, dtype=np.float32)
             rows, cols = data.shape
             max_columns = max(64, min(4096, int(max_columns)))
             if cols > max_columns:
@@ -345,9 +422,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 data,
                 contrast=float(self.settings["contrast"]) / 100.0,
                 gamma=float(self.settings["gamma"]) / 100.0,
-                enhance=bool(self.settings["enhance"]),
+                per_bin=bool(self.settings["enhance"]),
                 display_mode=str(self.settings["displayMode"]),
-                harmonics=str(self.settings["harmonics"]),
+                harmonic_mode=str(self.settings["harmonics"]),
             )
             lo = float(np.min(enhanced)) if enhanced.size else 0.0
             hi = float(np.max(enhanced)) if enhanced.size else 1.0
