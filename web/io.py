@@ -60,7 +60,10 @@ class IOMixin:
             try:self._load_audio_path(audio_path,analyze=True)
             finally:
                 with self._lock:self._busy=False
-            with self._lock:self._status=f"{Path(path).name} と音声を読み込みました"
+            with self._lock:
+                # Audio loading resets the player's sample-rate-dependent state.
+                # Rebuild preview notes afterwards so project notes sound immediately.
+                self._sync_notes_to_player();self._status=f"{Path(path).name} と音声を読み込みました"
         else:
             with self._lock:
                 self.audio_path=None;self.spectrogram=None;self.duration=max(60.0,max((n.end for n in self.notes),default=0.0));self.midi_min=12;self.midi_max=120;self.pitch_step=1.0;self.player.clear_audio();self._sync_notes_to_player();self._status=f"{Path(path).name} のノートを読み込みました"
