@@ -44,6 +44,27 @@ class WebUiCompatibilityTests(unittest.TestCase):
         self.assertEqual(end, int(1.0 * bridge.player.sr))
         self.assertAlmostEqual(midi, 69.0)
 
+    def test_fixed_angle_compression_overrides_fractional_and_target_bpm_modes(self):
+        bridge = Bridge()
+        bridge.notes = [Note(0.0, 0.73, 69.0, target_angle=90.0).normalized()]
+
+        notes, opts, _workflow = bridge._prepare_adofai_export(
+            {
+                "method": "rabbit_zip",
+                "angleCompressionMode": "fixed",
+                "angleCompressionFixedAngle": 165.0,
+                "xMode": "target_bpm",
+                "targetBpm": 2400.0,
+                "finalAngleMode": "scaled",
+            },
+            None,
+        )
+
+        self.assertAlmostEqual(notes[0].target_angle, 165.0)
+        self.assertEqual(opts["rabbit_x_mode"], "floor")
+        self.assertEqual(opts["final_angle_mode"], "custom")
+        self.assertAlmostEqual(opts["final_custom_angle"], 165.0)
+
     def test_analysis_adapter_maps_profile_and_resolution(self):
         captured = {}
 
