@@ -18,10 +18,22 @@ type Props = {
   onStatus(text:string):void;
 };
 
+type CurveShapeState={mode:string;p1:number;p2:number};
+function parseCurveShape(value:string):CurveShapeState{
+  const parts=String(value||"ease").split(":");
+  if(parts[0]!=="custom")return{mode:parts[0]||"ease",p1:0,p2:100};
+  const a=Number(parts[1]),b=Number(parts[2]);
+  return{mode:"custom",p1:Number.isFinite(a)?a:0,p2:Number.isFinite(b)?b:100};
+}
+function clampCurvePercent(value:number){return Math.max(-200,Math.min(300,value));}
+
 export default function SettingsPanel({ api, settings, notes, selected, playbackTime, audioName, busy, onPatch, onStateAction, onMutation, onStatus }: Props) {
   const [page,setPage]=useState<Page>("note");
   const one=selected.length===1?notes[selected[0]]:null;
+  const curveShape=parseCurveShape(settings.curveShape);
   const mutate=(p:Promise<NoteMutationResult>,sel=selected)=>void p.then(x=>onMutation(x,sel)).catch(e=>onStatus(String(e)));
+  const setCurveShape=(mode:string)=>void onPatch({curveShape:mode==="custom"?`custom:${curveShape.p1}:${curveShape.p2}`:mode});
+  const setCustomCurve=(p1:number,p2:number)=>void onPatch({curveShape:`custom:${clampCurvePercent(p1)}:${clampCurvePercent(p2)}`});
   return <aside className="settings"><h2>設定</h2><nav>{pages.map(([id,label])=><button key={id} className={page===id?"active":""} onClick={()=>setPage(id)}>{label}</button>)}</nav><div className="settings-body">
     {page==="note"&&<>
       {selected.length===0&&<div className="hint">ノートを選択すると、位置・長さ・音高を数値でも編集できます。</div>}
@@ -77,7 +89,13 @@ export default function SettingsPanel({ api, settings, notes, selected, playback
       <button className="wide" disabled={!api||!audioName||busy} onClick={()=>void onStateAction(()=>api!.reanalyze_audio())}>音声を再解析</button><div className="hint">解析設定の変更は再解析後に反映されます。</div>
     </>}
     {page==="curve"&&<>
-      <Row label="カーブ形状"><Select value={settings.curveShape} options={[["ease","イーズ"],["s_curve","S字"],["linear","直線"],["ease_in","イーズイン"],["ease_out","イーズアウト"]]} onChange={v=>void onPatch({curveShape:v})}/></Row>
+      <Row label="カーブ形状"><Select value={curveShape.mode} options={[["ease","イーズ"],["s_curve","S字"],["sine","サイン"],["expo_in","指数イン"],["expo_out","指数アウト"],["linear","直線"],["ease_in","イーズイン"],["ease_out","イーズアウト"],["custom","カスタム Bézier"]]} onChange={setCurveShape}/></Row>
+      {curveShape.mode==="custom"&&<>
+        <Row label="Bezier P1"><NumberInput value={curveShape.p1} min={-200} max={300} step={1} suffix=" %" onChange={v=>setCustomCurve(v,curveShape.p2)}/></Row>
+        <Row label="Bezier P2"><NumberInput value={curveShape.p2} min={-200} max={300} step={1} suffix=" %" onChange={v=>setCustomCurve(curveShape.p1,v)}/></Row>
+        <div className="hint">0% = 開始音高、100% = 終了音高。範囲外を指定するとオーバーシュートも作れます。</div>
+      </>}
+      <button className="wide" disabled={!api||selected.length===0} onClick={()=>void api!.apply_curve_shape(selected).then(x=>onMutation(x,selected))}>形状を適用</button>
       <Row label="補間"><Select value={settings.curveInterpolation} options={[["bezier_pitch","ベジェ（音高）"],["linear_pitch","直線（音高）"],["linear_hz","直線（Hz）"],["bezier_hz","ベジェ（Hz）"]]} onChange={v=>void onPatch({curveInterpolation:v})}/></Row>
       <button className="wide" disabled={!api||selected.length===0} onClick={()=>void api!.apply_interpolation(selected).then(x=>onMutation(x,selected))}>補間を適用</button>
       <Row label="目標角度"><NumberInput value={settings.targetAngle} min={.001} max={359.999} step={.001} suffix="°" onChange={v=>void onPatch({targetAngle:v})}/></Row>

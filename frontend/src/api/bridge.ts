@@ -43,7 +43,7 @@ export type BackendApi = {
   quantize_notes(indices: number[]): Promise<NoteMutationResult>; split_notes(indices: number[], atTime: number): Promise<NoteMutationResult>;
   bulk_edit_notes(indices: number[], changes: Partial<{ timeDelta: number; pitchDelta: number; duration: number; align: "start" | "end" | "" }>): Promise<NoteMutationResult>;
   get_note_presets(): Promise<NotePreset[]>; save_note_preset(name: string, index: number): Promise<NotePresetResult>; delete_note_preset(name: string): Promise<NotePresetResult>; insert_note_preset(name: string, atTime: number): Promise<NoteMutationResult>;
-  apply_interpolation(indices: number[]): Promise<NoteMutationResult>; apply_target_angle(indices: number[]): Promise<NoteMutationResult>; clear_target_angle(indices: number[]): Promise<NoteMutationResult>;
+  apply_curve_shape(indices: number[]): Promise<NoteMutationResult>; apply_interpolation(indices: number[]): Promise<NoteMutationResult>; apply_target_angle(indices: number[]): Promise<NoteMutationResult>; clear_target_angle(indices: number[]): Promise<NoteMutationResult>;
   undo(): Promise<NoteMutationResult>; redo(): Promise<NoteMutationResult>; copy_notes(indices: number[]): Promise<{ status: string }>;
   cut_notes(indices: number[]): Promise<NoteMutationResult>; paste_notes(atTime: number): Promise<NoteMutationResult>;
   save_project_dialog(): Promise<AppState>; load_project_dialog(): Promise<AppState>; import_midi_dialog(): Promise<AppState>;

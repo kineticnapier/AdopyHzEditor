@@ -65,6 +65,44 @@ class WebUiCompatibilityTests(unittest.TestCase):
         self.assertEqual(opts["final_angle_mode"], "custom")
         self.assertAlmostEqual(opts["final_custom_angle"], 165.0)
 
+    def test_curve_shape_presets_and_custom_controls(self):
+        bridge = Bridge()
+
+        bridge.settings["curveShape"] = "sine"
+        self.assertEqual(bridge._curve_controls(60.0, 70.0), (61.2, 68.8))
+
+        bridge.settings["curveShape"] = "expo_in"
+        self.assertEqual(bridge._curve_controls(60.0, 70.0), (60.0, 60.5))
+
+        bridge.settings["curveShape"] = "expo_out"
+        self.assertEqual(bridge._curve_controls(60.0, 70.0), (69.5, 70.0))
+
+        bridge.settings["curveShape"] = "custom:-50:150"
+        self.assertEqual(bridge._curve_controls(60.0, 70.0), (55.0, 75.0))
+
+    def test_apply_curve_shape_updates_existing_curve(self):
+        bridge = Bridge()
+        bridge.notes = [
+            Note(
+                0.0,
+                1.0,
+                60.0,
+                100,
+                "curve",
+                72.0,
+                60.0,
+                72.0,
+                "bezier_pitch",
+            ).normalized()
+        ]
+        bridge.settings["curveShape"] = "custom:25:75"
+
+        result = bridge.apply_curve_shape([0])
+
+        self.assertIn("形状を適用", result["status"])
+        self.assertAlmostEqual(bridge.notes[0].ctrl1_midi, 63.0)
+        self.assertAlmostEqual(bridge.notes[0].ctrl2_midi, 69.0)
+
     def test_analysis_adapter_maps_profile_and_resolution(self):
         captured = {}
 

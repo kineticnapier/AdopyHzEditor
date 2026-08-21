@@ -12,6 +12,7 @@ except ImportError as exc:
         "python -m pip install -r requirements-webui.txt"
     ) from exc
 
+from core.note_model import Note
 from i18n import set_language
 import web.backend as web_backend_module
 from web.audio import WebAudioPlayer, decode_audio_file as decode_audio_file_compat
@@ -142,6 +143,70 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
             return bool(value)
         return str(value)
+
+    def _curve_controls(self, p0: float, p3: float) -> tuple[float, float]:
+        """Extend the Web UI's creation-time Bezier shape presets.
+
+        Custom values are encoded in curveShape as ``custom:P1:P2`` where P1/P2
+        are percentages along the pitch delta. This keeps project persistence
+        backward-compatible because curveShape is already saved as a string.
+        """
+        start = float(p0)
+        delta = float(p3) - start
+        shape = str(self.settings.get("curveShape", "ease"))
+
+        if shape == "sine":
+            return start + delta * 0.12, start + delta * 0.88
+        if shape == "expo_in":
+            return start, start + delta * 0.05
+        if shape == "expo_out":
+            return start + delta * 0.95, start + delta
+        if shape.startswith("custom:"):
+            try:
+                _, raw_p1, raw_p2 = shape.split(":", 2)
+                p1 = max(-200.0, min(300.0, float(raw_p1))) / 100.0
+                p2 = max(-200.0, min(300.0, float(raw_p2))) / 100.0
+            except (TypeError, ValueError):
+                p1, p2 = 0.0, 1.0
+            return start + delta * p1, start + delta * p2
+
+        return super()._curve_controls(p0, p3)
+
+    def apply_curve_shape(self, indices):
+        """Apply the current curve-shape preset to existing selected curves."""
+        with self._lock:
+            valid = sorted(
+                {
+                    int(i)
+                    for i in indices
+                    if 0 <= int(i) < len(self.notes) and self.notes[int(i)].is_curve
+                }
+            )
+            if not valid:
+                return {"notes": self._note_dicts(), "status": "カーブノートが選択されていません"}
+
+            self._push_undo()
+            for i in valid:
+                n = self.notes[i].normalized()
+                end_midi = float(n.midi_end if n.midi_end is not None else n.midi)
+                c1, c2 = self._curve_controls(float(n.midi), end_midi)
+                self.notes[i] = Note(
+                    n.start,
+                    n.end,
+                    n.midi,
+                    n.velocity,
+                    "curve",
+                    end_midi,
+                    c1,
+                    c2,
+                    n.interpolation,
+                    n.target_angle,
+                ).normalized()
+
+            self._dirty = True
+            self._sync_notes_to_player()
+            self._status = f"{len(valid)}個のカーブに形状を適用しました"
+            return {"notes": self._note_dicts(), "status": self._status}
 
     def open_audio(self):
         super().open_audio()
