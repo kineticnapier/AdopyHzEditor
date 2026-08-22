@@ -245,15 +245,12 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
                 fixed_angle = 165.0
             fixed_angle = max(0.001, min(359.999, fixed_angle))
 
-            # Fixed-angle mode is authoritative for Angle Compression:
-            # - every note uses the requested main relative angle;
-            # - a fractional final tile uses the same angle instead of scaling;
-            # - target-BPM X selection is ignored because it otherwise suppresses
-            #   per-note target_angle inside the exporter.
+            # Fixed Angle Compression controls only the full/main tiles.
+            # Fractional final tiles remain governed by finalAngleMode and its
+            # own custom/cardinal settings. Keep target-BPM disabled here because
+            # it otherwise suppresses per-note target_angle inside the exporter.
             for note in notes:
                 note.target_angle = fixed_angle
-            build_opts["final_angle_mode"] = "custom"
-            build_opts["final_custom_angle"] = fixed_angle
             if build_opts.get("rabbit_x_mode") == "target_bpm":
                 build_opts["rabbit_x_mode"] = "floor"
 
