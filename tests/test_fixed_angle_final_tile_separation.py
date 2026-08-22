@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from core.note_model import Note
+from exporters.adofai import build_adofai_debug_rows, build_adofai_level
 from web_ui import Bridge
 
 
@@ -43,6 +44,36 @@ class FixedAngleFinalTileSeparationTests(unittest.TestCase):
         self.assertAlmostEqual(notes[0].target_angle, 165.0)
         self.assertEqual(opts["rabbit_x_mode"], "floor")
         self.assertEqual(opts["final_angle_mode"], "scaled")
+
+    def test_horizontal_terminal_tile_also_applies_to_integer_cycle_a2(self):
+        bridge = Bridge()
+        original_end = 30.0 / 110.0
+        bridge.notes = [Note(0.0, original_end, 45.0, target_angle=90.0).normalized()]
+
+        notes, opts, _workflow = bridge._prepare_adofai_export(
+            {
+                "method": "rabbit_zip",
+                "angleCompressionMode": "fixed",
+                "angleCompressionFixedAngle": 165.0,
+                "xMode": "floor",
+                "finalAngleMode": "horizontal",
+            },
+            None,
+        )
+
+        # The project note stays exact; only the export copy reserves its final
+        # full cycle for terminal-tile styling.
+        self.assertAlmostEqual(bridge.notes[0].end, original_end, places=15)
+        keycount = notes[0].freq * notes[0].duration
+        self.assertLess(keycount, 30.0)
+        self.assertGreater(keycount, 29.999999)
+
+        rows = build_adofai_debug_rows(notes, **opts)
+        self.assertEqual(rows[0]["tiles_est"], 30)
+        self.assertNotEqual(rows[0]["final_angle_effective"], "")
+
+        level, _stats = build_adofai_level(notes, **opts)
+        self.assertIn(float(level["angleData"][-1]), (0.0, 180.0))
 
 
 if __name__ == "__main__":
