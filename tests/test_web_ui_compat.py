@@ -44,7 +44,7 @@ class WebUiCompatibilityTests(unittest.TestCase):
         self.assertEqual(end, int(1.0 * bridge.player.sr))
         self.assertAlmostEqual(midi, 69.0)
 
-    def test_fixed_angle_compression_overrides_fractional_and_target_bpm_modes(self):
+    def test_fixed_angle_compression_keeps_fractional_mode_independent(self):
         bridge = Bridge()
         bridge.notes = [Note(0.0, 0.73, 69.0, target_angle=90.0).normalized()]
 
@@ -55,15 +55,16 @@ class WebUiCompatibilityTests(unittest.TestCase):
                 "angleCompressionFixedAngle": 165.0,
                 "xMode": "target_bpm",
                 "targetBpm": 2400.0,
-                "finalAngleMode": "scaled",
+                "finalAngleMode": "horizontal",
+                "finalCustomAngle": 72.0,
             },
             None,
         )
 
         self.assertAlmostEqual(notes[0].target_angle, 165.0)
         self.assertEqual(opts["rabbit_x_mode"], "floor")
-        self.assertEqual(opts["final_angle_mode"], "custom")
-        self.assertAlmostEqual(opts["final_custom_angle"], 165.0)
+        self.assertEqual(opts["final_angle_mode"], "horizontal")
+        self.assertAlmostEqual(opts["final_custom_angle"], 72.0)
 
     def test_curve_shape_presets_and_custom_controls(self):
         bridge = Bridge()
