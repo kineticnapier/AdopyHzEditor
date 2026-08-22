@@ -5,6 +5,7 @@ import io
 import json
 import shutil
 import webbrowser
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,8 @@ _HELP_SECTIONS: list[tuple[str, str, str]] = [
     ("troubleshooting", "help.troubleshooting.title", "help.troubleshooting.body"),
     ("about", "help.about.title", "help.about.body"),
 ]
+
+_RABBIT_KEYCOUNT_EPS = 1e-9
 
 
 def _as_float(value: Any, default: float, lo: float | None = None, hi: float | None = None) -> float:
@@ -59,6 +62,37 @@ def _as_int(value: Any, default: int, lo: int | None = None, hi: int | None = No
 def _choice(value: Any, allowed: set[str], default: str) -> str:
     text = str(value)
     return text if text in allowed else default
+
+
+def _stabilize_rabbit_zip_cycle_boundaries(notes: list[Any]) -> list[Any]:
+    """Keep near-integer fixed-note cycle counts from creating a bogus final tile.
+
+    Rabbit ZIP currently computes the whole-cycle count with ``floor(keycount + EPS)``
+    while its fractional remainder uses ``floor(keycount)``. A value such as
+    21.9999999998 can therefore become both 22 whole tiles and an almost-1.0
+    fractional tile. Work on export copies only and snap such values just above
+    the integer so both calculations agree; the tiny residual stays well below
+    the exporter's 1e-6 final-tile threshold.
+    """
+    stabilized: list[Any] = []
+    for note in notes:
+        n = note.normalized()
+        if n.is_curve or n.duration <= 0:
+            stabilized.append(n)
+            continue
+
+        freq = float(n.freq)
+        if freq <= 0:
+            stabilized.append(n)
+            continue
+
+        keycount = freq * float(n.duration)
+        nearest = int(round(keycount))
+        if nearest > 0 and abs(keycount - nearest) <= _RABBIT_KEYCOUNT_EPS:
+            safe_keycount = float(nearest) + 2.0 * _RABBIT_KEYCOUNT_EPS
+            n = replace(n, end=float(n.start) + safe_keycount / freq).normalized()
+        stabilized.append(n)
+    return stabilized
 
 
 class AdoFAIMixin:
@@ -180,6 +214,9 @@ class AdoFAIMixin:
             "song_filename": Path(audio_path).name if use_song and audio_path else None,
             "song_offset_ms": float(song_offset_ms) if use_song else None,
         }
+        if opts["method"] == "rabbit_zip":
+            notes = _stabilize_rabbit_zip_cycle_boundaries(notes)
+
         workflow = {
             "copySong": copy_song,
             "songSourcePath": audio_path if use_song else None,
