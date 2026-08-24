@@ -5,6 +5,9 @@ from typing import Any
 from core.note_model import Note, hz_to_midi, midi_to_hz
 
 
+MIN_NOTE_DURATION = 0.001
+
+
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, float(value)))
 
@@ -42,7 +45,7 @@ class EditingMixin:
         p1 = float(n.ctrl1_midi if n.ctrl1_midi is not None else p0)
         p2 = float(n.ctrl2_midi if n.ctrl2_midi is not None else p3)
 
-        if mode == "bezier_hz":
+        if mode in ("bezier_hz", "hz_bezier"):
             left_hz, right_hz = _split_cubic(tuple(midi_to_hz(x) for x in (p0, p1, p2, p3)), t)
             left_vals = tuple(hz_to_midi(max(1e-12, x)) for x in left_hz)
             right_vals = tuple(hz_to_midi(max(1e-12, x)) for x in right_hz)
@@ -90,7 +93,7 @@ class EditingMixin:
             new_indices: list[int] = []
             for i, raw_note in enumerate(self.notes):
                 n = raw_note.normalized()
-                if i in valid and n.start + 0.001 < t < n.end - 0.001:
+                if i in valid and n.start + MIN_NOTE_DURATION < t < n.end - MIN_NOTE_DURATION:
                     if split_count == 0:
                         self._push_undo()
                     left, right = self._split_note_exact(n, t)
@@ -106,6 +109,79 @@ class EditingMixin:
             self._sync_notes_to_player()
             self._status = f"{split_count}個のノートを分割しました"
             return {"notes": self._note_dicts(), "indices": new_indices, "status": self._status}
+
+    def cut_notes_range(self, indices: list[int], start_time: float, end_time: float) -> dict[str, Any]:
+        """Remove a time interval from selected notes while preserving curve geometry.
+
+        Curves are split with the same exact de Casteljau path used by
+        ``split_notes``. The retained left/right fragments therefore trace the
+        original curve exactly instead of being re-fit after the cut.
+        """
+        with self._lock:
+            valid = set(self._valid_indices(indices))
+            if not valid:
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "ノートが選択されていません"}
+
+            a = self._snap_time(float(start_time))
+            b = self._snap_time(float(end_time))
+            if b < a:
+                a, b = b, a
+            if b - a < MIN_NOTE_DURATION:
+                return {"notes": self._note_dicts(), "indices": sorted(valid), "changed": False, "status": "切り取り範囲が短すぎます"}
+
+            changed = 0
+            undo_pushed = False
+            new_notes: list[Note] = []
+            new_indices: list[int] = []
+            eps = 1e-9
+
+            for i, raw_note in enumerate(self.notes):
+                n = raw_note.normalized()
+                overlap_start = max(n.start, a)
+                overlap_end = min(n.end, b)
+                overlaps = i in valid and overlap_end - overlap_start > eps
+
+                if not overlaps:
+                    if i in valid:
+                        new_indices.append(len(new_notes))
+                    new_notes.append(n)
+                    continue
+
+                if not undo_pushed:
+                    self._push_undo()
+                    undo_pushed = True
+                changed += 1
+
+                left_duration = overlap_start - n.start
+                right_duration = n.end - overlap_end
+                keep_left = left_duration + eps >= MIN_NOTE_DURATION
+                keep_right = right_duration + eps >= MIN_NOTE_DURATION
+
+                if keep_left and keep_right:
+                    left, tail = self._split_note_exact(n, overlap_start)
+                    _removed, right = self._split_note_exact(tail, overlap_end)
+                    new_indices.extend([len(new_notes), len(new_notes) + 1])
+                    new_notes.extend([left, right])
+                elif keep_left:
+                    left, _removed = self._split_note_exact(n, overlap_start)
+                    new_indices.append(len(new_notes))
+                    new_notes.append(left)
+                elif keep_right:
+                    _removed, right = self._split_note_exact(n, overlap_end)
+                    new_indices.append(len(new_notes))
+                    new_notes.append(right)
+                # Otherwise the cut covers the note except for sub-millisecond
+                # scraps. Drop those scraps rather than exporting pathological
+                # ultra-short notes later.
+
+            if changed == 0:
+                return {"notes": self._note_dicts(), "indices": sorted(valid), "changed": False, "status": "切り取り範囲と選択ノートが重なっていません"}
+
+            self.notes = new_notes
+            self._dirty = True
+            self._sync_notes_to_player()
+            self._status = f"{changed}個のノートから指定区間を切り取りました"
+            return {"notes": self._note_dicts(), "indices": new_indices, "changed": True, "status": self._status}
 
     def duplicate_notes_shifted(self, indices: list[int], dx: float, dy: float) -> dict[str, Any]:
         with self._lock:
@@ -168,16 +244,16 @@ class EditingMixin:
             for i, n in zip(valid, notes):
                 edited = n.shifted(dx=time_delta, dy=pitch_delta).normalized()
                 if duration_value is not None:
-                    duration = max(0.001, float(duration_value))
+                    duration = max(MIN_NOTE_DURATION, float(duration_value))
                     end = min(self.duration, edited.start + duration)
                     if end <= edited.start:
-                        end = min(self.duration, edited.start + 0.001)
+                        end = min(self.duration, edited.start + MIN_NOTE_DURATION)
                     edited = self._with_times(edited, edited.start, end)
                 if align == "start":
-                    start = min(align_start, edited.end - 0.001)
+                    start = min(align_start, edited.end - MIN_NOTE_DURATION)
                     edited = self._with_times(edited, start, edited.end)
                 elif align == "end":
-                    end = max(align_end, edited.start + 0.001)
+                    end = max(align_end, edited.start + MIN_NOTE_DURATION)
                     end = min(self.duration, end)
                     edited = self._with_times(edited, edited.start, end)
                 self.notes[i] = edited
