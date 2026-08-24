@@ -47,6 +47,7 @@ export type BackendApi = {
   undo(): Promise<NoteMutationResult>; redo(): Promise<NoteMutationResult>; copy_notes(indices: number[]): Promise<{ status: string }>;
   cut_notes(indices: number[]): Promise<NoteMutationResult>; paste_notes(atTime: number): Promise<NoteMutationResult>;
   save_project_dialog(): Promise<AppState>; load_project_dialog(): Promise<AppState>; relink_project_audio_dialog(): Promise<AppState>; import_midi_dialog(): Promise<AppState>;
+  close_window(): Promise<{ ok: boolean }>;
   export_midi_dialog(): Promise<{ ok: boolean; path?: string; status: string }>; export_adofai_dialog(): Promise<{ ok: boolean; path?: string; stats?: Record<string, unknown>; status: string }>;
   get_adofai_export_defaults(selectedIndices?: number[]): Promise<AdoFAIExportOptions>;
   choose_adofai_song_source(): Promise<{ ok: boolean; path?: string; name?: string; status: string }>;

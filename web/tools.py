@@ -84,13 +84,15 @@ class ToolsMixin:
             self._undo_stack.clear()
             self._redo_stack.clear()
             self._apply_project_settings(settings)
-            self.project_path = str(Path(path).resolve())
+            # Notes-only loading creates a derived workspace. Keeping the source
+            # project path would let a normal save overwrite it without audio.
+            self.project_path = None
             self.audio_path = None
             self.spectrogram = None
             self.player.clear_audio()
             self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
-            self._dirty = False
+            self._dirty = True
             self._status = f"Loaded notes only: {Path(path).name}"
             return self._state_dict()
 

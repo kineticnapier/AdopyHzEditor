@@ -63,6 +63,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self._busy = False
         self._status = "Ready"
         self._dirty = False
+        self._allow_window_close = False
 
         self.duration = 60.0
         self.midi_min = 12
@@ -110,6 +111,27 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
 
     def attach_window(self, window) -> None:
         self._window = window
+
+    def on_window_closing(self, *_args) -> bool:
+        """Route dirty window closes through the React unsaved-changes dialog."""
+        with self._lock:
+            if self._allow_window_close or not self._dirty:
+                return True
+            window = self._window
+        if window is not None:
+            window.evaluate_js(
+                "window.dispatchEvent(new CustomEvent('adopyhz-close-requested'))"
+            )
+        return False
+
+    def close_window(self) -> dict[str, bool]:
+        """Close after the frontend has resolved the unsaved-changes prompt."""
+        with self._lock:
+            self._allow_window_close = True
+            window = self._window
+        if window is not None:
+            window.destroy()
+        return {"ok": True}
 
     def _dialog(self, mode, *, file_types, save_filename: str | None = None):
         paths = self._file_dialog(
@@ -300,6 +322,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         if not paths:
             return self.get_state()
         path = str(paths[0])
+        with self._lock:
+            previous_audio = self.audio_path
+            was_dirty = self._dirty
         self._busy = True
         self._status = f"Loading {Path(path).name}..."
         try:
@@ -309,7 +334,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             self._analyze_current_audio()
             with self._lock:
                 self._status = f"Loaded {Path(path).name}"
-                self._dirty = False
+                self._dirty = was_dirty or previous_audio != self.audio_path
             return self.get_state()
         finally:
             self._busy = False
