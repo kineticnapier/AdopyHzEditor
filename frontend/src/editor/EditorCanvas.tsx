@@ -14,12 +14,13 @@ type Props = {
   onDuplicateMove(indices: number[], dx: number, dy: number): Promise<void>;
   onResize(indices: number[], edge: "start" | "end", delta: number): Promise<void>;
   onDelete(indices: number[]): Promise<void>;
+  onCutRange(indices: number[], start: number, end: number): Promise<void>;
   onSeek(time: number): Promise<void>;
   onView(changes: Partial<ViewState>): Promise<void>;
   onCursorMove?(time: number, midi: number): void;
 };
 
-type DragMode = "create" | "curve" | "region" | "move" | "duplicate-move" | "resize-start" | "resize-end";
+type DragMode = "create" | "curve" | "region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
 type DragState = { mode: DragMode; startTime: number; startMidi: number; nowTime: number; nowMidi: number; indices: number[] };
 
 function midiToHz(midi: number) { return 440 * 2 ** ((midi - 69) / 12); }
@@ -219,10 +220,16 @@ export default function EditorCanvas(props: Props) {
 
     if(drag){
       const x1=coords.x(drag.startTime),x2=coords.x(drag.nowTime),y1=coords.y(drag.startMidi),y2=coords.y(drag.nowMidi);
-      ctx.save();ctx.setLineDash([6,4]);ctx.strokeStyle="rgba(255,255,255,.9)";ctx.fillStyle="rgba(70,175,255,.16)";
-      if(drag.mode==="region"){ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));}
-      else if(drag.mode==="create"){const ym=coords.y((drag.startMidi+drag.nowMidi)/2),rh=Math.abs(coords.y(0)-coords.y(.9));ctx.fillRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);ctx.strokeRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);}
-      else if(drag.mode==="curve"){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();}
+      ctx.save();ctx.setLineDash([6,4]);
+      if(drag.mode==="cut-range"){
+        ctx.strokeStyle="rgba(255,120,120,.98)";ctx.fillStyle="rgba(255,80,80,.2)";
+        ctx.fillRect(Math.min(x1,x2),0,Math.abs(x2-x1),h);ctx.strokeRect(Math.min(x1,x2),0,Math.abs(x2-x1),h);
+      }else{
+        ctx.strokeStyle="rgba(255,255,255,.9)";ctx.fillStyle="rgba(70,175,255,.16)";
+        if(drag.mode==="region"){ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));}
+        else if(drag.mode==="create"){const ym=coords.y((drag.startMidi+drag.nowMidi)/2),rh=Math.abs(coords.y(0)-coords.y(.9));ctx.fillRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);ctx.strokeRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);}
+        else if(drag.mode==="curve"){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();}
+      }
       ctx.restore();
     }
 
@@ -241,7 +248,12 @@ export default function EditorCanvas(props: Props) {
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
     if(event.button!==0)return;
     event.currentTarget.setPointerCapture(event.pointerId);
-    const p=eventPosition(event),hit=hitNote(props.notes,p.time,p.midi,props.spectrum?.pitchStep??1);
+    const p=eventPosition(event);
+    if(event.ctrlKey&&event.altKey&&props.selected.length){
+      setDrag({mode:"cut-range",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:props.selected});
+      return;
+    }
+    const hit=hitNote(props.notes,p.time,p.midi,props.spectrum?.pitchStep??1);
     if(hit!==null){
       let next=props.selected;
       if(event.ctrlKey){next=props.selected.includes(hit)?props.selected.filter(x=>x!==hit):[...props.selected,hit];props.onSelect(next);return;}
@@ -259,12 +271,17 @@ export default function EditorCanvas(props: Props) {
     if(drag){setDrag({...drag,nowTime:p.time,nowMidi:p.midi});return;}
     const now=performance.now();
     if(props.onCursorMove&&now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove(p.time,p.midi);}
+    if(event.ctrlKey&&event.altKey&&props.selected.length){event.currentTarget.style.cursor="crosshair";return;}
     const hit=hitNote(props.notes,p.time,p.midi,props.spectrum?.pitchStep??1);
     event.currentTarget.style.cursor=hit!==null&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":"crosshair";
   }
   async function onPointerUp(event:ReactPointerEvent<HTMLCanvasElement>){
     if(!drag)return;
     const p=eventPosition(event),cur={...drag,nowTime:p.time,nowMidi:p.midi};setDrag(null);
+    if(cur.mode==="cut-range"){
+      if(Math.abs(cur.nowTime-cur.startTime)>=.001)await props.onCutRange(cur.indices,Math.min(cur.startTime,cur.nowTime),Math.max(cur.startTime,cur.nowTime));
+      return;
+    }
     if(cur.mode==="move"||cur.mode==="duplicate-move"){
       const dx=cur.nowTime-cur.startTime,dy=Math.round(cur.nowMidi-cur.startMidi);
       if(Math.abs(dx)>1e-4||dy!==0){if(cur.mode==="duplicate-move")await props.onDuplicateMove(cur.indices,dx,dy);else await props.onMove(cur.indices,dx,dy);}
@@ -292,5 +309,5 @@ export default function EditorCanvas(props: Props) {
     else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
     else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
   }
-  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/></div>;
+  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/></div>;
 }
