@@ -32,7 +32,7 @@ function noteMidiAt(note: NoteDto, u: number) {
   const mode = note.interpolation ?? "bezier_pitch";
   if (mode === "linear_pitch") return p0 + (p3 - p0) * t;
   if (mode === "linear_hz") return hzToMidi(midiToHz(p0) + (midiToHz(p3) - midiToHz(p0)) * t);
-  if (mode === "bezier_hz") return hzToMidi(cubic(midiToHz(p0), midiToHz(p1), midiToHz(p2), midiToHz(p3), t));
+  if (mode === "bezier_hz" || mode === "hz_bezier") return hzToMidi(cubic(midiToHz(p0), midiToHz(p1), midiToHz(p2), midiToHz(p3), t));
   return cubic(p0, p1, p2, p3, t);
 }
 function hitNote(notes: NoteDto[], time: number, midi: number, pitchStep = 1) {
