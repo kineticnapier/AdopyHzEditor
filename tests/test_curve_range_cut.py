@@ -36,6 +36,7 @@ class CurveRangeCutTests(unittest.TestCase):
 
         result = bridge.cut_notes_range([0], 2.2, 3.7)
 
+        self.assertTrue(result["changed"])
         self.assertEqual(len(result["notes"]), 2)
         self.assertEqual(result["indices"], [0, 1])
         left, right = [Note.from_dict(row) for row in result["notes"]]
@@ -70,6 +71,27 @@ class CurveRangeCutTests(unittest.TestCase):
         self._assert_fragment_matches_original(original, left)
         self._assert_fragment_matches_original(original, right)
 
+    def test_hz_bezier_alias_range_cut_preserves_both_fragments(self):
+        bridge = Bridge()
+        original = Note(
+            0.0,
+            4.0,
+            48.0,
+            90,
+            "curve",
+            67.0,
+            53.0,
+            62.0,
+            "hz_bezier",
+        ).normalized()
+        bridge.notes = [original]
+
+        result = bridge.cut_notes_range([0], 1.25, 2.5)
+
+        left, right = [Note.from_dict(row) for row in result["notes"]]
+        self._assert_fragment_matches_original(original, left)
+        self._assert_fragment_matches_original(original, right)
+
     def test_range_cut_can_remove_middle_of_fixed_note(self):
         bridge = Bridge()
         bridge.notes = [Note(0.0, 3.0, 69.0).normalized()]
@@ -78,6 +100,17 @@ class CurveRangeCutTests(unittest.TestCase):
 
         self.assertEqual([(n["start"], n["end"]) for n in result["notes"]], [(0.0, 1.0), (2.0, 3.0)])
         self.assertEqual(result["indices"], [0, 1])
+
+    def test_range_cut_drops_sub_millisecond_edge_fragment(self):
+        bridge = Bridge()
+        bridge.notes = [Note(0.0, 1.0, 69.0).normalized()]
+
+        result = bridge.cut_notes_range([0], 0.0005, 0.5)
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(len(result["notes"]), 1)
+        self.assertAlmostEqual(result["notes"][0]["start"], 0.5)
+        self.assertAlmostEqual(result["notes"][0]["end"], 1.0)
 
     def test_range_cut_can_remove_entire_selected_note_only(self):
         bridge = Bridge()
@@ -91,6 +124,18 @@ class CurveRangeCutTests(unittest.TestCase):
         self.assertEqual(len(result["notes"]), 1)
         self.assertAlmostEqual(result["notes"][0]["midi"], 64.0)
         self.assertEqual(result["indices"], [])
+
+    def test_range_cut_reports_no_change_without_overlap(self):
+        bridge = Bridge()
+        bridge.notes = [Note(0.0, 1.0, 60.0).normalized()]
+        bridge._dirty = False
+
+        result = bridge.cut_notes_range([0], 2.0, 3.0)
+
+        self.assertFalse(result["changed"])
+        self.assertFalse(bridge._dirty)
+        self.assertEqual(result["indices"], [0])
+        self.assertEqual(len(result["notes"]), 1)
 
 
 if __name__ == "__main__":
