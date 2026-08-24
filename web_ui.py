@@ -230,6 +230,32 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         defaults["angleCompressionFixedAngle"] = 165.0
         return defaults
 
+    def _reserve_integer_terminal_tiles(self, notes, final_mode):
+        """Let a distinct terminal-tile mode also apply to exact integer cycles.
+
+        The exporter only enters its final-tile branch when ``frac > 0``. After
+        integer-boundary stabilization an A note can be exactly 30 cycles, so a
+        horizontal/custom/cardinal terminal setting would otherwise never run.
+        Work only on export copies and reserve the final full cycle as an almost-
+        full fractional cycle. The timing difference is below a nanosecond-scale
+        cycle epsilon while tile count stays unchanged.
+        """
+        mode = str(final_mode or "scaled").lower().replace(" ", "_").replace("-", "_")
+        if mode == "scaled":
+            return
+
+        eps = 1e-9
+        for note in notes:
+            n = note.normalized()
+            if n.is_curve or n.duration <= 0 or n.freq <= 0:
+                continue
+            keycount = float(n.freq) * float(n.duration)
+            nearest = int(round(keycount))
+            if nearest <= 0 or abs(keycount - nearest) > 10.0 * eps:
+                continue
+            safe_keycount = float(nearest) - 2.0 * eps
+            note.end = float(n.start) + safe_keycount / float(n.freq)
+
     def _prepare_adofai_export(self, raw_options, selected_indices):
         # Web UI no longer exposes just intonation. Force equal temperament here
         # as well so stale/front-end-crafted values cannot change the result.
@@ -245,15 +271,13 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
                 fixed_angle = 165.0
             fixed_angle = max(0.001, min(359.999, fixed_angle))
 
-            # Fixed-angle mode is authoritative for Angle Compression:
-            # - every note uses the requested main relative angle;
-            # - a fractional final tile uses the same angle instead of scaling;
-            # - target-BPM X selection is ignored because it otherwise suppresses
-            #   per-note target_angle inside the exporter.
+            # Fixed Angle Compression controls only the full/main tiles. The
+            # terminal tile remains governed by finalAngleMode, even if the note
+            # lands on an exact integer cycle count. Keep target-BPM disabled
+            # because it suppresses per-note target_angle inside the exporter.
             for note in notes:
                 note.target_angle = fixed_angle
-            build_opts["final_angle_mode"] = "custom"
-            build_opts["final_custom_angle"] = fixed_angle
+            self._reserve_integer_terminal_tiles(notes, build_opts.get("final_angle_mode", "scaled"))
             if build_opts.get("rabbit_x_mode") == "target_bpm":
                 build_opts["rabbit_x_mode"] = "floor"
 
