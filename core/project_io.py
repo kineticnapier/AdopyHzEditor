@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 import json
 import os
+import tempfile
 from core.note_model import Note
 
 
@@ -115,7 +116,30 @@ def save_project(
         "settings": settings or {},
         "notes": [n.to_dict() for n in sorted(notes, key=lambda x: (x.start, x.midi, x.end))],
     }
-    project_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    temp_path: Path | None = None
+    try:
+        # The temporary file must live beside the project so os.replace stays
+        # on the same filesystem and is atomic on Windows as well as POSIX.
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=project_path.parent,
+            prefix=f".{project_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            temp_file.write(payload)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_path, project_path)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def load_project(path: str | Path) -> tuple[str | None, list[Note], dict[str, Any]]:
