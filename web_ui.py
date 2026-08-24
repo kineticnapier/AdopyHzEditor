@@ -228,7 +228,20 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         defaults["harmonyTuning"] = "equal temperament"
         defaults["angleCompressionMode"] = "auto"
         defaults["angleCompressionFixedAngle"] = 165.0
+        defaults["songSourcePath"] = str(self.audio_path or "")
         return defaults
+
+    def choose_adofai_song_source(self):
+        path = self._dialog(webview.FileDialog.OPEN, file_types=web_backend_module.AUDIO_FILE_TYPES)
+        if not path:
+            return {"ok": False, "status": "キャンセルしました"}
+        source = str(Path(path).resolve())
+        return {
+            "ok": True,
+            "path": source,
+            "name": Path(source).name,
+            "status": f"音源先を {Path(source).name} に変更しました",
+        }
 
     def _reserve_integer_terminal_tiles(self, notes, final_mode):
         """Let a distinct terminal-tile mode also apply to exact integer cycles.
@@ -262,6 +275,31 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         options = dict(raw_options or {})
         options["harmonyTuning"] = "equal temperament"
         notes, build_opts, workflow = super()._prepare_adofai_export(options, selected_indices)
+
+        # The export song can be different from the audio used for analysis and
+        # note editing. Keep the project audio untouched and override only the
+        # ADOFAI songFilename/copy workflow.
+        song_source = str(options.get("songSourcePath") or self.audio_path or "").strip()
+        use_song = bool(options.get("useProjectSong", bool(song_source)))
+        if use_song:
+            if not song_source:
+                raise ValueError("音源先を選択してください")
+            build_opts["song_filename"] = Path(song_source).name
+            if bool(options.get("songOffsetAuto", True)):
+                build_opts["song_offset_ms"] = min((n.normalized().start for n in notes), default=0.0) * 1000.0
+            else:
+                try:
+                    song_offset = float(options.get("songOffsetMs", 0.0))
+                except (TypeError, ValueError):
+                    song_offset = 0.0
+                build_opts["song_offset_ms"] = max(-3600000.0, min(3600000.0, song_offset))
+            workflow["songSourcePath"] = song_source
+            workflow["copySong"] = bool(options.get("copyProjectSong", True))
+        else:
+            build_opts["song_filename"] = None
+            build_opts["song_offset_ms"] = None
+            workflow["songSourcePath"] = None
+            workflow["copySong"] = False
 
         mode = str(options.get("angleCompressionMode", "auto"))
         if build_opts.get("method") == "rabbit_zip" and mode == "fixed":
