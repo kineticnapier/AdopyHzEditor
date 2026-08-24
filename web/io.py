@@ -12,6 +12,7 @@ from exporters.midi import export_midi
 from core.note_model import Note
 from core.project_io import load_project, save_project
 
+AUDIO_FILE_TYPES = ("音声ファイル (*.wav;*.mp3;*.ogg;*.flac;*.m4a;*.aac)", "すべてのファイル (*.*)")
 PROJECT_FILE_TYPES = ("AdopyHzEditorプロジェクト (*.adopyhz;*.ahe.json)", "JSON (*.json)", "すべてのファイル (*.*)")
 MIDI_FILE_TYPES = ("MIDIファイル (*.mid;*.midi)", "すべてのファイル (*.*)")
 ADOF_FILE_TYPES = ("ADOFAI譜面 (*.adofai)", "すべてのファイル (*.*)")
@@ -66,7 +67,31 @@ class IOMixin:
                 self._sync_notes_to_player();self._status=f"{Path(path).name} と音声を読み込みました"
         else:
             with self._lock:
-                self.audio_path=None;self.spectrogram=None;self.duration=max(60.0,max((n.end for n in self.notes),default=0.0));self.midi_min=12;self.midi_max=120;self.pitch_step=1.0;self.player.clear_audio();self._sync_notes_to_player();self._status=f"{Path(path).name} のノートを読み込みました"
+                self.audio_path=None;self.spectrogram=None;self.duration=max(60.0,max((n.end for n in self.notes),default=0.0));self.midi_min=12;self.midi_max=120;self.pitch_step=1.0;self.player.clear_audio();self._sync_notes_to_player()
+                if audio_path:
+                    self._status=f"{Path(path).name} の音源が見つかりません。ファイル → プロジェクト音源を再指定… から選び直せます"
+                else:
+                    self._status=f"{Path(path).name} のノートを読み込みました"
+        return self.get_state()
+
+    def relink_project_audio_dialog(self) -> dict[str, Any]:
+        with self._lock:
+            if not self.project_path:
+                self._status="先にプロジェクトを読み込んでください"
+                return self._state_dict()
+
+        path=self._dialog(webview.FileDialog.OPEN,file_types=AUDIO_FILE_TYPES)
+        if not path:return self.get_state()
+        source=str(Path(path).resolve())
+
+        with self._lock:self._busy=True
+        try:
+            self._load_audio_path(source,analyze=True)
+            with self._lock:
+                # Rebuild preview notes because the audio sample rate may have changed.
+                self._sync_notes_to_player();self._dirty=True;self._status=f"プロジェクト音源を {Path(source).name} に再指定しました"
+        finally:
+            with self._lock:self._busy=False
         return self.get_state()
 
     def _shifted_export_notes(self) -> list[Note]:
