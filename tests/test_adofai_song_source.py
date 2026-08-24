@@ -10,7 +10,7 @@ from web_ui import Bridge
 class AdoFAISongSourceTests(unittest.TestCase):
     def test_defaults_use_current_project_audio(self):
         bridge = Bridge()
-        bridge.audio_path = r"C:\music\analysis.wav"
+        bridge.audio_path = "/music/analysis.wav"
         bridge.notes = [Note(0.5, 1.0, 69.0).normalized()]
 
         defaults = bridge.get_adofai_export_defaults()
@@ -20,7 +20,7 @@ class AdoFAISongSourceTests(unittest.TestCase):
 
     def test_custom_song_source_does_not_replace_analysis_audio(self):
         bridge = Bridge()
-        bridge.audio_path = r"C:\music\analysis.wav"
+        bridge.audio_path = "/music/analysis.wav"
         bridge.notes = [Note(0.5, 1.0, 69.0).normalized()]
 
         _notes, build_opts, workflow = bridge._prepare_adofai_export(
@@ -28,17 +28,17 @@ class AdoFAISongSourceTests(unittest.TestCase):
                 "method": "rabbit_zip",
                 "useProjectSong": True,
                 "copyProjectSong": True,
-                "songSourcePath": r"D:\adofai\playback.ogg",
+                "songSourcePath": "/adofai/playback.ogg",
                 "songOffsetAuto": False,
                 "songOffsetMs": 123.0,
             },
             None,
         )
 
-        self.assertEqual(bridge.audio_path, r"C:\music\analysis.wav")
+        self.assertEqual(bridge.audio_path, "/music/analysis.wav")
         self.assertEqual(build_opts["song_filename"], "playback.ogg")
         self.assertEqual(build_opts["song_offset_ms"], 123.0)
-        self.assertEqual(workflow["songSourcePath"], r"D:\adofai\playback.ogg")
+        self.assertEqual(workflow["songSourcePath"], "/adofai/playback.ogg")
         self.assertTrue(workflow["copySong"])
 
     def test_custom_song_source_works_without_loaded_project_audio(self):
