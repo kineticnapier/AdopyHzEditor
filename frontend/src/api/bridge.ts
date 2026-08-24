@@ -12,7 +12,7 @@ export type AnalysisState = { available: boolean; duration: number; midiMin: num
 export type AppState = { settings: EditorSettings; view: ViewState; playback: PlaybackState; audio: { path: string | null; name: string | null; loaded: boolean }; projectPath: string | null; notes: NoteDto[]; analysis: AnalysisState; busy: boolean; status: string; dirty: boolean };
 export type SpectrogramPayload = { available: boolean; rows?: number; cols?: number; data?: string; duration?: number; midiMin?: number; midiMax?: number; pitchStep?: number };
 export type CursorPeakPayload = { available: boolean; time?: number; cursorMidi?: number; cursorHz?: number; cursorName?: string; cursorCents?: number; peakMidi?: number; peakHz?: number; peakName?: string; peakCents?: number; peakDb?: number };
-export type NoteMutationResult = { notes: NoteDto[]; status: string; index?: number; indices?: number[] };
+export type NoteMutationResult = { notes: NoteDto[]; status: string; index?: number; indices?: number[]; changed?: boolean };
 export type NotePreset = { name: string; note: NoteDto; duration: number; kind: "note" | "curve" };
 export type NotePresetResult = { presets: NotePreset[]; status: string };
 
