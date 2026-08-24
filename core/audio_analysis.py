@@ -4,10 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 import hashlib
 import json
+import os
+import tempfile
+import zipfile
 import numpy as np
 
 
 CACHE_VERSION = 4
+CACHE_MAX_BYTES = 1024 * 1024 * 1024
 
 
 @dataclass
@@ -173,6 +177,120 @@ def has_analysis_cache(audio_path: str | Path, **kwargs) -> bool:
         return False
 
 
+def _cache_scalar(data, name: str, cast):
+    value = np.asarray(data[name])
+    if value.size != 1:
+        raise ValueError(f"cache field {name!r} must be scalar")
+    return cast(value.reshape(()).item())
+
+
+def _load_analysis_cache(cache_path: Path, audio_path: Path) -> Spectrogram:
+    with np.load(cache_path, allow_pickle=False) as data:
+        required = {"db", "duration", "midi_min", "midi_max", "frame_times", "sr"}
+        missing = required.difference(data.files)
+        if missing:
+            raise ValueError(f"cache fields missing: {sorted(missing)}")
+
+        db = np.asarray(data["db"])
+        frame_times = np.asarray(data["frame_times"])
+        if db.ndim != 2 or db.shape[0] <= 0 or db.shape[1] <= 0:
+            raise ValueError("cache db must be a non-empty 2D array")
+        if frame_times.ndim != 1 or len(frame_times) != db.shape[1]:
+            raise ValueError("cache frame_times shape does not match db")
+        if not np.issubdtype(db.dtype, np.number) or not np.issubdtype(frame_times.dtype, np.number):
+            raise ValueError("cache arrays must be numeric")
+        if not np.all(np.isfinite(db)) or not np.all(np.isfinite(frame_times)):
+            raise ValueError("cache arrays contain non-finite values")
+
+        duration = _cache_scalar(data, "duration", float)
+        midi_min = _cache_scalar(data, "midi_min", int)
+        midi_max = _cache_scalar(data, "midi_max", int)
+        sample_rate = _cache_scalar(data, "sr", int)
+        if not np.isfinite(duration) or duration < 0 or midi_max < midi_min or sample_rate <= 0:
+            raise ValueError("cache scalar metadata is invalid")
+
+        bins_per_semitone = _cache_scalar(data, "bins_per_semitone", int) if "bins_per_semitone" in data.files else 1
+        folded_to_semitone = _cache_scalar(data, "folded_to_semitone", bool) if "folded_to_semitone" in data.files else True
+        bins_per_octave = _cache_scalar(data, "bins_per_octave", int) if "bins_per_octave" in data.files else 12
+        pitch_step = _cache_scalar(data, "pitch_step", float) if "pitch_step" in data.files else 1.0
+        if bins_per_semitone <= 0 or bins_per_octave <= 0 or not np.isfinite(pitch_step) or pitch_step <= 0:
+            raise ValueError("cache pitch metadata is invalid")
+
+        return Spectrogram(
+            audio_path=str(audio_path),
+            db=db.astype(np.float32),
+            duration=duration,
+            midi_min=midi_min,
+            midi_max=midi_max,
+            frame_times=frame_times.astype(np.float64, copy=False),
+            sr=sample_rate,
+            bins_per_semitone=bins_per_semitone,
+            folded_to_semitone=folded_to_semitone,
+            bins_per_octave=bins_per_octave,
+            pitch_step=pitch_step,
+        )
+
+
+def _save_analysis_cache(cache_path: Path, **arrays) -> None:
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w+b",
+            dir=cache_path.parent,
+            prefix=f".{cache_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            np.savez(temp_file, **arrays)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_path, cache_path)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def cleanup_analysis_cache(
+    cache_dir: Path,
+    *,
+    max_bytes: int = CACHE_MAX_BYTES,
+    exclude: set[Path] | None = None,
+) -> None:
+    excluded = {path.resolve() for path in (exclude or set())}
+    entries: list[tuple[float, int, Path]] = []
+    total = 0
+    try:
+        candidates = list(cache_dir.glob("*.npz"))
+    except OSError:
+        return
+
+    for path in candidates:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        total += stat.st_size
+        entries.append((stat.st_mtime, stat.st_size, path))
+
+    limit = max(0, int(max_bytes))
+    if total <= limit:
+        return
+    for _mtime, size, path in sorted(entries):
+        try:
+            if path.resolve() in excluded:
+                continue
+            path.unlink()
+            total -= size
+        except OSError:
+            continue
+        if total <= limit:
+            break
+
+
 def analyze_cqt(
     audio_path: str | Path,
     *,
@@ -216,22 +334,17 @@ def analyze_cqt(
         cqt_bins_per_octave=bins_per_octave,
     )
     cache_path = cache_dir / f"{key}.npz"
+    if use_cache:
+        cleanup_analysis_cache(cache_dir, exclude={cache_path})
 
     if use_cache and cache_path.exists():
-        data = np.load(cache_path, allow_pickle=False)
-        return Spectrogram(
-            audio_path=str(path),
-            db=data["db"].astype(np.float32),
-            duration=float(data["duration"]),
-            midi_min=int(data["midi_min"]),
-            midi_max=int(data["midi_max"]),
-            frame_times=data["frame_times"],
-            sr=int(data["sr"]),
-            bins_per_semitone=int(data["bins_per_semitone"]) if "bins_per_semitone" in data.files else 1,
-            folded_to_semitone=bool(data["folded_to_semitone"]) if "folded_to_semitone" in data.files else True,
-            bins_per_octave=int(data["bins_per_octave"]) if "bins_per_octave" in data.files else 12,
-            pitch_step=float(data["pitch_step"]) if "pitch_step" in data.files else 1.0,
-        )
+        try:
+            return _load_analysis_cache(cache_path, path)
+        except (EOFError, KeyError, OSError, TypeError, ValueError, zipfile.BadZipFile):
+            try:
+                cache_path.unlink()
+            except OSError:
+                pass
 
     import math
     y, actual_sr = librosa.load(str(path), sr=sr, mono=True)
@@ -278,19 +391,25 @@ def analyze_cqt(
 
     if use_cache:
         # Intentionally uncompressed: bigger cache, much faster second load.
-        np.savez(
-            cache_path,
-            db=db,
-            duration=np.array(duration),
-            midi_min=np.array(midi_min),
-            midi_max=np.array(midi_max),
-            frame_times=times,
-            sr=np.array(actual_sr),
-            bins_per_semitone=np.array(display_bins_per_semitone),
-            folded_to_semitone=np.array(bool(fold_to_semitone)),
-            bins_per_octave=np.array(display_bins_per_octave),
-            pitch_step=np.array(display_pitch_step),
-        )
+        try:
+            _save_analysis_cache(
+                cache_path,
+                db=db,
+                duration=np.array(duration),
+                midi_min=np.array(midi_min),
+                midi_max=np.array(midi_max),
+                frame_times=times,
+                sr=np.array(actual_sr),
+                bins_per_semitone=np.array(display_bins_per_semitone),
+                folded_to_semitone=np.array(bool(fold_to_semitone)),
+                bins_per_octave=np.array(display_bins_per_octave),
+                pitch_step=np.array(display_pitch_step),
+            )
+            cleanup_analysis_cache(cache_dir, exclude={cache_path})
+        except OSError:
+            # A cache write must never turn an otherwise successful analysis
+            # into a user-visible failure.
+            pass
 
     return Spectrogram(str(path), db, duration, midi_min, midi_max, times, actual_sr, display_bins_per_semitone, bool(fold_to_semitone), display_bins_per_octave, display_pitch_step)
 
