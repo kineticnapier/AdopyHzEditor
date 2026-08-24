@@ -219,7 +219,9 @@ export default function EditorCanvas(props: Props) {
     }
 
     if(drag){
-      const x1=coords.x(drag.startTime),x2=coords.x(drag.nowTime),y1=coords.y(drag.startMidi),y2=coords.y(drag.nowMidi);
+      const shownStart=drag.mode==="cut-range"?snapTime(props.settings,props.playback.duration,drag.startTime):drag.startTime;
+      const shownNow=drag.mode==="cut-range"?snapTime(props.settings,props.playback.duration,drag.nowTime):drag.nowTime;
+      const x1=coords.x(shownStart),x2=coords.x(shownNow),y1=coords.y(drag.startMidi),y2=coords.y(drag.nowMidi);
       ctx.save();ctx.setLineDash([6,4]);
       if(drag.mode==="cut-range"){
         ctx.strokeStyle="rgba(255,120,120,.98)";ctx.fillStyle="rgba(255,80,80,.2)";
@@ -279,7 +281,8 @@ export default function EditorCanvas(props: Props) {
     if(!drag)return;
     const p=eventPosition(event),cur={...drag,nowTime:p.time,nowMidi:p.midi};setDrag(null);
     if(cur.mode==="cut-range"){
-      if(Math.abs(cur.nowTime-cur.startTime)>=.001)await props.onCutRange(cur.indices,Math.min(cur.startTime,cur.nowTime),Math.max(cur.startTime,cur.nowTime));
+      const a=snapTime(props.settings,props.playback.duration,cur.startTime),b=snapTime(props.settings,props.playback.duration,cur.nowTime);
+      if(Math.abs(b-a)>=.001)await props.onCutRange(cur.indices,Math.min(a,b),Math.max(a,b));
       return;
     }
     if(cur.mode==="move"||cur.mode==="duplicate-move"){
@@ -309,5 +312,5 @@ export default function EditorCanvas(props: Props) {
     else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
     else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
   }
-  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/></div>;
+  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り（スナップ対応）" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/></div>;
 }
