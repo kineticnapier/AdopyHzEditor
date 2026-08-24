@@ -107,6 +107,76 @@ class EditingMixin:
             self._status = f"{split_count}個のノートを分割しました"
             return {"notes": self._note_dicts(), "indices": new_indices, "status": self._status}
 
+    def cut_notes_range(self, indices: list[int], start_time: float, end_time: float) -> dict[str, Any]:
+        """Remove a time interval from selected notes while preserving curve geometry.
+
+        Curves are split with the same exact de Casteljau path used by
+        ``split_notes``. The retained left/right fragments therefore trace the
+        original curve exactly instead of being re-fit after the cut.
+        """
+        with self._lock:
+            valid = set(self._valid_indices(indices))
+            if not valid:
+                return {"notes": self._note_dicts(), "indices": [], "status": "ノートが選択されていません"}
+
+            a = self._snap_time(float(start_time))
+            b = self._snap_time(float(end_time))
+            if b < a:
+                a, b = b, a
+            if b - a < 0.001:
+                return {"notes": self._note_dicts(), "indices": sorted(valid), "status": "切り取り範囲が短すぎます"}
+
+            changed = 0
+            undo_pushed = False
+            new_notes: list[Note] = []
+            new_indices: list[int] = []
+            eps = 1e-9
+
+            for i, raw_note in enumerate(self.notes):
+                n = raw_note.normalized()
+                overlap_start = max(n.start, a)
+                overlap_end = min(n.end, b)
+                overlaps = i in valid and overlap_end - overlap_start > eps
+
+                if not overlaps:
+                    if i in valid:
+                        new_indices.append(len(new_notes))
+                    new_notes.append(n)
+                    continue
+
+                if not undo_pushed:
+                    self._push_undo()
+                    undo_pushed = True
+                changed += 1
+
+                keep_left = overlap_start - n.start > eps
+                keep_right = n.end - overlap_end > eps
+
+                if keep_left and keep_right:
+                    left, tail = self._split_note_exact(n, overlap_start)
+                    _removed, right = self._split_note_exact(tail, overlap_end)
+                    new_indices.extend([len(new_notes), len(new_notes) + 1])
+                    new_notes.extend([left, right])
+                elif keep_left:
+                    left, _removed = self._split_note_exact(n, overlap_start)
+                    new_indices.append(len(new_notes))
+                    new_notes.append(left)
+                elif keep_right:
+                    _removed, right = self._split_note_exact(n, overlap_end)
+                    new_indices.append(len(new_notes))
+                    new_notes.append(right)
+                # Otherwise the cut covers the entire selected note, so no
+                # replacement fragment is appended.
+
+            if changed == 0:
+                return {"notes": self._note_dicts(), "indices": sorted(valid), "status": "切り取り範囲と選択ノートが重なっていません"}
+
+            self.notes = new_notes
+            self._dirty = True
+            self._sync_notes_to_player()
+            self._status = f"{changed}個のノートから指定区間を切り取りました"
+            return {"notes": self._note_dicts(), "indices": new_indices, "status": self._status}
+
     def duplicate_notes_shifted(self, indices: list[int], dx: float, dy: float) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
