@@ -45,13 +45,13 @@ export default function App(){
   async function updateView(changes:Partial<ViewState>){setView(v=>({...v,...changes}));if(api)setView(await api.set_view(changes))}
   async function fitView(){if(api)setView(await api.fit_view())}
   async function runStateAction(action:()=>Promise<AppState>){if(!api)return;setBusy(true);try{const state=await action();applyState(state);if(state.analysis.available)await refreshSpectrum(api);else setSpectrum(null)}catch(e){setStatus(String(e))}finally{setBusy(false)}}
-  function applyMutation(result:NoteMutationResult,selection?:number[]){setNotes(result.notes);setStatus(result.status);setDirty(true);if(selection)setSelected(selection.filter(i=>i>=0&&i<result.notes.length));else setSelected(old=>old.filter(i=>i>=0&&i<result.notes.length))}
+  function applyMutation(result:NoteMutationResult,selection?:number[],markDirty=true){setNotes(result.notes);setStatus(result.status);if(markDirty)setDirty(true);if(selection)setSelected(selection.filter(i=>i>=0&&i<result.notes.length));else setSelected(old=>old.filter(i=>i>=0&&i<result.notes.length))}
   async function addNote(start:number,end:number,midi:number,kind:"note"|"curve",endMidi:number){if(!api)return;const r=await api.add_note(start,end,midi,kind,endMidi);applyMutation(r,r.index===undefined?[]:[r.index])}
   async function moveNotes(indices:number[],dx:number,dy:number){if(api&&indices.length)applyMutation(await api.move_notes(indices,dx,dy),indices)}
   async function duplicateMove(indices:number[],dx:number,dy:number){if(api&&indices.length){const r=await api.duplicate_notes_shifted(indices,dx,dy);applyMutation(r,r.indices??[])}}
   async function resizeNotes(indices:number[],edge:"start"|"end",delta:number){if(api&&indices.length)applyMutation(await api.resize_notes(indices,edge,delta),indices)}
   async function deleteNotes(indices=selected){if(api&&indices.length)applyMutation(await api.delete_notes(indices),[])}
-  async function cutRange(indices:number[],start:number,end:number){if(api&&indices.length){const r=await api.cut_notes_range(indices,start,end);applyMutation(r,r.indices??[])}}
+  async function cutRange(indices:number[],start:number,end:number){if(api&&indices.length){const r=await api.cut_notes_range(indices,start,end);applyMutation(r,r.indices??[],r.changed!==false)}}
   async function duplicate(){if(api&&selected.length){const r=await api.duplicate_notes(selected);applyMutation(r,r.indices??[])}}
   async function quantize(){if(api&&selected.length)applyMutation(await api.quantize_notes(selected),selected)}
   async function splitSelected(){if(api&&selected.length){const r=await api.split_notes(selected,playback.time);applyMutation(r,r.indices?.length?r.indices:selected)}}
