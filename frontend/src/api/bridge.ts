@@ -23,7 +23,7 @@ export type AdoFAIExportOptions = {
   xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; angleCompressionMode: "auto" | "fixed"; angleCompressionFixedAngle: number; maxTiles: number; maxTilesPerNote: number;
   trackVisual: "normal" | "faint" | "very faint" | "hidden"; visualPathMode: "raw" | "upward" | "upward avoid" | "twirl upward"; visualPathAngle: number;
   visualPositionMode: "off" | "note step"; visualPositionX: number; visualPositionY: number; finalAngleMode: "scaled" | "cardinal" | "horizontal" | "custom";
-  finalCustomAngle: number; finalCardinalStep: number; useProjectSong: boolean; copyProjectSong: boolean; songSourcePath: string; songOffsetAuto: boolean; songOffsetMs: number; selectedOnly: boolean;
+  finalCustomAngle: number; finalCardinalStep: number; useProjectSong: boolean; copyProjectSong: boolean; songConflictAction: "cancel" | "rename" | "overwrite"; songSourcePath: string; songOffsetAuto: boolean; songOffsetMs: number; selectedOnly: boolean;
 };
 export type AdoFAITilePreview = { points: Array<{ x: number; y: number; angle: number }>; stats: Record<string, unknown>; shownTiles: number; totalTiles: number; limited: boolean };
 export type AdoFAIDebugPreview = { rows: Array<Record<string, unknown>>; summary: { rows: number; estimatedTiles: number; targetAngleUsed: number; targetAngleIgnored: number; finalVisualCorrections: number; warnings: number }; limited: boolean };

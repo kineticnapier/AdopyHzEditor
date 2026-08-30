@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import csv
+import filecmp
 import io
 import json
+import os
 import shutil
+import tempfile
 import webbrowser
 from dataclasses import replace
 from pathlib import Path
@@ -33,6 +36,57 @@ _HELP_SECTIONS: list[tuple[str, str, str]] = [
 ]
 
 _RABBIT_KEYCOUNT_EPS = 1e-9
+
+
+def _same_file_or_content(source: Path, target: Path) -> bool:
+    if source == target:
+        return True
+    if not target.is_file():
+        return False
+    try:
+        if source.samefile(target):
+            return True
+    except OSError:
+        pass
+    try:
+        if source.stat().st_size != target.stat().st_size:
+            return False
+        return filecmp.cmp(source, target, shallow=False)
+    except OSError:
+        return False
+
+
+def _available_song_target(target: Path) -> Path:
+    index = 2
+    while True:
+        candidate = target.with_name(f"{target.stem} ({index}){target.suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
+def _copy_song_atomic(source: Path, target: Path) -> None:
+    temp_path: Path | None = None
+    try:
+        with source.open("rb") as source_file, tempfile.NamedTemporaryFile(
+            mode="w+b",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            shutil.copyfileobj(source_file, temp_file)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        shutil.copystat(source, temp_path)
+        os.replace(temp_path, target)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _as_float(value: Any, default: float, lo: float | None = None, hi: float | None = None) -> float:
@@ -136,6 +190,7 @@ class AdoFAIMixin:
             "finalCardinalStep": 90.0,
             "useProjectSong": has_song,
             "copyProjectSong": has_song,
+            "songConflictAction": "cancel",
             "songOffsetAuto": True,
             "songOffsetMs": round(auto_offset, 3),
             "selectedOnly": bool(selected),
@@ -220,6 +275,7 @@ class AdoFAIMixin:
         workflow = {
             "copySong": copy_song,
             "songSourcePath": audio_path if use_song else None,
+            "songConflictAction": _choice(raw.get("songConflictAction"), {"cancel", "rename", "overwrite"}, "cancel"),
             "songOffsetAuto": auto_song_offset,
             "selectedOnly": selected_only,
         }
@@ -262,17 +318,47 @@ class AdoFAIMixin:
         if Path(path).suffix.lower() != ".adofai":
             path += ".adofai"
 
-        level, stats = build_adofai_level(notes, **build_opts)
-        Path(path).write_text(json.dumps(level, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-
         copied_song: str | None = None
+        copy_required = False
+        copy_target: Path | None = None
         source = workflow.get("songSourcePath")
         if workflow.get("copySong") and source:
             source_path = Path(str(source)).resolve()
-            target = Path(path).resolve().parent / source_path.name
-            if source_path != target:
-                shutil.copy2(source_path, target)
-            copied_song = str(target)
+            if not source_path.is_file():
+                return {"ok": False, "status": f"Audio source not found: {source_path}"}
+            copy_target = Path(path).resolve().parent / source_path.name
+            if _same_file_or_content(source_path, copy_target):
+                copy_required = False
+            elif copy_target.exists():
+                conflict_action = str(workflow.get("songConflictAction", "cancel"))
+                if conflict_action == "rename":
+                    copy_target = _available_song_target(copy_target)
+                    copy_required = True
+                elif conflict_action == "overwrite":
+                    copy_required = True
+                else:
+                    return {
+                        "ok": False,
+                        "conflict": True,
+                        "status": f"Audio copy cancelled: {copy_target.name} already exists with different content",
+                    }
+            else:
+                copy_required = True
+            build_opts["song_filename"] = copy_target.name
+            copied_song = str(copy_target)
+
+        level, stats = build_adofai_level(notes, **build_opts)
+        Path(path).write_text(json.dumps(level, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+        if copy_required and source and copy_target is not None:
+            try:
+                _copy_song_atomic(Path(str(source)).resolve(), copy_target)
+            except OSError as exc:
+                return {
+                    "ok": False,
+                    "path": str(path),
+                    "status": f"Audio copy failed: {exc}",
+                }
 
         with self._lock:
             self._status = f"Exported {Path(path).name} ({stats.get('tiles_total', 0)} tiles)"
