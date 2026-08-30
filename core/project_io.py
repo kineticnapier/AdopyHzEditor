@@ -11,6 +11,39 @@ from core.note_model import Note
 PROJECT_VERSION = 3
 
 
+class ProjectVersionError(ValueError):
+    """Base error for project version compatibility failures."""
+
+
+class UnsupportedProjectVersionError(ProjectVersionError):
+    def __init__(self, version: int) -> None:
+        self.version = version
+        self.supported_version = PROJECT_VERSION
+        super().__init__(
+            "このプロジェクトは新しいAdopyHzEditorで作成されています。"
+            "アプリを更新してください。"
+            f"（プロジェクト: v{version} / 対応: v{PROJECT_VERSION}）"
+        )
+
+
+class InvalidProjectVersionError(ProjectVersionError):
+    def __init__(self, value: object) -> None:
+        self.value = value
+        super().__init__("プロジェクトのversionが不正なため読み込めません。")
+
+
+def _validate_project_version(data: dict[str, Any]) -> int | None:
+    """Return a supported version, or None for pre-version legacy files."""
+    if "version" not in data:
+        return None
+    version = data["version"]
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise InvalidProjectVersionError(version)
+    if version > PROJECT_VERSION:
+        raise UnsupportedProjectVersionError(version)
+    return version
+
+
 def _safe_relative_path(target: Path, base_dir: Path) -> str | None:
     try:
         return os.path.relpath(str(target.resolve()), str(base_dir.resolve())).replace("\\", "/")
@@ -145,6 +178,9 @@ def save_project(
 def load_project(path: str | Path) -> tuple[str | None, list[Note], dict[str, Any]]:
     project_path = Path(path)
     data = json.loads(project_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(data, dict):
+        raise ValueError("プロジェクトのJSON形式が不正です。")
+    _validate_project_version(data)
     audio_path = _resolve_audio_path(project_path, data)
     notes = [Note.from_dict(x) for x in data.get("notes", [])]
     settings = data.get("settings") or {}
