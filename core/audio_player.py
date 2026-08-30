@@ -127,7 +127,6 @@ class AudioPlayer:
     def set_playback_speed(self, speed: float) -> None:
         with self.lock:
             self.playback_speed = max(0.10, min(4.0, float(speed)))
-            self._pos_float = float(self.pos)
 
     def _normalize_note_instrument(self, instrument: str | None) -> str:
         key = (instrument or "sine").lower().replace(" ", "_").replace("-", "_")
@@ -224,8 +223,10 @@ class AudioPlayer:
         self._click_wave_cache[key] = wave[:, None]
         return self._click_wave_cache[key]
 
-    def _mix_metronome(self, outdata, start_sample: int, frames: int) -> None:
+    def _mix_metronome(self, outdata, source_positions: np.ndarray) -> None:
         if not self.metronome_enabled or self.metronome_bpm <= 0 or self.metronome_volume <= 0:
+            return
+        if len(source_positions) == 0:
             return
 
         beat_samples = self.sr * 60.0 / self.metronome_bpm
@@ -236,28 +237,35 @@ class AudioPlayer:
         click = self._click_wave(max(80, int(self.sr * 0.025)))
         click_len = len(click)
 
-        block_start = start_sample
-        block_end = start_sample + frames
+        block_start = float(source_positions[0])
+        block_end = float(source_positions[-1])
 
         k0 = int(np.floor((block_start - offset_sample - click_len) / beat_samples))
         k1 = int(np.ceil((block_end - offset_sample) / beat_samples))
 
         for k in range(k0, k1 + 1):
             beat = int(round(offset_sample + k * beat_samples))
-            if beat + click_len < block_start or beat >= block_end:
+            if beat + click_len < block_start or beat > block_end:
                 continue
-            out_s = max(0, beat - block_start)
-            clk_s = max(0, block_start - beat)
-            count = min(frames - out_s, click_len - clk_s)
-            if count > 0:
-                outdata[out_s:out_s + count, :] += click[clk_s:clk_s + count, :] * self.metronome_volume
+            out_s = int(np.searchsorted(source_positions, beat, side="left"))
+            out_e = int(np.searchsorted(source_positions, beat + click_len, side="left"))
+            if out_e <= out_s:
+                continue
+            click_positions = source_positions[out_s:out_e] - beat
+            i0 = np.floor(click_positions).astype(np.int64)
+            frac = (click_positions - i0).astype(np.float32)[:, None]
+            i1 = np.minimum(i0 + 1, click_len - 1)
+            sampled = click[i0] * (1.0 - frac) + click[i1] * frac
+            outdata[out_s:out_e, :] += sampled * self.metronome_volume
 
-    def _mix_preview_notes(self, outdata, start_sample: int, frames: int) -> None:
+    def _mix_preview_notes(self, outdata, source_positions: np.ndarray) -> None:
         if not self.note_sound_enabled or self.note_volume <= 0 or not self.preview_notes:
             return
+        if len(source_positions) == 0:
+            return
 
-        block_start = start_sample
-        block_end = start_sample + frames
+        block_start = float(source_positions[0])
+        block_end = float(source_positions[-1])
         sr = max(1, self.sr)
 
         # コールバックごとの短いブロックなので単純走査で十分。
@@ -267,16 +275,16 @@ class AudioPlayer:
         for ns, ne, midi in self.preview_notes:
             if ne <= block_start:
                 continue
-            if ns >= block_end:
+            if ns > block_end:
                 break
 
-            out_s = max(0, ns - block_start)
-            out_e = min(frames, ne - block_start)
+            out_s = int(np.searchsorted(source_positions, ns, side="left"))
+            out_e = int(np.searchsorted(source_positions, ne, side="left"))
             if out_e <= out_s:
                 continue
 
             freq = midi_to_hz(float(midi) + octave_shift * 12)
-            sample_index = np.arange(block_start + out_s, block_start + out_e, dtype=np.float32)
+            sample_index = source_positions[out_s:out_e]
             # 絶対サンプル時刻から生成するのでブロック境界で位相が飛びにくい
             phase = 2.0 * np.pi * freq * sample_index / sr
             local = sample_index - ns
@@ -368,19 +376,30 @@ class AudioPlayer:
         else:
             self.play()
 
-    def _read_audio_block_speed(self, start_pos: float, frames: int, speed: float):
+    def _source_positions(self, start_pos: float, frames: int, speed: float) -> np.ndarray:
+        return start_pos + np.arange(frames, dtype=np.float64) * float(speed)
+
+    def _read_audio_block_speed(
+        self,
+        start_pos: float,
+        frames: int,
+        speed: float,
+        source_positions: np.ndarray | None = None,
+    ):
         assert self.audio is not None
         n = len(self.audio)
         if n <= 0:
             return np.zeros((0, 1), dtype=np.float32)
 
-        if abs(speed - 1.0) < 1e-6:
+        if abs(speed - 1.0) < 1e-6 and abs(start_pos - round(start_pos)) < 1e-9:
             s = int(start_pos)
             e = min(n, s + frames)
             return self.audio[s:e]
 
-        positions = start_pos + np.arange(frames, dtype=np.float32) * float(speed)
-        valid = positions < (n - 1)
+        positions = source_positions
+        if positions is None:
+            positions = self._source_positions(start_pos, frames, speed)
+        valid = positions < n
         if not np.any(valid):
             return np.zeros((0, 1), dtype=np.float32)
 
@@ -398,24 +417,29 @@ class AudioPlayer:
 
             speed = max(0.10, min(4.0, float(getattr(self, "playback_speed", 1.0))))
             start_pos_float = float(getattr(self, "_pos_float", float(self.pos)))
-            start_pos = int(start_pos_float)
+            source_positions = self._source_positions(start_pos_float, frames, speed)
 
             outdata.fill(0)
 
             if self.audio is not None:
-                chunk = self._read_audio_block_speed(start_pos_float, frames, speed)
+                chunk = self._read_audio_block_speed(
+                    start_pos_float,
+                    frames,
+                    speed,
+                    source_positions,
+                )
                 if len(chunk) > 0:
                     outdata[:len(chunk), :] = chunk * self.volume
                 playback_end = len(self.audio)
                 chunk_len = len(chunk)
             else:
                 playback_end = max(0, int(self.virtual_duration_samples))
-                remaining = max(0, playback_end - start_pos)
-                chunk_len = min(frames, remaining)
+                chunk_len = int(np.searchsorted(source_positions, playback_end, side="left"))
 
             if chunk_len > 0:
-                self._mix_preview_notes(outdata, start_pos, frames)
-                self._mix_metronome(outdata, start_pos, frames)
+                active_positions = source_positions[:chunk_len]
+                self._mix_preview_notes(outdata[:chunk_len], active_positions)
+                self._mix_metronome(outdata[:chunk_len], active_positions)
                 np.clip(outdata, -1.0, 1.0, out=outdata)
 
             if chunk_len < frames:
