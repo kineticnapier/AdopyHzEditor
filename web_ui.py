@@ -370,6 +370,7 @@ def main() -> int:
         background_color="#20242a",
     )
     bridge.attach_window(window)
+    window.events.closing += bridge.on_window_closing
     webview.start(
         gui=_packaged_gui(),
         debug=os.environ.get("ADOPY_WEB_UI_DEBUG") == "1",
