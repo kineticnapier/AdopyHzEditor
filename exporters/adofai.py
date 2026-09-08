@@ -20,6 +20,10 @@ CURRENT_VISUAL_ROUTE_STATE: dict[str, Any] | None = None
 CURRENT_TWIRL_ACTIVE = False
 CURRENT_GENERATED_RELATIVES: list[float] = []
 
+AUTO_ROUTE_LOOKAHEAD = 32
+AUTO_ROUTE_MIN_TWIRL_GAP = 4
+AUTO_ROUTE_ENVELOPE_DEGREES = 90.0
+
 
 def new_level() -> dict[str, Any]:
     return {
@@ -115,13 +119,26 @@ def apply_twirl_angledata_rebuild(
     angle_data: list[Any],
     actions: list[dict[str, Any]],
     visual_path_mode: str,
-) -> None:
+    visual_path_angle: float = 90.0,
+    meaningful_floors: set[int] | None = None,
+) -> dict[str, int | float]:
     if not visual_path_twirl_enabled(visual_path_mode):
-        return
+        return {}
     if not CURRENT_GENERATED_RELATIVES:
-        return
+        return {}
+
+    twirl_floors, route_stats = plan_auto_route_twirls(
+        CURRENT_GENERATED_RELATIVES,
+        preferred_heading=visual_path_angle,
+        meaningful_floors=meaningful_floors,
+    )
+    actions.extend(twirl_event(floor) for floor in twirl_floors)
     rebuilt = rebuild_angle_data_from_relatives(CURRENT_GENERATED_RELATIVES, actions)
     angle_data[:] = rebuilt
+
+    if CURRENT_VISUAL_ROUTE_STATE is not None:
+        CURRENT_VISUAL_ROUTE_STATE.update(route_stats)
+    return route_stats
 
 
 def visual_path_key(mode: str) -> str:
@@ -140,6 +157,8 @@ def visual_path_enabled(mode: str) -> bool:
         "twirl_upward",
         "upward_twirl",
         "twirl_up",
+        "auto_route_twirl",
+        "auto_twirl",
     )
 
 
@@ -148,7 +167,13 @@ def visual_path_avoid_enabled(mode: str) -> bool:
 
 
 def visual_path_twirl_enabled(mode: str) -> bool:
-    return visual_path_key(mode) in ("twirl_upward", "upward_twirl", "twirl_up")
+    return visual_path_key(mode) in (
+        "twirl_upward",
+        "upward_twirl",
+        "twirl_up",
+        "auto_route_twirl",
+        "auto_twirl",
+    )
 
 
 def twirl_event(floor: int) -> dict[str, Any]:
@@ -180,6 +205,170 @@ def relative_for_heading(prev_abs: float, heading: float, twirled: bool) -> floa
     if twirled:
         return clean_relative_angle(float(heading) - float(prev_abs) + 180.0)
     return clean_relative_angle(float(prev_abs) + 180.0 - float(heading))
+
+
+def _signed_heading_offset(heading: float, preferred_heading: float) -> float:
+    return (float(heading) - float(preferred_heading) + 180.0) % 360.0 - 180.0
+
+
+def _auto_route_metrics(
+    angle_data: list[Any],
+    *,
+    preferred_heading: float,
+) -> dict[str, int | float]:
+    max_downward_run = 0
+    downward_run = 0
+    max_deviation = 0.0
+
+    # The first two entries are the untouched starter floors. Generated
+    # relative angles begin at angleData[2].
+    for raw_heading in angle_data[2:]:
+        heading = float(raw_heading)
+        deviation = abs(_signed_heading_offset(heading, preferred_heading))
+        max_deviation = max(max_deviation, deviation)
+        if deviation > 90.0 + 1e-7:
+            downward_run += 1
+            max_downward_run = max(max_downward_run, downward_run)
+        else:
+            downward_run = 0
+
+    return {
+        "max_downward_run": max_downward_run,
+        "max_heading_deviation": round(max_deviation, 6),
+    }
+
+
+def plan_auto_route_twirls(
+    relatives: list[float],
+    *,
+    preferred_heading: float = 90.0,
+    meaningful_floors: set[int] | None = None,
+    lookahead: int = AUTO_ROUTE_LOOKAHEAD,
+    min_twirl_gap: int = AUTO_ROUTE_MIN_TWIRL_GAP,
+    envelope_degrees: float = AUTO_ROUTE_ENVELOPE_DEGREES,
+) -> tuple[list[int], dict[str, int | float]]:
+    """Plan Twirls over the full timing-relative sequence in linear space.
+
+    The planner scans a bounded future window for the first heading that would
+    leave the half-plane centered on ``preferred_heading``.  It then chooses a
+    turn point within that window whose pre-Twirl heading is closest to the
+    angular envelope and whose post-Twirl step returns toward the center.
+
+    Only Twirl floors are returned.  ``relatives`` is never rewritten, which is
+    the central timing invariant for this mode.
+    """
+    cleaned = [clean_relative_angle(rel) for rel in relatives]
+    if not cleaned:
+        return [], {
+            "twirl_turns": 0,
+            "planner_lookahead": max(1, int(lookahead)),
+            "max_downward_run": 0,
+            "max_heading_deviation": 0.0,
+        }
+
+    preferred = float(preferred_heading) % 360.0
+    horizon = max(2, int(lookahead))
+    min_gap = max(1, int(min_twirl_gap))
+    envelope = max(30.0, min(170.0, float(envelope_degrees)))
+    boundary_floors = set(meaningful_floors or ())
+
+    twirled = False
+    heading = 0.0
+    index = 0
+    last_twirl_index = -min_gap
+    twirl_floors: list[int] = []
+
+    while index < len(cleaned):
+        simulated = heading
+        first_violation: int | None = None
+        scan_end = min(len(cleaned), index + horizon)
+        for future_index in range(index, scan_end):
+            simulated = heading_from_timing_relative(
+                simulated,
+                cleaned[future_index],
+                twirled,
+            )
+            if abs(_signed_heading_offset(simulated, preferred)) > envelope + 1e-7:
+                first_violation = future_index
+                break
+
+        if first_violation is None:
+            heading = heading_from_timing_relative(heading, cleaned[index], twirled)
+            index += 1
+            continue
+
+        first_allowed = max(index, last_twirl_index + min_gap)
+        if first_allowed > first_violation:
+            # Preserve the minimum spacing even for a difficult local pattern.
+            # The next iteration will reconsider once another floor is allowed.
+            heading = heading_from_timing_relative(heading, cleaned[index], twirled)
+            index += 1
+            continue
+
+        before_heading = heading
+        best_index = first_allowed
+        best_score = float("inf")
+
+        for candidate in range(index, first_violation + 1):
+            if candidate >= first_allowed:
+                no_turn_heading = heading_from_timing_relative(
+                    before_heading,
+                    cleaned[candidate],
+                    twirled,
+                )
+                turned_heading = heading_from_timing_relative(
+                    before_heading,
+                    cleaned[candidate],
+                    not twirled,
+                )
+                before_deviation = abs(_signed_heading_offset(before_heading, preferred))
+                no_turn_deviation = abs(_signed_heading_offset(no_turn_heading, preferred))
+                turned_deviation = abs(_signed_heading_offset(turned_heading, preferred))
+
+                # Natural folds happen at an envelope extremum, return inward,
+                # and do not create a new out-of-envelope tile.  A floor marking
+                # a note boundary only breaks otherwise near-equal choices.
+                score = abs(envelope - before_deviation)
+                score += max(0.0, turned_deviation - envelope) * 100.0
+                score += max(0.0, turned_deviation - before_deviation) * 4.0
+                if turned_deviation >= no_turn_deviation - 1e-7:
+                    score += 1000.0
+                score += (first_violation - candidate) * 0.01
+                if candidate + 2 in boundary_floors:
+                    score -= 0.25
+
+                if score < best_score - 1e-12:
+                    best_score = score
+                    best_index = candidate
+
+            before_heading = heading_from_timing_relative(
+                before_heading,
+                cleaned[candidate],
+                twirled,
+            )
+
+        for committed_index in range(index, best_index):
+            heading = heading_from_timing_relative(
+                heading,
+                cleaned[committed_index],
+                twirled,
+            )
+
+        twirled = not twirled
+        heading = heading_from_timing_relative(heading, cleaned[best_index], twirled)
+        # angleData begins with floors 0 and 1.  relatives[0] creates floor 2.
+        twirl_floors.append(best_index + 2)
+        last_twirl_index = best_index
+        index = best_index + 1
+
+    planned_actions = [twirl_event(floor) for floor in twirl_floors]
+    planned_angles = rebuild_angle_data_from_relatives(cleaned, planned_actions)
+    metrics = _auto_route_metrics(planned_angles, preferred_heading=preferred)
+    metrics.update({
+        "twirl_turns": len(twirl_floors),
+        "planner_lookahead": horizon,
+    })
+    return twirl_floors, metrics
 
 
 
@@ -424,10 +613,10 @@ def shape_visual_relative(
       keep the original direction while it is safe; if lookahead predicts an
       overlap with already placed tiles, choose an upward-biased safe heading.
 
-    twirl upward:
-      keep the requested relative angle unchanged. When the current orbit state
-      would make this tile flow downward, put Twirl on this tile's floor and
-      explicitly make this same tile use the post-Twirl relative-angle formula.
+    Auto Route (Twirl), including the legacy ``twirl upward`` alias:
+      keep the requested relative angle unchanged during generation.  A
+      bounded-lookahead post-pass plans Twirls over the complete sequence and
+      then rebuilds absolute angleData from those same timing relatives.
     """
     global CURRENT_TWIRL_ACTIVE
 
@@ -438,35 +627,10 @@ def shape_visual_relative(
         return base_rel, False, current_twirl
 
     if visual_path_twirl_enabled(visual_path_mode):
-        prev_abs = float(angle_data[-1])
-        state = CURRENT_VISUAL_ROUTE_STATE
-
-        current_heading = heading_from_timing_relative(prev_abs, base_rel, current_twirl)
-        sin_current = math.sin(math.radians(current_heading))
-        downward = sin_current < -0.08
-
-        if state is None:
-            return base_rel, False, current_twirl
-
-        if not downward:
-            # Re-arm only after the path has clearly returned upward, otherwise
-            # a long nearly-horizontal/downward section can spam Twirl events.
-            if sin_current > 0.08:
-                state["twirl_armed"] = True
-            return base_rel, False, current_twirl
-
-        if not state.get("twirl_armed", True):
-            return base_rel, False, current_twirl
-
-        next_twirl = not current_twirl
-        CURRENT_TWIRL_ACTIVE = next_twirl
-
-        state["pending_twirl"] = True
-        state["twirl_turns"] = int(state.get("twirl_turns", 0)) + 1
-        state["twirl_armed"] = False
-
-        # rel is unchanged; only the formula used for this tile changes.
-        return base_rel, True, next_twirl
+        # Planning is deliberately deferred until the complete relative-angle
+        # sequence is known.  This keeps generation identical to raw mode and
+        # prevents a one-tile local decision from changing timing data.
+        return base_rel, False, current_twirl
 
     if visual_path_avoid_enabled(visual_path_mode):
         shaped, changed = choose_upward_avoid_relative(
@@ -3091,9 +3255,17 @@ def build_adofai_level(
     global CURRENT_VISUAL_ROUTE_STATE, CURRENT_TWIRL_ACTIVE, CURRENT_GENERATED_RELATIVES
     CURRENT_TWIRL_ACTIVE = False
     CURRENT_GENERATED_RELATIVES = []
-    CURRENT_VISUAL_ROUTE_STATE = make_visual_route_state(angle_data) if (
-        visual_path_avoid_enabled(visual_path_mode) or visual_path_twirl_enabled(visual_path_mode)
-    ) else None
+    if visual_path_avoid_enabled(visual_path_mode):
+        CURRENT_VISUAL_ROUTE_STATE = make_visual_route_state(angle_data)
+    elif visual_path_twirl_enabled(visual_path_mode):
+        CURRENT_VISUAL_ROUTE_STATE = {
+            "twirl_turns": 0,
+            "planner_lookahead": AUTO_ROUTE_LOOKAHEAD,
+            "max_downward_run": 0,
+            "max_heading_deviation": 0.0,
+        }
+    else:
+        CURRENT_VISUAL_ROUTE_STATE = None
 
     method_key = (method or "rabbit_zip").lower().replace(" ", "_").replace("-", "_")
     use_phase_continuous_glide = bool(phase_continuous_glide)
@@ -3168,7 +3340,12 @@ def build_adofai_level(
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
         )
-        apply_twirl_angledata_rebuild(angle_data, actions, visual_path_mode)
+        apply_twirl_angledata_rebuild(
+            angle_data,
+            actions,
+            visual_path_mode,
+            visual_path_angle,
+        )
         stats: dict[str, int | float | str] = {
             "method": method_key,
             "track_visual": track_visual,
@@ -3182,6 +3359,8 @@ def build_adofai_level(
             "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
             "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
             "visual_route_twirls": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("twirl_turns", 0)),
+            "visual_route_max_downward_run": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("max_downward_run", 0)),
+            "visual_route_max_heading_deviation": float((CURRENT_VISUAL_ROUTE_STATE or {}).get("max_heading_deviation", 0.0)),
             "phase_continuous_glide": bool(use_phase_continuous_glide),
             "input_notes_total": len(notes),
             "base_bpm": round(float(base_bpm), 6),
@@ -3246,9 +3425,15 @@ def build_adofai_level(
         level.setdefault("settings", {})["bpm"] = round(play_bpm, 6)
         current_bpm = play_bpm
 
+    route_boundaries: set[int] = set()
+
     for n in sorted_notes:
         if max_tiles > 0 and tiles >= max_tiles:
             break
+
+        # The first generated relative for this note creates floor + 1 because
+        # angleData already contains the starter destination tile.
+        route_boundaries.add(floor + 1)
 
         if n.start > now + 1e-6:
             pause_seconds(actions, floor, n.start - now, current_bpm)
@@ -3393,7 +3578,13 @@ def build_adofai_level(
 
         now = max(now, n.end)
 
-    apply_twirl_angledata_rebuild(angle_data, actions, visual_path_mode)
+    apply_twirl_angledata_rebuild(
+        angle_data,
+        actions,
+        visual_path_mode,
+        visual_path_angle,
+        route_boundaries,
+    )
 
     stats: dict[str, int | float | str] = {
         "method": method_key,
@@ -3407,6 +3598,8 @@ def build_adofai_level(
         "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
         "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
         "visual_route_twirls": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("twirl_turns", 0)),
+        "visual_route_max_downward_run": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("max_downward_run", 0)),
+        "visual_route_max_heading_deviation": float((CURRENT_VISUAL_ROUTE_STATE or {}).get("max_heading_deviation", 0.0)),
         "curve_step_sec": round(float(curve_step_sec), 6),
         "curve_pitch_step": round(float(curve_pitch_step), 6),
         "phase_continuous_glide": bool(use_phase_continuous_glide),

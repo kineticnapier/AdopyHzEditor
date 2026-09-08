@@ -387,7 +387,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             ("raw", "export.visual_path.raw"),
             ("upward", "export.visual_path.upward"),
             ("upward avoid", "export.visual_path.upward_avoid"),
-            ("twirl upward", "export.visual_path.twirl_upward"),
+            ("auto route twirl", "export.visual_path.auto_route_twirl"),
         ])
         set_combo_value(self.visual_path_mode, "raw")
         self.visual_path_mode.setToolTip(
@@ -395,7 +395,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "raw: 角度をそのまま使う\n"
             "upward: 各タイルの絶対方向を指定角度へ寄せ、SetSpeedでtimingを補正する\n"
             "upward avoid: 通常方向が既存タイルに近づきそうな時だけ、上方向候補へ逃がす\n"
-            "twirl upward: 下向きになりそうな時だけそのfloorにTwirlを挟む。relは変えず、そのtileから即反転式で置く"
+            "Auto Route (Twirl): 先の経路を見て自然な折り返しにTwirlを置く。relとtimingは変えない"
         )
 
         self.visual_path_angle = QtWidgets.QDoubleSpinBox()
