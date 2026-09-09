@@ -7,6 +7,7 @@ from typing import Any
 
 import webview
 
+from app_metadata import APP_VERSION
 from exporters.midi import export_midi
 from i18n import available_languages, current_language, set_language, tr
 from core.note_model import Note
@@ -357,4 +358,8 @@ class ToolsMixin:
         return {"current": current_language(), "restartRequired": True, "status": tr("dialog.language.restart")}
 
     def get_update_info(self) -> dict[str, Any]:
-        return {"version": "0.7.2", "text": tr("update.open_releases_text", version="0.7.2"), "info": tr("update.open_releases_info")}
+        return {
+            "version": APP_VERSION,
+            "text": tr("update.open_releases_text", version=APP_VERSION),
+            "info": tr("update.open_releases_info"),
+        }
