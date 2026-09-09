@@ -18,29 +18,55 @@ MIDI_FILE_TYPES = ("MIDIファイル (*.mid;*.midi)", "すべてのファイル 
 ADOF_FILE_TYPES = ("ADOFAI譜面 (*.adofai)", "すべてのファイル (*.*)")
 
 
+# Keep the on-disk key, Web UI setting key, and saved value type together so
+# adding a setting cannot update the save path without also updating restore.
+PROJECT_SETTING_FIELDS: tuple[tuple[str, str, type], ...] = (
+    ("grid_bpm", "bpm", float),
+    ("grid_offset_ms", "offsetMs", float),
+    ("grid_enabled", "gridEnabled", bool),
+    ("metronome_enabled", "metronomeEnabled", bool),
+    ("metronome_volume", "metronomeVolume", int),
+    ("snap_enabled", "snapEnabled", bool),
+    ("snap_div", "snapDiv", int),
+    ("preview_octave", "previewOctave", int),
+    ("export_octave", "exportOctave", int),
+    ("export_semitone", "exportSemitone", int),
+    ("note_volume", "previewVolume", int),
+    ("note_sound_enabled", "notePreview", bool),
+    ("note_instrument", "previewSound", str),
+    ("song_volume", "volume", int),
+    ("playback_speed", "speed", float),
+    ("analysis_profile", "analysisProfile", str),
+    ("cqt_resolution", "cqtResolution", str),
+    ("display_mode", "displayMode", str),
+    ("cmap", "colormap", str),
+    ("contrast", "contrast", int),
+    ("gamma", "gamma", int),
+    ("enhance", "enhance", bool),
+    ("harmonics", "harmonics", str),
+    ("curve_shape", "curveShape", str),
+    ("curve_interpolation", "curveInterpolation", str),
+    ("target_angle", "targetAngle", float),
+)
+
+# Older desktop projects used this name before preview_octave was introduced.
+PROJECT_SETTING_ALIASES = {"note_octave": "previewOctave"}
+
+
 class IOMixin:
     def _project_settings(self) -> dict[str, Any]:
         s = self.settings
-        return {
-            "grid_bpm": float(s["bpm"]), "grid_offset_ms": float(s["offsetMs"]), "grid_enabled": bool(s["gridEnabled"]),
-            "metronome_enabled": bool(s["metronomeEnabled"]), "metronome_volume": int(s["metronomeVolume"]), "snap_enabled": bool(s["snapEnabled"]),
-            "snap_div": int(s["snapDiv"]), "preview_octave": int(s["previewOctave"]), "export_octave": int(s["exportOctave"]),
-            "export_semitone": int(s["exportSemitone"]), "note_volume": int(s["previewVolume"]), "note_sound_enabled": bool(s["notePreview"]),
-            "note_instrument": str(s["previewSound"]), "song_volume": int(s["volume"]), "playback_speed": float(s["speed"]),
-            "analysis_profile": str(s["analysisProfile"]), "cqt_resolution": str(s["cqtResolution"]), "display_mode": str(s["displayMode"]),
-            "cmap": str(s["colormap"]), "curve_shape": str(s["curveShape"]), "curve_interpolation": str(s["curveInterpolation"]), "web_ui": True,
-        }
+        saved = {project_key: value_type(s[setting_key]) for project_key, setting_key, value_type in PROJECT_SETTING_FIELDS}
+        saved["web_ui"] = True
+        return saved
 
     def _apply_project_settings(self, data: dict[str, Any]) -> None:
-        aliases = {
-            "grid_bpm":"bpm","grid_offset_ms":"offsetMs","grid_enabled":"gridEnabled","metronome_enabled":"metronomeEnabled","metronome_volume":"metronomeVolume",
-            "snap_enabled":"snapEnabled","snap_div":"snapDiv","preview_octave":"previewOctave","note_octave":"previewOctave","export_octave":"exportOctave",
-            "export_semitone":"exportSemitone","note_volume":"previewVolume","note_sound_enabled":"notePreview","note_instrument":"previewSound","song_volume":"volume",
-            "playback_speed":"speed","analysis_profile":"analysisProfile","cqt_resolution":"cqtResolution","display_mode":"displayMode","cmap":"colormap",
-            "curve_shape":"curveShape","curve_interpolation":"curveInterpolation",
-        }
-        for source,target in aliases.items():
-            if source in data and target in self.settings: self.settings[target]=self._normalize_setting(target,data[source])
+        for project_key, setting_key, _value_type in PROJECT_SETTING_FIELDS:
+            if project_key in data and setting_key in self.settings:
+                self.settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
+        for project_key, setting_key in PROJECT_SETTING_ALIASES.items():
+            if project_key in data and setting_key in self.settings:
+                self.settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
         self._apply_player_settings()
 
     def save_project_dialog(self) -> dict[str, Any]:
