@@ -64,6 +64,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self._status = "Ready"
         self._dirty = False
         self._allow_window_close = False
+        self._window_close_pending = False
 
         self.duration = 60.0
         self.midi_min = 12
@@ -117,20 +118,57 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         with self._lock:
             if self._allow_window_close or not self._dirty:
                 return True
+            if self._window_close_pending:
+                return False
+            self._window_close_pending = True
             window = self._window
-        if window is not None:
+        if window is None:
+            with self._lock:
+                self._window_close_pending = False
+            return False
+
+        # pywebview runs the locking closing event on the native GUI thread.
+        # Qt's evaluate_js waits for a result delivered by that same event loop,
+        # so calling it inline here can deadlock before React sees the request.
+        # Return from the native close callback first, then notify React.
+        threading.Thread(
+            target=self._dispatch_window_close_request,
+            args=(window,),
+            name="adopyhz-close-request",
+            daemon=True,
+        ).start()
+        return False
+
+    def _dispatch_window_close_request(self, window) -> None:
+        try:
             window.evaluate_js(
                 "window.dispatchEvent(new CustomEvent('adopyhz-close-requested'))"
             )
-        return False
+        except Exception:
+            # Keep the window open and allow a later close attempt to retry.
+            with self._lock:
+                self._window_close_pending = False
+
+    def cancel_window_close(self) -> dict[str, bool]:
+        """Return to normal editing after the close prompt is cancelled."""
+        with self._lock:
+            self._window_close_pending = False
+            self._allow_window_close = False
+        return {"ok": True}
 
     def close_window(self) -> dict[str, bool]:
         """Close after the frontend has resolved the unsaved-changes prompt."""
         with self._lock:
             self._allow_window_close = True
+            self._window_close_pending = False
             window = self._window
-        if window is not None:
-            window.destroy()
+        try:
+            if window is not None:
+                window.destroy()
+        except Exception:
+            with self._lock:
+                self._allow_window_close = False
+            raise
         return {"ok": True}
 
     def _dialog(self, mode, *, file_types, save_filename: str | None = None):
