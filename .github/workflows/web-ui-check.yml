@@ -132,11 +132,12 @@ jobs:
           assert state["settings"]["speed"] == 1.0
           PY
 
-      - name: Close and save lifecycle tests
+      - name: Web lifecycle and gap bridge tests
         run: >-
           python -m unittest
           tests.test_unsaved_data_protection
           tests.test_webview_lifecycle
+          tests.test_web_gap_bridge
 
       - name: Launcher is Windows PowerShell 5.1 safe
         shell: python
