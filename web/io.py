@@ -43,12 +43,25 @@ class IOMixin:
             if source in data and target in self.settings: self.settings[target]=self._normalize_setting(target,data[source])
         self._apply_player_settings()
 
-    def save_project_dialog(self) -> dict[str, Any]:
-        path=self._dialog(webview.FileDialog.SAVE,file_types=PROJECT_FILE_TYPES,save_filename="project.adopyhz")
-        if not path:return self.get_state()
+    def _save_project_path(self, path: str) -> dict[str, Any]:
         if not Path(path).suffix:path+=".adopyhz"
         with self._lock:
             save_project(path,audio_path=self.audio_path,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._dirty=False;self._status=f"{Path(path).name} を保存しました";return self._state_dict()
+
+    def save_project_dialog(self) -> dict[str, Any]:
+        """Save in place when possible; ask for a path only for new projects."""
+        with self._lock:
+            path = self.project_path
+        if path:
+            return self._save_project_path(path)
+        return self.save_project_as_dialog()
+
+    def save_project_as_dialog(self) -> dict[str, Any]:
+        with self._lock:
+            filename = Path(self.project_path).name if self.project_path else "project.adopyhz"
+        path=self._dialog(webview.FileDialog.SAVE,file_types=PROJECT_FILE_TYPES,save_filename=filename)
+        if not path:return self.get_state()
+        return self._save_project_path(path)
 
     def load_project_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.OPEN,file_types=PROJECT_FILE_TYPES)

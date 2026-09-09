@@ -11,6 +11,7 @@ on:
       - "importers/**"
       - "tools/**"
       - "frontend/**"
+      - "tests/**"
       - "requirements-core.txt"
       - "requirements-webui.txt"
       - "scripts/build_release.ps1"
@@ -58,6 +59,28 @@ jobs:
       - name: Build packaged Web UI
         shell: powershell
         run: .\scripts\build_release.ps1 -Clean -NoZip
+
+      - name: Test Windows source close and save lifecycle
+        shell: powershell
+        run: |
+          $python = (Resolve-Path ".venv\Scripts\python.exe").Path
+          & $python -m unittest tests.test_unsaved_data_protection tests.test_webview_lifecycle
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows source lifecycle tests failed."
+          }
+
+      - name: Smoke-test source Web UI with Qt
+        shell: powershell
+        run: |
+          $python = (Resolve-Path ".venv\Scripts\python.exe").Path
+          Remove-Item Env:ADOPY_WEB_UI_GUI -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath $python -ArgumentList "web_ui.py" -PassThru
+          Start-Sleep -Seconds 8
+          $process.Refresh()
+          if ($process.HasExited) {
+            throw "Source Web UI exited during startup with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
 
       - name: Verify packaged files
         shell: powershell

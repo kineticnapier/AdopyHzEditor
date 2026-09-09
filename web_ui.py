@@ -342,15 +342,20 @@ def _ui_url() -> str:
     return "frontend/dist/index.html"
 
 
-def _packaged_gui() -> str | None:
-    """Avoid pythonnet/WinForms in the frozen Windows package.
+def _webview_gui() -> str | None:
+    """Use the same Qt backend for Windows source and packaged runs.
 
-    pythonnet's .NET Framework loader has known failure modes after freezing
-    where Python.Runtime.dll is present but Loader.Initialize cannot be resolved.
-    The packaged Windows build therefore uses pywebview's Qt/PySide6 backend.
-    Source/dev runs keep pywebview's normal platform selection.
+    pywebview's EdgeChromium/WinForms file dialog is not marshaled to its GUI
+    thread in 6.2.1.  Qt uses queued signals for dialogs and window operations.
+    ADOPY_WEB_UI_GUI remains available for renderer diagnosis; ``auto`` restores
+    pywebview's platform default.
     """
-    if sys.platform.startswith("win") and getattr(sys, "frozen", False):
+    override = os.environ.get("ADOPY_WEB_UI_GUI", "").strip().lower()
+    if override in {"auto", "default"}:
+        return None
+    if override:
+        return override
+    if sys.platform.startswith("win"):
         return "qt"
     return None
 
@@ -372,7 +377,7 @@ def main() -> int:
     bridge.attach_window(window)
     window.events.closing += bridge.on_window_closing
     webview.start(
-        gui=_packaged_gui(),
+        gui=_webview_gui(),
         debug=os.environ.get("ADOPY_WEB_UI_DEBUG") == "1",
     )
     return 0
