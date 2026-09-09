@@ -308,6 +308,7 @@
   "export.visual_path.upward": "Prefer upward",
   "export.visual_path.upward_avoid": "Avoid overlap upward",
   "export.visual_path.twirl_upward": "Twirl upward",
+  "export.visual_path.auto_route_twirl": "Auto Route (Twirl)",
   "export.visual_position.off": "Off",
   "export.visual_position.note_step": "Step per note",
   "export.final_mode.scaled": "Scaled fractional tile",

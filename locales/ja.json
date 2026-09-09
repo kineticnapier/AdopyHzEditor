@@ -308,6 +308,7 @@
   "export.visual_path.upward": "上方向へ寄せる",
   "export.visual_path.upward_avoid": "重なり回避時だけ上方向",
   "export.visual_path.twirl_upward": "Twirlで上方向維持",
+  "export.visual_path.auto_route_twirl": "自動経路（Twirl）",
   "export.visual_position.off": "なし",
   "export.visual_position.note_step": "ノートごとにずらす",
   "export.final_mode.scaled": "端数に合わせて縮小",

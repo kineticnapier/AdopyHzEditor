@@ -257,7 +257,11 @@ class AdoFAIMixin:
             "max_tiles": _as_int(raw.get("maxTiles"), 200000, 0, 10000000),
             "max_tiles_per_note": _as_int(raw.get("maxTilesPerNote"), 5000, 0, 1000000),
             "track_visual": _choice(raw.get("trackVisual"), {"normal", "faint", "very faint", "hidden"}, "normal"),
-            "visual_path_mode": _choice(raw.get("visualPathMode"), {"raw", "upward", "upward avoid", "twirl upward"}, "raw"),
+            "visual_path_mode": _choice(
+                raw.get("visualPathMode"),
+                {"raw", "upward", "upward avoid", "auto route twirl", "twirl upward"},
+                "raw",
+            ),
             "visual_path_angle": _as_float(raw.get("visualPathAngle"), 90.0, 0.0, 359.999),
             "visual_position_mode": _choice(raw.get("visualPositionMode"), {"off", "note step"}, "off"),
             "visual_position_x": _as_float(raw.get("visualPositionX"), 0.0, -100000.0, 100000.0),
