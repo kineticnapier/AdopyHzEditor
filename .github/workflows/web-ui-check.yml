@@ -138,6 +138,9 @@ jobs:
           tests.test_unsaved_data_protection
           tests.test_webview_lifecycle
 
+      - name: Auto Route and Harmony timing invariants
+        run: python -m unittest tests.test_auto_route_twirl tests.test_harmony_auto_route
+
       - name: Launcher is Windows PowerShell 5.1 safe
         shell: python
         run: |
