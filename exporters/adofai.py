@@ -121,6 +121,7 @@ def apply_twirl_angledata_rebuild(
     visual_path_mode: str,
     visual_path_angle: float = 90.0,
     meaningful_floors: set[int] | None = None,
+    avoid_retracing: bool = False,
 ) -> dict[str, int | float]:
     if not visual_path_twirl_enabled(visual_path_mode):
         return {}
@@ -131,6 +132,7 @@ def apply_twirl_angledata_rebuild(
         CURRENT_GENERATED_RELATIVES,
         preferred_heading=visual_path_angle,
         meaningful_floors=meaningful_floors,
+        avoid_retracing=avoid_retracing,
     )
     actions.extend(twirl_event(floor) for floor in twirl_floors)
     rebuilt = rebuild_angle_data_from_relatives(CURRENT_GENERATED_RELATIVES, actions)
@@ -246,6 +248,7 @@ def plan_auto_route_twirls(
     lookahead: int = AUTO_ROUTE_LOOKAHEAD,
     min_twirl_gap: int = AUTO_ROUTE_MIN_TWIRL_GAP,
     envelope_degrees: float = AUTO_ROUTE_ENVELOPE_DEGREES,
+    avoid_retracing: bool = False,
 ) -> tuple[list[int], dict[str, int | float]]:
     """Plan Twirls over the full timing-relative sequence in linear space.
 
@@ -277,9 +280,20 @@ def plan_auto_route_twirls(
     index = 0
     last_twirl_index = -min_gap
     twirl_floors: list[int] = []
+    x, y = 0.0, 0.0
+    visited = {_route_cell(x, y)}
+
+    def record_step(angle: float) -> None:
+        nonlocal x, y
+        if avoid_retracing:
+            x += math.cos(math.radians(angle))
+            y += math.sin(math.radians(angle))
+            visited.add(_route_cell(x, y))
 
     while index < len(cleaned):
         simulated = heading
+        sx, sy = x, y
+        future_cells: set[tuple[int, int]] = set()
         first_violation: int | None = None
         scan_end = min(len(cleaned), index + horizon)
         for future_index in range(index, scan_end):
@@ -288,12 +302,20 @@ def plan_auto_route_twirls(
                 cleaned[future_index],
                 twirled,
             )
-            if abs(_signed_heading_offset(simulated, preferred)) > envelope + 1e-7:
+            collision = False
+            if avoid_retracing:
+                sx += math.cos(math.radians(simulated))
+                sy += math.sin(math.radians(simulated))
+                cell = _route_cell(sx, sy)
+                collision = cell in visited or cell in future_cells
+                future_cells.add(cell)
+            if collision or abs(_signed_heading_offset(simulated, preferred)) > envelope + 1e-7:
                 first_violation = future_index
                 break
 
         if first_violation is None:
             heading = heading_from_timing_relative(heading, cleaned[index], twirled)
+            record_step(heading)
             index += 1
             continue
 
@@ -302,6 +324,7 @@ def plan_auto_route_twirls(
             # Preserve the minimum spacing even for a difficult local pattern.
             # The next iteration will reconsider once another floor is allowed.
             heading = heading_from_timing_relative(heading, cleaned[index], twirled)
+            record_step(heading)
             index += 1
             continue
 
@@ -337,6 +360,22 @@ def plan_auto_route_twirls(
                 if candidate + 2 in boundary_floors:
                     score -= 0.25
 
+                if avoid_retracing:
+                    # Score the same bounded future with this candidate Twirl.
+                    # No timing angles or speed events are changed.
+                    px, py, ph = x, y, heading
+                    cells: set[tuple[int, int]] = set()
+                    for probe in range(index, scan_end):
+                        ph = heading_from_timing_relative(
+                            ph, cleaned[probe], twirled ^ (probe >= candidate)
+                        )
+                        px += math.cos(math.radians(ph))
+                        py += math.sin(math.radians(ph))
+                        cell = _route_cell(px, py)
+                        if cell in visited or cell in cells:
+                            score += 10000.0
+                        cells.add(cell)
+
                 if score < best_score - 1e-12:
                     best_score = score
                     best_index = candidate
@@ -353,9 +392,11 @@ def plan_auto_route_twirls(
                 cleaned[committed_index],
                 twirled,
             )
+            record_step(heading)
 
         twirled = not twirled
         heading = heading_from_timing_relative(heading, cleaned[best_index], twirled)
+        record_step(heading)
         # angleData begins with floors 0 and 1.  relatives[0] creates floor 2.
         twirl_floors.append(best_index + 2)
         last_twirl_index = best_index
@@ -3345,6 +3386,7 @@ def build_adofai_level(
             actions,
             visual_path_mode,
             visual_path_angle,
+            avoid_retracing=_harmony_timing_key(harmony_timing_mode) == "ratio_polyrhythm",
         )
         stats: dict[str, int | float | str] = {
             "method": method_key,
