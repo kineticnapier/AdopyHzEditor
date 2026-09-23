@@ -32,6 +32,7 @@ NON_DEFAULT_SETTINGS = {
     "colormap": "magma",
     "analysisProfile": "Deep",
     "cqtResolution": "48 bins/octave",
+    "analysisSource": "vorbis_direct",
     "curveShape": "smoothstep",
     "curveInterpolation": "bezier_hz",
     "targetAngle": 137.5,

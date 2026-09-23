@@ -13,6 +13,11 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include <string.h>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 #define FORMAT_VERSION 1u
 #define BLOCK_TAG 0x4b434c42u /* "BLCK", little endian */
@@ -185,6 +190,7 @@ int main(int argc, char **argv)
    int decoder_error = VORBIS__no_error;
    int result = 0;
    int ok = 1;
+   int output_is_stdout = 0;
 
    if (argc != 3) {
       fprintf(stderr, "usage: %s INPUT.ogg OUTPUT.bin\n", argv[0]);
@@ -192,6 +198,7 @@ int main(int argc, char **argv)
    }
    input_path = argv[1];
    output_path = argv[2];
+   output_is_stdout = strcmp(output_path, "-") == 0;
 
    decoder = open_spectrum_file(input_path, &decoder_error);
    if (!decoder) {
@@ -202,7 +209,14 @@ int main(int argc, char **argv)
    info = stb_vorbis_get_info(decoder);
    total_samples = (uint64_t)stb_vorbis_stream_length_in_samples(decoder);
 
-   out = fopen(output_path, "wb");
+   if (output_is_stdout) {
+      out = stdout;
+#ifdef _WIN32
+      _setmode(_fileno(stdout), _O_BINARY);
+#endif
+   } else {
+      out = fopen(output_path, "wb");
+   }
    if (!out) {
       fprintf(stderr, "cannot create output: %s (%s)\n",
               output_path, strerror(errno));
@@ -244,12 +258,17 @@ int main(int argc, char **argv)
    if (ok)
       ok = write_u32(out, END_TAG);
 
-   if (fclose(out) != 0)
+   if (output_is_stdout) {
+      if (fflush(out) != 0)
+         ok = 0;
+   } else if (fclose(out) != 0) {
       ok = 0;
+   }
    stb_vorbis_close(decoder);
 
    if (!ok) {
-      remove(output_path);
+      if (!output_is_stdout)
+         remove(output_path);
       return 5;
    }
    return 0;

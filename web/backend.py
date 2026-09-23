@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import math
 import threading
 from pathlib import Path
@@ -16,6 +17,10 @@ from core.audio_analysis import (
 )
 from core.audio_player import AudioPlayer, decode_audio_file
 from core.note_model import Note, midi_to_hz, note_name
+from core.vorbis_direct import (
+    analyze_vorbis_direct_notes,
+    select_analysis_backend,
+)
 from web.editing import EditingMixin
 from web.io import IOMixin
 from web.notes import NoteMixin
@@ -32,6 +37,7 @@ PROJECT_FILE_TYPES = (
 )
 MIDI_FILE_TYPES = ("MIDI Files (*.mid;*.midi)", "All files (*.*)")
 ADOF_FILE_TYPES = ("ADOFAI Level (*.adofai)", "All files (*.*)")
+LOGGER = logging.getLogger(__name__)
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -54,6 +60,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self._window = None
         self.player = AudioPlayer()
         self.spectrogram: Spectrogram | None = None
+        self.analysis_stats: dict[str, Any] = {}
         self.audio_path: str | None = None
         self.project_path: str | None = None
         self.notes: list[Note] = []
@@ -95,6 +102,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             "colormap": "wavetone",
             "analysisProfile": "Normal",
             "cqtResolution": "profile default",
+            "analysisSource": "cqt",
             "curveShape": "ease",
             "curveInterpolation": "bezier_pitch",
             "targetAngle": 165.0,
@@ -212,6 +220,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             return _int_clamp(value, 5, 500)
         if key == "targetAngle":
             return _clamp(value, 0.001, 359.999)
+        if key == "analysisSource":
+            return "vorbis_direct" if str(value) == "vorbis_direct" else "cqt"
         if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
             return bool(value)
         return str(value)
@@ -233,6 +243,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "midi",
                 "adofai",
                 "cursor-peak",
+                "vorbis-direct-notes",
             ],
         }
 
@@ -243,6 +254,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         if self.spectrogram is None:
             return {
                 "available": False,
+                "source": str(self.settings["analysisSource"]),
+                "stats": dict(self.analysis_stats),
                 "duration": float(self.duration),
                 "midiMin": int(self.midi_min),
                 "midiMax": int(self.midi_max),
@@ -250,6 +263,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             }
         return {
             "available": True,
+            "source": "cqt",
+            "stats": dict(self.analysis_stats),
             "duration": float(self.spectrogram.duration),
             "midiMin": int(self.spectrogram.midi_min),
             "midiMax": int(self.spectrogram.midi_max),
@@ -369,9 +384,10 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             decoded = decode_audio_file(path)
             with self._lock:
                 self._set_audio_data(path, decoded)
-            self._analyze_current_audio()
+            analysis_result = self._analyze_current_audio()
             with self._lock:
-                self._status = f"Loaded {Path(path).name}"
+                if analysis_result == "cqt":
+                    self._status = f"Loaded {Path(path).name}"
                 self._dirty = was_dirty or previous_audio != self.audio_path
             return self.get_state()
         finally:
@@ -393,20 +409,93 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             options["fold_to_semitone"] = False
         return options
 
-    def _analyze_current_audio(self) -> None:
+    def _analyze_current_audio(self, *, generate_notes: bool = False) -> str | None:
         if not self.audio_path:
-            return
+            return None
         self._busy = True
         try:
+            requested = str(self.settings.get("analysisSource", "cqt"))
+            if requested == "vorbis_direct":
+                selection = select_analysis_backend(
+                    self.audio_path,
+                    "vorbis_direct",
+                )
+                if selection.selected == "vorbis_direct":
+                    if not generate_notes:
+                        with self._lock:
+                            self.spectrogram = None
+                            self.analysis_stats = {
+                                "requestedSource": "vorbis_direct",
+                                "selectedSource": "vorbis_direct",
+                            }
+                            self._status = (
+                                "Vorbis Direct を選択中です。解析を実行すると"
+                                "現在のノートを置き換えます"
+                            )
+                        return "direct_pending"
+                    result = analyze_vorbis_direct_notes(self.audio_path)
+                    stats = result.stats.to_dict()
+                    stats.update(
+                        requestedSource="vorbis_direct",
+                        selectedSource="vorbis_direct",
+                    )
+                    with self._lock:
+                        self._push_undo()
+                        self.notes = [note.normalized() for note in result.notes]
+                        self.spectrogram = None
+                        self.analysis_stats = stats
+                        self.duration = max(0.001, float(result.stream_info.duration))
+                        self.player.set_virtual_duration(self.duration)
+                        if self.notes:
+                            self.midi_min = max(
+                                0,
+                                int(math.floor(min(note.midi for note in self.notes))) - 2,
+                            )
+                            self.midi_max = min(
+                                127,
+                                int(math.ceil(max(note.midi for note in self.notes))) + 2,
+                            )
+                        else:
+                            self.midi_min, self.midi_max = 12, 120
+                        self.pitch_step = 1.0
+                        self.view["mode"] = "notes"
+                        self._dirty = True
+                        self._sync_notes_to_player()
+                        self._status = (
+                            f"Vorbis Direct: {len(self.notes)}個のノート "
+                            f"({stats['blocksProcessed']} blocks, "
+                            f"{stats['analysisSeconds']:.2f}s)"
+                        )
+                    LOGGER.info("Vorbis Direct analysis stats: %s", stats)
+                    return "vorbis_direct"
+
+                LOGGER.info(
+                    "Vorbis Direct fallback: %s",
+                    selection.fallback_reason,
+                )
+
             spec = analyze_cqt(self.audio_path, **self._analysis_options())
             with self._lock:
                 self.spectrogram = spec
+                self.analysis_stats = {
+                    "requestedSource": requested,
+                    "selectedSource": "cqt",
+                }
+                if requested == "vorbis_direct":
+                    self.analysis_stats["fallbackReason"] = (
+                        selection.fallback_reason
+                    )
                 self.duration = max(0.001, float(spec.duration))
                 self.midi_min = int(spec.midi_min)
                 self.midi_max = int(spec.midi_max)
                 self.pitch_step = float(spec.pitch_step)
                 self.player.set_virtual_duration(self.duration)
-                self._status = "Analysis ready"
+                self._status = (
+                    "Vorbis Direct はこの音源で使えないため、CQTで解析しました"
+                    if requested == "vorbis_direct"
+                    else "Analysis ready"
+                )
+            return "fallback" if requested == "vorbis_direct" else "cqt"
         finally:
             self._busy = False
 
@@ -415,7 +504,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             with self._lock:
                 self._status = "Open an audio file first"
             return self.get_state()
-        self._analyze_current_audio()
+        self._analyze_current_audio(generate_notes=True)
         return self.get_state()
 
     def get_cursor_peak(self, seconds: float, midi: float, search_range: float = 5.0) -> dict[str, Any]:

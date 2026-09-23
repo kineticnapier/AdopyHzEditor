@@ -6,11 +6,19 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
+from core.audio_analysis import Spectrogram
+from core.note_model import Note
 from core.vorbis_direct import (
+    analyze_vorbis_direct_notes,
+    BackendSelection,
+    VorbisDirectAnalysisStats,
+    VorbisDirectNoteResult,
     VorbisDirectUnavailableError,
+    VorbisStreamInfo,
     ensure_vorbis_direct_helper,
     extract_vorbis_spectrum,
     select_analysis_backend,
@@ -257,6 +265,232 @@ class VorbisDirectTests(unittest.TestCase):
         self.assertEqual(selection.requested, "vorbis_direct")
         self.assertEqual(selection.selected, "pcm")
         self.assertIn("falling back", selection.fallback_reason)
+
+    def test_pure_tone_becomes_a_small_number_of_long_notes(self):
+        source = self._encode(
+            "sine=frequency=440:sample_rate=44100:duration=3",
+            "tracked-tone.ogg",
+        )
+
+        result = analyze_vorbis_direct_notes(
+            source,
+            helper_path=self.helper,
+        )
+        near_440 = [
+            note for note in result.notes if abs(note.freq - 440.0) < 25.0
+        ]
+
+        self.assertTrue(near_440)
+        self.assertGreater(max(note.duration for note in near_440), 2.5)
+        self.assertLess(len(result.notes), result.stats.blocks_processed // 4)
+        self.assertEqual(result.stats.final_note_count, len(result.notes))
+
+    def test_multiple_tones_become_simultaneous_notes(self):
+        source = self._encode(
+            (
+                "aevalsrc="
+                "0.25*sin(2*PI*440*t)+"
+                "0.2*sin(2*PI*660*t)+"
+                "0.15*sin(2*PI*880*t):s=44100:d=2"
+            ),
+            "tracked-multiple.ogg",
+        )
+
+        result = analyze_vorbis_direct_notes(
+            source,
+            helper_path=self.helper,
+        )
+
+        for frequency in (440.0, 660.0, 880.0):
+            matching = [
+                note
+                for note in result.notes
+                if abs(note.freq - frequency) < 30.0 and note.duration > 1.5
+            ]
+            self.assertTrue(matching, frequency)
+
+    def test_changing_tone_tracks_frequency_and_time(self):
+        source = self._encode(
+            (
+                "aevalsrc="
+                "if(lt(t\\,1)\\,sin(2*PI*440*t)\\,"
+                "sin(2*PI*660*t)):s=44100:d=2"
+            ),
+            "changing.ogg",
+        )
+
+        result = analyze_vorbis_direct_notes(
+            source,
+            helper_path=self.helper,
+        )
+        first = [
+            note
+            for note in result.notes
+            if abs(note.freq - 440.0) < 30.0 and note.start < 0.2
+        ]
+        second = [
+            note
+            for note in result.notes
+            if abs(note.freq - 660.0) < 30.0 and note.start > 0.8
+        ]
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        self.assertLess(min(note.start for note in second), 1.2)
+
+    def test_note_analysis_accepts_short_and_long_blocks(self):
+        source = self._encode(
+            (
+                "aevalsrc="
+                "0.2*sin(2*PI*440*t)+"
+                "if(lt(mod(t\\,0.25)\\,0.001)\\,0.8\\,0)"
+                ":s=44100:d=2"
+            ),
+            "tracked-transient.ogg",
+        )
+
+        result = analyze_vorbis_direct_notes(
+            source,
+            helper_path=self.helper,
+        )
+
+        self.assertGreater(result.stats.short_blocks, 0)
+        self.assertGreater(result.stats.long_blocks, 0)
+        self.assertEqual(
+            result.stats.blocks_processed,
+            result.stats.short_blocks + result.stats.long_blocks,
+        )
+        previous_start = -1.0
+        for note in result.notes:
+            self.assertTrue(np.isfinite([note.start, note.end, note.midi]).all())
+            self.assertGreater(note.end, note.start)
+            self.assertGreaterEqual(note.start, previous_start)
+            previous_start = note.start
+
+
+class VorbisDirectEditorIntegrationTests(unittest.TestCase):
+    @staticmethod
+    def _direct_result() -> VorbisDirectNoteResult:
+        notes = (
+            Note(0.1, 0.9, 69.0),
+            Note(0.2, 0.8, 76.0),
+        )
+        return VorbisDirectNoteResult(
+            notes=notes,
+            stream_info=VorbisStreamInfo(44100, 1, 256, 2048, 44100),
+            stats=VorbisDirectAnalysisStats(
+                blocks_processed=50,
+                short_blocks=40,
+                long_blocks=10,
+                raw_peaks_detected=120,
+                peaks_after_threshold=80,
+                peaks_selected=70,
+                final_note_count=2,
+                analysis_seconds=0.25,
+                python_peak_memory_bytes=4096,
+            ),
+        )
+
+    def test_direct_result_replaces_editor_notes_with_normal_notes(self):
+        import web.backend as web_backend
+        from web_ui import Bridge
+
+        bridge = Bridge()
+        bridge.audio_path = "tone.ogg"
+        bridge.settings["analysisSource"] = "vorbis_direct"
+        bridge.notes = [Note(0.0, 0.5, 60.0)]
+
+        with (
+            mock.patch.object(
+                web_backend,
+                "select_analysis_backend",
+                return_value=BackendSelection(
+                    requested="vorbis_direct",
+                    selected="vorbis_direct",
+                ),
+            ),
+            mock.patch.object(
+                web_backend,
+                "analyze_vorbis_direct_notes",
+                return_value=self._direct_result(),
+            ),
+        ):
+            state = bridge.reanalyze_audio()
+
+        self.assertEqual(len(bridge.notes), 2)
+        self.assertTrue(all(isinstance(note, Note) for note in bridge.notes))
+        self.assertEqual(state["analysis"]["stats"]["finalNoteCount"], 2)
+        self.assertEqual(state["view"]["mode"], "notes")
+        self.assertTrue(state["dirty"])
+        bridge.undo()
+        self.assertEqual([note.midi for note in bridge.notes], [60.0])
+
+    def test_non_vorbis_direct_request_falls_back_without_replacing_notes(self):
+        import web.backend as web_backend
+        from web_ui import Bridge
+
+        bridge = Bridge()
+        bridge.audio_path = "audio.wav"
+        bridge.settings["analysisSource"] = "vorbis_direct"
+        bridge.notes = [Note(0.0, 0.5, 60.0)]
+        spec = Spectrogram(
+            audio_path="audio.wav",
+            db=np.zeros((2, 3), dtype=np.float32),
+            duration=1.0,
+            midi_min=60,
+            midi_max=61,
+            frame_times=np.linspace(0.0, 1.0, 3),
+            sr=22050,
+            bins_per_semitone=1,
+        )
+
+        with (
+            mock.patch.object(
+                web_backend,
+                "select_analysis_backend",
+                return_value=mock.Mock(
+                    selected="pcm",
+                    fallback_reason="not Vorbis",
+                ),
+            ),
+            mock.patch.object(web_backend, "analyze_cqt", return_value=spec),
+        ):
+            state = bridge.reanalyze_audio()
+
+        self.assertEqual([note.midi for note in bridge.notes], [60.0])
+        self.assertTrue(state["analysis"]["available"])
+        self.assertEqual(state["analysis"]["stats"]["selectedSource"], "cqt")
+        self.assertEqual(state["analysis"]["stats"]["fallbackReason"], "not Vorbis")
+
+    def test_default_cqt_path_is_unchanged(self):
+        import web.backend as web_backend
+        from web_ui import Bridge
+
+        bridge = Bridge()
+        bridge.audio_path = "audio.ogg"
+        original_notes = [Note(0.0, 0.5, 60.0)]
+        bridge.notes = list(original_notes)
+        spec = Spectrogram(
+            audio_path="audio.ogg",
+            db=np.zeros((2, 3), dtype=np.float32),
+            duration=1.0,
+            midi_min=60,
+            midi_max=61,
+            frame_times=np.linspace(0.0, 1.0, 3),
+            sr=22050,
+            bins_per_semitone=1,
+        )
+
+        with mock.patch.object(
+            web_backend,
+            "analyze_cqt",
+            return_value=spec,
+        ) as analyze:
+            bridge.reanalyze_audio()
+
+        analyze.assert_called_once()
+        self.assertEqual(bridge.notes, original_notes)
+        self.assertEqual(bridge.analysis_stats["selectedSource"], "cqt")
 
 
 if __name__ == "__main__":

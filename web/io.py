@@ -38,6 +38,7 @@ PROJECT_SETTING_FIELDS: tuple[tuple[str, str, type], ...] = (
     ("playback_speed", "speed", float),
     ("analysis_profile", "analysisProfile", str),
     ("cqt_resolution", "cqtResolution", str),
+    ("analysis_source", "analysisSource", str),
     ("display_mode", "displayMode", str),
     ("cmap", "colormap", str),
     ("contrast", "contrast", int),
