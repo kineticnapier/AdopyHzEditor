@@ -142,7 +142,10 @@ jobs:
           tests.test_web_gap_bridge
 
       - name: Vorbis Direct integration tests
-        run: python -m unittest tests.test_vorbis_direct
+        run: >-
+          python -m unittest
+          tests.test_vorbis_direct
+          tests.test_vorbis_spectrum_import
 
       - name: Launcher is Windows PowerShell 5.1 safe
         shell: python
