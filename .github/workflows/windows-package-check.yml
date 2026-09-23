@@ -10,6 +10,8 @@ on:
       - "exporters/**"
       - "importers/**"
       - "tools/**"
+      - "native/**"
+      - "third_party/**"
       - "frontend/**"
       - "tests/**"
       - "requirements-core.txt"
