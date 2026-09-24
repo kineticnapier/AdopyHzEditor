@@ -41,6 +41,7 @@ PROJECT_SETTING_FIELDS: tuple[tuple[str, str, type], ...] = (
     ("analysis_source", "analysisSource", str),
     ("spectrum_threshold", "spectrumThreshold", float),
     ("spectrum_opacity", "spectrumOpacity", int),
+    ("spectrum_layer_mode", "spectrumLayerMode", str),
     ("display_mode", "displayMode", str),
     ("cmap", "colormap", str),
     ("contrast", "contrast", int),

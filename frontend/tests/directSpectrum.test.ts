@@ -5,6 +5,7 @@ import {
   FOLLOW_TARGET_RATIO,
   FOLLOW_TRIGGER_RATIO,
   followViewportStart,
+  spectrumLayersForMode,
   spectrumRegionKey,
   type SpectrumRegion,
 } from "../src/editor/directSpectrum.ts";
@@ -16,6 +17,12 @@ const baseRegion: SpectrumRegion = {
 
 test("cursor movement inside the dead-zone keeps the viewport fixed", () => {
   assert.equal(followViewportStart(10, 10, 10 + 10 * (FOLLOW_TRIGGER_RATIO - 0.01), 100), null);
+});
+
+test("Raw, Tracks, and Both select the intended spectrum sub-layers", () => {
+  assert.deepEqual(spectrumLayersForMode("raw"), { raw: true, tracks: false });
+  assert.deepEqual(spectrumLayersForMode("tracks"), { raw: false, tracks: true });
+  assert.deepEqual(spectrumLayersForMode("both"), { raw: true, tracks: true });
 });
 
 test("crossing the follow threshold advances one prefetched page", () => {
@@ -42,16 +49,20 @@ test("same region is cached and concurrent requests are deduplicated", async () 
   assert.equal(cache.stats.backendQueries, 1);
 });
 
-test("one second of cursor-only animation does not create repeated spectrum queries", async () => {
-  let calls = 0;
-  const cache = new DirectSpectrumRegionCache(async () => { calls += 1; return { available: true }; });
-  await cache.load(baseRegion);
+test("one second of cursor-only animation does not repeat raw or track queries", async () => {
+  let rawCalls = 0, trackCalls = 0;
+  const rawCache = new DirectSpectrumRegionCache(async () => { rawCalls += 1; return { available: true }; });
+  const trackCache = new DirectSpectrumRegionCache(async () => { trackCalls += 1; return { available: true, pointCount: 1 }; });
+  await rawCache.load(baseRegion);
+  await trackCache.load(baseRegion);
   for (let frame = 0; frame < 60; frame += 1) {
     const cursorTime = 1 + frame / 60;
     assert.equal(followViewportStart(0, 10, cursorTime, 100), null);
   }
-  assert.equal(calls, 1);
-  assert.equal(cache.stats.backendQueries, 1);
+  assert.equal(rawCalls, 1);
+  assert.equal(trackCalls, 1);
+  assert.equal(rawCache.stats.backendQueries, 1);
+  assert.equal(trackCache.stats.backendQueries, 1);
 });
 
 test("an invalidated stale request cannot repopulate or rewind the viewport", async () => {
@@ -66,6 +77,20 @@ test("an invalidated stale request cannot repopulate or rewind the viewport", as
   resolvers[0]({ available: true, startTime: 0 });
   assert.equal(await stale, null);
   assert.equal(cache.stats.staleResults, 1);
+});
+
+test("a stale track viewport response is ignored after a manual region change", async () => {
+  type TrackPayload = { available: boolean; startTime: number; pointCount: number };
+  const resolvers: Array<(value: TrackPayload) => void> = [];
+  const cache = new DirectSpectrumRegionCache<TrackPayload>(() => new Promise(done => { resolvers.push(done); }));
+  const oldViewport = cache.load(baseRegion);
+  cache.invalidate();
+  const movedRegion = { ...baseRegion, startTime: 20, endTime: 30 };
+  const movedViewport = cache.load(movedRegion);
+  resolvers[1]({ available: true, startTime: 20, pointCount: 200 });
+  assert.equal((await movedViewport)?.startTime, 20);
+  resolvers[0]({ available: true, startTime: 0, pointCount: 300 });
+  assert.equal(await oldViewport, null);
 });
 
 test("a manual seek outside the viewport selects the target-zone region", () => {

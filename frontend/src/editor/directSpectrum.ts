@@ -4,6 +4,10 @@ export const FOLLOW_TRIGGER_RATIO = 0.78;
 export const FOLLOW_TARGET_RATIO = 0.24;
 export const FOLLOW_PAGE_RATIO = FOLLOW_TRIGGER_RATIO - FOLLOW_TARGET_RATIO;
 
+export function spectrumLayersForMode(mode: "raw" | "tracks" | "both") {
+  return { raw: mode !== "tracks", tracks: mode !== "raw" };
+}
+
 export type SpectrumRegion = {
   startTime: number;
   endTime: number;
@@ -72,17 +76,17 @@ export function spectrumRegionKey(region: SpectrumRegion): string {
   ]);
 }
 
-type FetchRegion = (region: SpectrumRegion) => Promise<DirectSpectrumPayload>;
+type FetchRegion<T> = (region: SpectrumRegion) => Promise<T>;
 
-export class DirectSpectrumRegionCache {
-  private readonly cache = new Map<string, DirectSpectrumPayload>();
-  private readonly inflight = new Map<string, Promise<DirectSpectrumPayload | null>>();
-  private readonly fetchRegion: FetchRegion;
+export class DirectSpectrumRegionCache<T = DirectSpectrumPayload> {
+  private readonly cache = new Map<string, T>();
+  private readonly inflight = new Map<string, Promise<T | null>>();
+  private readonly fetchRegion: FetchRegion<T>;
   private readonly maxEntries: number;
   private generation = 0;
   readonly stats = { backendQueries: 0, cacheHits: 0, deduplicatedQueries: 0, staleResults: 0 };
 
-  constructor(fetchRegion: FetchRegion, maxEntries = 2) {
+  constructor(fetchRegion: FetchRegion<T>, maxEntries = 2) {
     this.fetchRegion = fetchRegion;
     this.maxEntries = maxEntries;
   }
@@ -93,7 +97,7 @@ export class DirectSpectrumRegionCache {
     this.inflight.clear();
   }
 
-  peek(region: SpectrumRegion): DirectSpectrumPayload | undefined {
+  peek(region: SpectrumRegion): T | undefined {
     const key = spectrumRegionKey(region);
     const payload = this.cache.get(key);
     if (payload) {
@@ -104,7 +108,7 @@ export class DirectSpectrumRegionCache {
     return payload;
   }
 
-  load(region: SpectrumRegion): Promise<DirectSpectrumPayload | null> {
+  load(region: SpectrumRegion): Promise<T | null> {
     const cached = this.peek(region);
     if (cached) return Promise.resolve(cached);
 

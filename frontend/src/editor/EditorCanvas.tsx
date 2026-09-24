@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import type { DirectSpectrumPayload, EditorSettings, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
+import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 
 type Props = {
   notes: NoteDto[];
@@ -9,6 +9,7 @@ type Props = {
   playback: PlaybackState;
   spectrum: SpectrogramPayload | null;
   directSpectrum: DirectSpectrumPayload | null;
+  frequencyTracks: FrequencyTrackPayload | null;
   onViewportSize?(size: {width:number;height:number}): void;
   onSelect(indices: number[]): void;
   onAdd(start: number, end: number, midi: number, kind: "note" | "curve", endMidi: number): Promise<void>;
@@ -20,6 +21,7 @@ type Props = {
   onSeek(time: number): Promise<void>;
   onView(changes: Partial<ViewState>): Promise<void>;
   onCursorMove?(time: number, midi: number): void;
+  onTrackHover?(track: {id:number;frequency:number;noteName:string;duration:number;magnitude:number}|null): void;
 };
 
 type DragMode = "create" | "curve" | "region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
@@ -88,6 +90,14 @@ function decodeSpectrum(payload: SpectrogramPayload | null) {
   for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
   return { ...payload, rows: payload.rows, cols: payload.cols, bytes };
 }
+function decodeFrequencyTracks(payload: FrequencyTrackPayload | null) {
+  if(!payload?.available||!payload.data||!payload.pointCount)return null;
+  const raw=atob(payload.data),bytes=Uint8Array.from(raw,c=>c.charCodeAt(0)),stride=18,count=Math.min(payload.pointCount,Math.floor(bytes.byteLength/stride)),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const ids=new Uint32Array(count),times=new Float32Array(count),midis=new Float32Array(count),magnitudes=new Float32Array(count),durations=new Float32Array(count),flags=new Uint8Array(count);
+  for(let i=0;i<count;i+=1){const offset=i*stride;ids[i]=view.getUint32(offset,true);times[i]=view.getFloat32(offset+4,true);midis[i]=view.getFloat32(offset+8,true);magnitudes[i]=view.getUint8(offset+12)/255;durations[i]=view.getFloat32(offset+13,true);flags[i]=view.getUint8(offset+17);}
+  return{ids,times,midis,magnitudes,durations,flags,count};
+}
+function midiLabel(midi:number){const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],rounded=Math.round(midi);return `${names[((rounded%12)+12)%12]}${Math.floor(rounded/12)-1}`;}
 function snapTime(settings: EditorSettings, duration: number, time: number) {
   const t = Math.max(0, Math.min(duration, time));
   if (!settings.snapEnabled) return t;
@@ -123,6 +133,7 @@ export default function EditorCanvas(props: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   cursorViewport.current={start:props.view.start,windowSeconds:props.view.windowSeconds,width:size.width};
   const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
+  const decodedTracks = useMemo(() => decodeFrequencyTracks(props.frequencyTracks), [props.frequencyTracks]);
   const spectrumCanvas = useMemo(() => {
     if (!decoded) return null;
     const canvas = document.createElement("canvas");
@@ -213,6 +224,17 @@ export default function EditorCanvas(props: Props) {
       ctx.save();ctx.globalAlpha=(props.settings.spectrumOpacity/100)*(props.view.mode==="spec"?1:.82);ctx.imageSmoothingEnabled=false;
       ctx.drawImage(directSpectrumCanvas,0,0,w,h);ctx.restore();
     }
+    if(decodedTracks&&props.view.mode!=="notes"){
+      ctx.save();ctx.lineCap="round";ctx.lineJoin="round";
+      for(let i=0;i<decodedTracks.count;i+=1){
+        const x=coords.x(decodedTracks.times[i]),y=coords.y(decodedTracks.midis[i]),m=decodedTracks.magnitudes[i],duration=decodedTracks.durations[i],strength=Math.sqrt(m),durationWeight=Math.max(.25,Math.min(1,duration/.2));
+        if((decodedTracks.flags[i]&1)!==0||i===0||decodedTracks.ids[i]!==decodedTracks.ids[i-1]){ctx.beginPath();ctx.arc(x,y,Math.max(.65,1.3*strength),0,Math.PI*2);ctx.fillStyle=`rgba(155,245,255,${(.12+.58*strength)*durationWeight})`;ctx.fill();continue;}
+        const averageStrength=Math.sqrt((m+decodedTracks.magnitudes[i-1])/2);
+        ctx.beginPath();ctx.moveTo(coords.x(decodedTracks.times[i-1]),coords.y(decodedTracks.midis[i-1]));ctx.lineTo(x,y);
+        ctx.strokeStyle=`rgba(135,240,255,${(.16+.76*averageStrength)*durationWeight})`;ctx.lineWidth=.65+1.75*averageStrength+Math.min(1.1,duration*.55);ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     for(let midi=Math.floor(props.view.pitchBottom);midi<=Math.ceil(props.view.pitchBottom+props.view.visibleNotes);midi+=1){
       const y=coords.y(midi-.5);ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.strokeStyle=midi%12===0?"rgba(255,255,255,.22)":"rgba(255,255,255,.075)";ctx.stroke();
@@ -279,7 +301,21 @@ export default function EditorCanvas(props: Props) {
       ctx.restore();
     }
 
-  },[coords,decoded,directSpectrumCanvas,drag,props.notes,props.playback.duration,props.selected,props.settings,props.view,size,spectrumCanvas]);
+  },[coords,decoded,decodedTracks,directSpectrumCanvas,drag,props.notes,props.playback.duration,props.selected,props.settings,props.view,size,spectrumCanvas]);
+
+  function hoveredTrack(px:number,py:number){
+    if(!decodedTracks||props.view.mode==="notes")return null;
+    let bestDistance=64,best:null|{id:number;frequency:number;noteName:string;duration:number;magnitude:number}=null;
+    for(let i=0;i<decodedTracks.count;i+=1){
+      const bx=coords.x(decodedTracks.times[i]),by=coords.y(decodedTracks.midis[i]);let distance=(px-bx)**2+(py-by)**2,midi=decodedTracks.midis[i],magnitude=decodedTracks.magnitudes[i];
+      if((decodedTracks.flags[i]&1)===0&&i>0&&decodedTracks.ids[i]===decodedTracks.ids[i-1]){
+        const ax=coords.x(decodedTracks.times[i-1]),ay=coords.y(decodedTracks.midis[i-1]),dx=bx-ax,dy=by-ay,length=Math.max(1e-9,dx*dx+dy*dy),fraction=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/length)),qx=ax+dx*fraction,qy=ay+dy*fraction;
+        distance=(px-qx)**2+(py-qy)**2;midi=decodedTracks.midis[i-1]+(decodedTracks.midis[i]-decodedTracks.midis[i-1])*fraction;magnitude=decodedTracks.magnitudes[i-1]+(decodedTracks.magnitudes[i]-decodedTracks.magnitudes[i-1])*fraction;
+      }
+      if(distance<bestDistance){bestDistance=distance;best={id:decodedTracks.ids[i],frequency:midiToHz(midi),noteName:midiLabel(midi),duration:decodedTracks.durations[i],magnitude};}
+    }
+    return best;
+  }
 
   function eventPosition(event: ReactPointerEvent<HTMLCanvasElement>|ReactMouseEvent<HTMLCanvasElement>){
     const r=event.currentTarget.getBoundingClientRect(),x=event.clientX-r.left,y=event.clientY-r.top;
@@ -315,7 +351,7 @@ export default function EditorCanvas(props: Props) {
     const p=eventPosition(event);
     if(drag){setDrag({...drag,nowTime:p.time,nowMidi:p.midi});return;}
     const now=performance.now();
-    if(props.onCursorMove&&now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove(p.time,p.midi);}
+    if(now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove?.(p.time,p.midi);props.onTrackHover?.(hoveredTrack(p.x,p.y));}
     if(event.ctrlKey&&event.altKey&&props.selected.length){event.currentTarget.style.cursor="crosshair";return;}
     const hit=hitNote(props.notes,p.time,p.midi,props.spectrum?.pitchStep??1);
     event.currentTarget.style.cursor=hit!==null&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":"crosshair";
@@ -355,5 +391,5 @@ export default function EditorCanvas(props: Props) {
     else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
     else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
   }
-  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り（スナップ対応）" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/><div className="playback-cursor" ref={playbackCursorRef}/></div>;
+  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り（スナップ対応）" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/><div className="playback-cursor" ref={playbackCursorRef}/></div>;
 }

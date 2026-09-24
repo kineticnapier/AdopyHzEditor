@@ -90,6 +90,7 @@ export default function SettingsPanel({ api, settings, notes, selected, playback
         <Row label="CQT解像度"><Select value={settings.cqtResolution} options={[["profile default","自動"],["100 cents","100セント"],["50 cents","50セント"],["25 cents","25セント"],["12.5 cents","12.5セント"],["41 EDO","41平均律"],["53 EDO","53平均律"]]} onChange={v=>void onPatch({cqtResolution:v})}/></Row>
       </>}
       {settings.analysisSource==="vorbis_direct"&&<>
+        <Row label="Spectrum表示"><Select value={settings.spectrumLayerMode} options={[["raw","Raw"],["tracks","Tracks"],["both","Raw + Tracks"]]} onChange={v=>void onPatch({spectrumLayerMode:v as EditorSettings["spectrumLayerMode"]})}/></Row>
         <Row label="表示しきい値"><Select value={String(settings.spectrumThreshold)} options={[["0","0%"],["0.5","0.5%"],["1","1%"],["2","2%"],["5","5%"],["10","10%"]]} onChange={v=>void onPatch({spectrumThreshold:Number(v)})}/></Row>
         <Row label="表示濃度"><Range value={settings.spectrumOpacity} onChange={v=>void onPatch({spectrumOpacity:v})}/></Row>
       </>}

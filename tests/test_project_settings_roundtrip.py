@@ -35,6 +35,7 @@ NON_DEFAULT_SETTINGS = {
     "analysisSource": "vorbis_direct",
     "spectrumThreshold": 5.0,
     "spectrumOpacity": 42,
+    "spectrumLayerMode": "tracks",
     "curveShape": "smoothstep",
     "curveInterpolation": "bezier_hz",
     "targetAngle": 137.5,
@@ -75,6 +76,7 @@ class ProjectSettingsRoundTripTests(unittest.TestCase):
                 "analysisSource",
                 "spectrumThreshold",
                 "spectrumOpacity",
+                "spectrumLayerMode",
             )
         }
 

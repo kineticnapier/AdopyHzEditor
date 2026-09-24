@@ -16,6 +16,7 @@ from core.audio_analysis import (
     enhance_spectrogram,
 )
 from core.audio_player import AudioPlayer, decode_audio_file
+from core.frequency_tracks import FrequencyTrackStore, build_frequency_track_store
 from core.note_model import Note, midi_to_hz, note_name
 from core.vorbis_direct import select_analysis_backend
 from core.vorbis_spectrum_store import (
@@ -62,6 +63,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self.player = AudioPlayer()
         self.spectrogram: Spectrogram | None = None
         self.vorbis_spectrum_store: VorbisSpectrumStore | None = None
+        self.frequency_track_store: FrequencyTrackStore | None = None
         self.analysis_stats: dict[str, Any] = {}
         self.audio_path: str | None = None
         self.project_path: str | None = None
@@ -107,6 +109,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             "analysisSource": "cqt",
             "spectrumThreshold": 2.0,
             "spectrumOpacity": 70,
+            "spectrumLayerMode": "both",
             "curveShape": "ease",
             "curveInterpolation": "bezier_pitch",
             "targetAngle": 165.0,
@@ -230,6 +233,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             return _clamp(value, 0.0, 100.0)
         if key == "spectrumOpacity":
             return _int_clamp(value, 0, 100)
+        if key == "spectrumLayerMode":
+            return str(value) if str(value) in {"raw", "tracks", "both"} else "both"
         if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
             return bool(value)
         return str(value)
@@ -252,6 +257,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "adofai",
                 "cursor-peak",
                 "vorbis-spectrum-layer",
+                "frequency-tracks",
             ],
         }
 
@@ -385,6 +391,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self.audio_path = str(path)
         self.spectrogram = None
         self.vorbis_spectrum_store = None
+        self.frequency_track_store = None
         self.analysis_stats = {}
         self.player.set_audio(decoded.samples, decoded.sample_rate, path=str(path))
         self.duration = max(0.001, float(decoded.duration))
@@ -447,6 +454,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                         with self._lock:
                             self.spectrogram = None
                             self.vorbis_spectrum_store = None
+                            self.frequency_track_store = None
                             self.analysis_stats = {
                                 "requestedSource": "vorbis_direct",
                                 "selectedSource": "vorbis_direct",
@@ -457,7 +465,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                             )
                         return "direct_pending"
                     store = analyze_vorbis_spectrum_store(self.audio_path)
+                    track_store = build_frequency_track_store(store)
                     stats = store.stats.to_dict()
+                    stats.update(track_store.stats.to_dict())
                     stats.update(
                         requestedSource="vorbis_direct",
                         selectedSource="vorbis_direct",
@@ -465,6 +475,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                     with self._lock:
                         self.spectrogram = None
                         self.vorbis_spectrum_store = store
+                        self.frequency_track_store = track_store
                         self.analysis_stats = stats
                         self.duration = max(0.001, float(store.duration))
                         self.player.set_virtual_duration(self.duration)
@@ -473,6 +484,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                         self.view["mode"] = "both" if self.notes else "spec"
                         self._status = (
                             f"Vorbis Direct: {stats['storedBins']} bins "
+                            f"/ {stats['totalTrackCount']} tracks "
                             f"({stats['blocksProcessed']} blocks, "
                             f"{stats['analysisSeconds']:.2f}s)"
                         )
@@ -488,6 +500,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             with self._lock:
                 self.spectrogram = spec
                 self.vorbis_spectrum_store = None
+                self.frequency_track_store = None
                 self.analysis_stats = {
                     "requestedSource": requested,
                     "selectedSource": "cqt",
@@ -568,6 +581,52 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             "maxMidi": min(127.0, float(maximum_midi)),
             "threshold": gate,
             "aggregationLevel": region.aggregation_level,
+            "querySeconds": region.query_seconds,
+        }
+
+    def get_frequency_track_region(
+        self,
+        start_time: float,
+        end_time: float,
+        minimum_midi: float,
+        maximum_midi: float,
+        pixel_width: int,
+        pixel_height: int,
+    ) -> dict[str, Any]:
+        """Return a bounded set of prebuilt frequency-track segments."""
+        del pixel_height  # Reserved for future pitch-aware LOD.
+        with self._lock:
+            store = self.frequency_track_store
+        if store is None:
+            return {"available": False}
+
+        max_points = max(4_000, min(30_000, int(pixel_width) * 24))
+        region = store.query_region(
+            start_time,
+            end_time,
+            minimum_midi,
+            maximum_midi,
+            max_points=max_points,
+        )
+        query_stats = {
+            "viewportReturnedTracks": region.returned_tracks,
+            "viewportReturnedTrackPoints": region.returned_points,
+            "viewportTrackDecimationLevel": region.decimation_level,
+            "viewportTrackQuerySeconds": region.query_seconds,
+        }
+        with self._lock:
+            self.analysis_stats.update(query_stats)
+        LOGGER.debug("Frequency track viewport stats: %s", query_stats)
+        return {
+            "available": True,
+            "data": base64.b64encode(region.packed_points).decode("ascii"),
+            "trackCount": region.returned_tracks,
+            "pointCount": region.returned_points,
+            "startTime": max(0.0, float(start_time)),
+            "endTime": min(float(end_time), float(self.duration)),
+            "minMidi": max(0.0, float(minimum_midi)),
+            "maxMidi": min(127.0, float(maximum_midi)),
+            "decimationLevel": region.decimation_level,
             "querySeconds": region.query_seconds,
         }
 
