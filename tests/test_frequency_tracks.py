@@ -13,6 +13,7 @@ from core.frequency_tracks import (
     _PACKED_TRACK_POINT_DTYPE,
     build_frequency_track_store,
 )
+from core.note_model import Note
 from core.vorbis_direct import VorbisSpectrumBlock, VorbisSpectrumChannel, VorbisStreamInfo
 from core.vorbis_spectrum_store import analyze_vorbis_spectrum_store
 
@@ -157,6 +158,85 @@ class FrequencyTrackStoreTests(unittest.TestCase):
         self.assertGreater(result["pointCount"], 0)
         self.assertEqual(len(base64.b64decode(result["data"])), result["pointCount"] * _PACKED_TRACK_POINT_DTYPE.itemsize)
         self.assertEqual(bridge.analysis_stats["viewportReturnedTrackPoints"], result["pointCount"])
+
+    def test_track_rectangle_selection_is_read_only(self):
+        from web_ui import Bridge
+
+        blocks = [self._block(index * 0.02, 1024, {54: 1.0, 82: 0.8}) for index in range(30)]
+        tracks = build_frequency_track_store(self._store(blocks))
+        bridge = Bridge()
+        bridge.frequency_track_store = tracks
+        bridge.notes = [Note(0.0, 0.2, 60.0)]
+        bridge._dirty = False
+        undo_size = len(bridge._undo_stack)
+
+        result = bridge.find_frequency_tracks(0.0, 1.0, 68.0, 70.0)
+
+        self.assertEqual(len(result["trackIds"]), 1)
+        self.assertEqual([note.midi for note in bridge.notes], [60.0])
+        self.assertFalse(bridge._dirty)
+        self.assertEqual(len(bridge._undo_stack), undo_size)
+
+    def test_fixed_track_conversion_creates_normal_note_and_is_undoable(self):
+        from web_ui import Bridge
+
+        blocks = [self._block(index * 0.02, 1024, {54: 1.0}) for index in range(30)]
+        tracks = build_frequency_track_store(self._store(blocks))
+        bridge = Bridge()
+        bridge.frequency_track_store = tracks
+        bridge.notes = []
+        bridge._dirty = False
+
+        result = bridge.create_notes_from_tracks([0], "fixed")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["indices"], [0])
+        self.assertEqual(len(bridge.notes), 1)
+        self.assertEqual(bridge.notes[0].kind, "note")
+        self.assertLess(abs(bridge.notes[0].freq - 436.0), 12.0)
+        self.assertGreater(bridge.notes[0].duration, 0.5)
+        self.assertTrue(bridge._dirty)
+
+        bridge.undo()
+        self.assertEqual(bridge.notes, [])
+
+    def test_curve_track_conversion_clips_time_and_preserves_pitch_motion(self):
+        from web_ui import Bridge
+
+        blocks = [self._block(index * 0.02, 1024, {54 + index // 4: 1.0}) for index in range(20)]
+        tracks = build_frequency_track_store(self._store(blocks))
+        track_id = int(np.argmax(self._track_lengths(tracks)))
+        bridge = Bridge()
+        bridge.frequency_track_store = tracks
+        bridge.notes = []
+
+        result = bridge.create_notes_from_tracks([track_id], "curve", 0.08, 0.28)
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(len(bridge.notes), 1)
+        note = bridge.notes[0]
+        self.assertEqual(note.kind, "curve")
+        self.assertAlmostEqual(note.start, 0.08, places=6)
+        self.assertAlmostEqual(note.end, 0.28, places=6)
+        self.assertIsNotNone(note.midi_end)
+        self.assertGreater(float(note.midi_end), note.midi)
+
+    def test_multiple_track_conversion_is_one_undo_step(self):
+        from web_ui import Bridge
+
+        blocks = [self._block(index * 0.02, 1024, {54: 1.0, 82: 0.8, 109: 0.7}) for index in range(20)]
+        tracks = build_frequency_track_store(self._store(blocks))
+        bridge = Bridge()
+        bridge.frequency_track_store = tracks
+        bridge.notes = []
+
+        result = bridge.create_notes_from_tracks([0, 1, 2], "fixed")
+        self.assertEqual(len(result["indices"]), 3)
+        self.assertEqual(len(bridge.notes), 3)
+        self.assertEqual(len(bridge._undo_stack), 1)
+
+        bridge.undo()
+        self.assertEqual(bridge.notes, [])
 
 
 if __name__ == "__main__":

@@ -14,8 +14,9 @@ export type AppState = { settings: EditorSettings; view: ViewState; playback: Pl
 export type SpectrogramPayload = { available: boolean; rows?: number; cols?: number; data?: string; duration?: number; midiMin?: number; midiMax?: number; pitchStep?: number };
 export type DirectSpectrumPayload = { available: boolean; data?: string; recordCount?: number; timeBuckets?: number; pitchBuckets?: number; startTime?: number; endTime?: number; minMidi?: number; maxMidi?: number; threshold?: number; aggregationLevel?: number; querySeconds?: number };
 export type FrequencyTrackPayload = { available: boolean; data?: string; trackCount?: number; pointCount?: number; startTime?: number; endTime?: number; minMidi?: number; maxMidi?: number; decimationLevel?: number; querySeconds?: number };
+export type TrackSelectionResult = { trackIds: number[]; status: string };
 export type CursorPeakPayload = { available: boolean; time?: number; cursorMidi?: number; cursorHz?: number; cursorName?: string; cursorCents?: number; peakMidi?: number; peakHz?: number; peakName?: string; peakCents?: number; peakDb?: number };
-export type NoteMutationResult = { notes: NoteDto[]; status: string; index?: number; indices?: number[]; changed?: boolean };
+export type NoteMutationResult = { notes: NoteDto[]; status: string; index?: number; indices?: number[]; changed?: boolean; trackIds?: number[] };
 export type NotePreset = { name: string; note: NoteDto; duration: number; kind: "note" | "curve" };
 export type NotePresetResult = { presets: NotePreset[]; status: string };
 
@@ -36,7 +37,7 @@ export type BackendApi = {
   ping(): Promise<{ ok: boolean; app: string; ui: string; capabilities: string[] }>;
   get_state(): Promise<AppState>; get_settings(): Promise<EditorSettings>; update_settings(changes: Partial<EditorSettings>): Promise<EditorSettings>;
   set_view(changes: Partial<ViewState>): Promise<ViewState>; fit_view(): Promise<ViewState>;
-  open_audio(): Promise<AppState>; reanalyze_audio(): Promise<AppState>; get_spectrogram(maxColumns?: number): Promise<SpectrogramPayload>; get_spectrum_region(startTime: number, endTime: number, minMidi: number, maxMidi: number, pixelWidth: number, pixelHeight: number, threshold?: number): Promise<DirectSpectrumPayload>; get_frequency_track_region(startTime: number, endTime: number, minMidi: number, maxMidi: number, pixelWidth: number, pixelHeight: number): Promise<FrequencyTrackPayload>; get_cursor_peak(seconds: number, midi: number, searchRange?: number): Promise<CursorPeakPayload>;
+  open_audio(): Promise<AppState>; reanalyze_audio(): Promise<AppState>; get_spectrogram(maxColumns?: number): Promise<SpectrogramPayload>; get_spectrum_region(startTime: number, endTime: number, minMidi: number, maxMidi: number, pixelWidth: number, pixelHeight: number, threshold?: number): Promise<DirectSpectrumPayload>; get_frequency_track_region(startTime: number, endTime: number, minMidi: number, maxMidi: number, pixelWidth: number, pixelHeight: number): Promise<FrequencyTrackPayload>; find_frequency_tracks(startTime: number, endTime: number, minMidi: number, maxMidi: number): Promise<TrackSelectionResult>; create_notes_from_tracks(trackIds: number[], mode?: "fixed" | "curve", startTime?: number | null, endTime?: number | null): Promise<NoteMutationResult>; get_cursor_peak(seconds: number, midi: number, searchRange?: number): Promise<CursorPeakPayload>;
   get_playback_state(): Promise<PlaybackState>; toggle_playback(): Promise<PlaybackState>; stop_playback(): Promise<PlaybackState>; seek_to(seconds: number): Promise<PlaybackState>; seek_relative(seconds: number): Promise<PlaybackState>;
   add_note(start: number, end: number, midi: number, kind?: string, endMidi?: number | null): Promise<NoteMutationResult>;
   delete_notes(indices: number[]): Promise<NoteMutationResult>; move_notes(indices: number[], dx: number, dy: number): Promise<NoteMutationResult>;

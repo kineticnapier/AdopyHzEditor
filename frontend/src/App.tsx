@@ -9,6 +9,7 @@ import Timeline from "./editor/Timeline";
 import TopToolbar from "./components/TopToolbar";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
 import { DirectSpectrumRegionCache, followViewportStart, nextPrefetchStart, spectrumLayersForMode, spectrumRegion, spectrumRegionKey } from "./editor/directSpectrum";
+import type { TrackSelectionRange } from "./editor/trackSelection";
 import "./dialogs.css";
 import { getBackendApi, type AppState, type BackendApi, type DirectSpectrumPayload, type EditorSettings, type FrequencyTrackPayload, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./api/bridge";
 import type { ToolBackendApi } from "./api/toolsBridge";
@@ -131,6 +132,22 @@ export default function App(){
       setStatus(`カーソル ${peak.time!.toFixed(3)}秒 / ${peak.cursorName}${signedCents(peak.cursorCents)} ${peak.cursorHz!.toFixed(2)}Hz | 近傍ピーク: ${peak.peakName}${signedCents(peak.peakCents)} ${peak.peakHz!.toFixed(2)}Hz (${peak.peakDb!.toFixed(1)} dB)`);
     }catch{/* Cursor diagnostics must not interrupt editing. */}
   }
+  async function findTracks(range:TrackSelectionRange){
+    if(!api)return [];
+    try{
+      const result=await api.find_frequency_tracks(range.startTime,range.endTime,range.minMidi,range.maxMidi);
+      setStatus(result.status);
+      return result.trackIds;
+    }catch(e){setStatus(String(e));return []}
+  }
+  async function convertTracks(trackIds:number[],conversionMode:"fixed"|"curve",range:TrackSelectionRange|null){
+    if(!api||!trackIds.length)return;
+    setBusy(true);
+    try{
+      const result=await api.create_notes_from_tracks(trackIds,conversionMode,range?.startTime??null,range?.endTime??null);
+      applyMutation(result,result.indices??[],result.changed!==false);
+    }catch(e){setStatus(String(e))}finally{setBusy(false)}
+  }
 
   const stateAction=(fn:()=>Promise<AppState>)=>void runStateAction(fn),nudgeSeconds=settings.snapEnabled?60/Math.max(1,settings.bpm)/Math.max(1,settings.snapDiv):.01;
   const openAudioSafely=()=>api&&requestDestructive("音声を開く",()=>runStateAction(()=>api.open_audio()));
@@ -142,7 +159,7 @@ export default function App(){
 
   return <div className="app">
     <TopToolbar connected={connected} busy={busy} audioName={audioName} dirty={dirty} playback={playback} view={view} menus={menus} onOpen={openAudioSafely} onLoadProject={loadProjectSafely} onSaveProject={()=>api&&stateAction(()=>api.save_project_dialog())} onSeek={t=>void seekTo(t)} onStop={()=>void stopPlayback()} onPlay={()=>void togglePlayback()} onSeekRelative={d=>void seekRelative(d)} onImportMidi={()=>api&&stateAction(()=>api.import_midi_dialog())} onExportMidi={()=>void api?.export_midi_dialog().then(x=>setStatus(x.status))} onExportAdo={()=>setAdoExportOpen(true)} onHelp={()=>setHelpSection("quick_start")} onMode={v=>void mode(v)}/>
-    <main className="workspace"><section className="editor"><EditorCanvas notes={notes} selected={selected} settings={settings} view={view} playback={playback} spectrum={spectrum} directSpectrum={directSpectrum} frequencyTracks={frequencyTracks} onViewportSize={setViewportSize} onSelect={setSelected} onAdd={addNote} onMove={moveNotes} onDuplicateMove={duplicateMove} onResize={resizeNotes} onDelete={deleteNotes} onCutRange={cutRange} onSeek={seekTo} onView={updateView} onCursorMove={(time,midi)=>void cursorMoved(time,midi)} onTrackHover={track=>setStatus(track?`Track #${track.id} · ${track.frequency.toFixed(2)} Hz · ${track.noteName} · ${track.duration.toFixed(3)} 秒 · 強度 ${(track.magnitude*100).toFixed(1)}%`:"準備完了")}/><Timeline view={view} playback={playback} followPlayback={followPlayback} onFollowPlayback={setFollowPlayback} onView={c=>void updateView(c)} onFit={()=>void fitView()}/></section><SettingsPanel api={api} settings={settings} notes={notes} selected={selected} playbackTime={playback.time} audioName={audioName} busy={busy} onPatch={patch} onStateAction={runStateAction} onMutation={applyMutation} onStatus={setStatus}/></main>
+    <main className="workspace"><section className="editor"><EditorCanvas notes={notes} selected={selected} settings={settings} view={view} playback={playback} spectrum={spectrum} directSpectrum={directSpectrum} frequencyTracks={frequencyTracks} trackRevision={analysisRevision} onViewportSize={setViewportSize} onSelect={setSelected} onAdd={addNote} onMove={moveNotes} onDuplicateMove={duplicateMove} onResize={resizeNotes} onDelete={deleteNotes} onCutRange={cutRange} onSeek={seekTo} onView={updateView} onCursorMove={(time,midi)=>void cursorMoved(time,midi)} onTrackHover={track=>setStatus(track?`Track #${track.id} · ${track.frequency.toFixed(2)} Hz · ${track.noteName} · ${track.duration.toFixed(3)} 秒 · 強度 ${(track.magnitude*100).toFixed(1)}%`:"準備完了")} onFindTracks={findTracks} onConvertTracks={convertTracks}/><Timeline view={view} playback={playback} followPlayback={followPlayback} onFollowPlayback={setFollowPlayback} onView={c=>void updateView(c)} onFit={()=>void fitView()}/></section><SettingsPanel api={api} settings={settings} notes={notes} selected={selected} playbackTime={playback.time} audioName={audioName} busy={busy} onPatch={patch} onStateAction={runStateAction} onMutation={applyMutation} onStatus={setStatus}/></main>
     <footer className="statusbar"><span>{busy?"処理中…":status}</span><span>{projectPath?projectPath.split(/[\\/]/).pop():"プロジェクトなし"} · ノート {notes.length}個</span></footer>
     {adoExportOpen&&api&&<AdoFAIExportDialog api={api} selected={selected} onClose={()=>setAdoExportOpen(false)} onStatus={setStatus} onHelp={s=>setHelpSection(s??"adofai_export")}/>} {helpSection&&api&&<HelpDialog api={api} initialSection={helpSection} onClose={()=>setHelpSection(null)}/>} {toolDialog==="blank"&&toolsApi&&<BlankWorkspaceDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus} onState={state=>{applyState(state);setSpectrum(null);setDirectSpectrum(null);setFrequencyTracks(null)}}/>} {toolDialog==="quickHz"&&toolsApi&&<QuickHzDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus}/>} {toolDialog==="harmonic"&&toolsApi&&<HarmonicDiagramDialog api={toolsApi} selected={selected} onClose={()=>setToolDialog(null)} onStatus={setStatus} onMutation={applyMutation}/>} {toolDialog==="update"&&toolsApi&&<UpdateDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus}/>}
     {pendingDestructive&&<UnsavedChangesDialog label={pendingDestructive.label} onSave={()=>void saveThenContinue()} onDiscard={discardThenContinue} onCancel={()=>void cancelPendingDestructive()}/>}
