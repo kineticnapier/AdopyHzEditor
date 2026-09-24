@@ -24,6 +24,7 @@ from core.vorbis_direct import (
     select_analysis_backend,
     write_vorbis_spectrum_csv,
 )
+from core.vorbis_spectrum_store import analyze_vorbis_spectrum_store
 
 
 FFMPEG = shutil.which("ffmpeg")
@@ -112,6 +113,32 @@ class VorbisDirectTests(unittest.TestCase):
                 )
                 for block in blocks
             )
+        )
+
+    def test_pure_tone_is_retained_in_compact_spectrum_store(self):
+        source = self._encode(
+            "sine=frequency=440:sample_rate=44100:duration=1",
+            "stored-tone.ogg",
+        )
+        store = analyze_vorbis_spectrum_store(
+            source,
+            helper_path=self.helper,
+        )
+        long_plane = next(
+            plane
+            for plane in store.planes
+            if plane.block_size == store.stream_info.long_block_size
+        )
+        frequencies = (
+            np.arange(long_plane.magnitudes.shape[1], dtype=np.float64) + 0.5
+        ) * store.stream_info.sample_rate / long_plane.block_size
+        evidence = np.max(long_plane.magnitudes, axis=0)
+
+        self.assertGreater(store.stats.stored_bins, 0)
+        self.assertEqual(store.stats.stored_bins, store.stats.total_bins)
+        self.assertLess(
+            abs(float(frequencies[int(np.argmax(evidence))]) - 440.0),
+            25.0,
         )
 
     def test_multiple_tones_produce_multiple_local_peaks(self):
@@ -369,62 +396,6 @@ class VorbisDirectTests(unittest.TestCase):
 
 
 class VorbisDirectEditorIntegrationTests(unittest.TestCase):
-    @staticmethod
-    def _direct_result() -> VorbisDirectNoteResult:
-        notes = (
-            Note(0.1, 0.9, 69.0),
-            Note(0.2, 0.8, 76.0),
-        )
-        return VorbisDirectNoteResult(
-            notes=notes,
-            stream_info=VorbisStreamInfo(44100, 1, 256, 2048, 44100),
-            stats=VorbisDirectAnalysisStats(
-                blocks_processed=50,
-                short_blocks=40,
-                long_blocks=10,
-                raw_peaks_detected=120,
-                peaks_after_threshold=80,
-                peaks_selected=70,
-                final_note_count=2,
-                analysis_seconds=0.25,
-                python_peak_memory_bytes=4096,
-            ),
-        )
-
-    def test_direct_result_replaces_editor_notes_with_normal_notes(self):
-        import web.backend as web_backend
-        from web_ui import Bridge
-
-        bridge = Bridge()
-        bridge.audio_path = "tone.ogg"
-        bridge.settings["analysisSource"] = "vorbis_direct"
-        bridge.notes = [Note(0.0, 0.5, 60.0)]
-
-        with (
-            mock.patch.object(
-                web_backend,
-                "select_analysis_backend",
-                return_value=BackendSelection(
-                    requested="vorbis_direct",
-                    selected="vorbis_direct",
-                ),
-            ),
-            mock.patch.object(
-                web_backend,
-                "analyze_vorbis_direct_notes",
-                return_value=self._direct_result(),
-            ),
-        ):
-            state = bridge.reanalyze_audio()
-
-        self.assertEqual(len(bridge.notes), 2)
-        self.assertTrue(all(isinstance(note, Note) for note in bridge.notes))
-        self.assertEqual(state["analysis"]["stats"]["finalNoteCount"], 2)
-        self.assertEqual(state["view"]["mode"], "notes")
-        self.assertTrue(state["dirty"])
-        bridge.undo()
-        self.assertEqual([note.midi for note in bridge.notes], [60.0])
-
     def test_non_vorbis_direct_request_falls_back_without_replacing_notes(self):
         import web.backend as web_backend
         from web_ui import Bridge

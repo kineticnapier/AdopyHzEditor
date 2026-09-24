@@ -17,9 +17,10 @@ from core.audio_analysis import (
 )
 from core.audio_player import AudioPlayer, decode_audio_file
 from core.note_model import Note, midi_to_hz, note_name
-from core.vorbis_direct import (
-    analyze_vorbis_direct_notes,
-    select_analysis_backend,
+from core.vorbis_direct import select_analysis_backend
+from core.vorbis_spectrum_store import (
+    VorbisSpectrumStore,
+    analyze_vorbis_spectrum_store,
 )
 from web.editing import EditingMixin
 from web.io import IOMixin
@@ -60,6 +61,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self._window = None
         self.player = AudioPlayer()
         self.spectrogram: Spectrogram | None = None
+        self.vorbis_spectrum_store: VorbisSpectrumStore | None = None
         self.analysis_stats: dict[str, Any] = {}
         self.audio_path: str | None = None
         self.project_path: str | None = None
@@ -103,6 +105,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             "analysisProfile": "Normal",
             "cqtResolution": "profile default",
             "analysisSource": "cqt",
+            "spectrumThreshold": 2.0,
+            "spectrumOpacity": 70,
             "curveShape": "ease",
             "curveInterpolation": "bezier_pitch",
             "targetAngle": 165.0,
@@ -222,6 +226,10 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             return _clamp(value, 0.001, 359.999)
         if key == "analysisSource":
             return "vorbis_direct" if str(value) == "vorbis_direct" else "cqt"
+        if key == "spectrumThreshold":
+            return _clamp(value, 0.0, 100.0)
+        if key == "spectrumOpacity":
+            return _int_clamp(value, 0, 100)
         if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
             return bool(value)
         return str(value)
@@ -243,7 +251,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "midi",
                 "adofai",
                 "cursor-peak",
-                "vorbis-direct-notes",
+                "vorbis-spectrum-layer",
             ],
         }
 
@@ -251,7 +259,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         return [n.normalized().to_dict() for n in self.notes]
 
     def _analysis_state(self) -> dict[str, Any]:
-        if self.spectrogram is None:
+        direct = self.vorbis_spectrum_store
+        if self.spectrogram is None and direct is None:
             return {
                 "available": False,
                 "source": str(self.settings["analysisSource"]),
@@ -260,6 +269,16 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "midiMin": int(self.midi_min),
                 "midiMax": int(self.midi_max),
                 "pitchStep": float(self.pitch_step),
+            }
+        if direct is not None:
+            return {
+                "available": True,
+                "source": "vorbis_direct",
+                "stats": dict(self.analysis_stats),
+                "duration": float(direct.duration),
+                "midiMin": 0,
+                "midiMax": 127,
+                "pitchStep": 0.0,
             }
         return {
             "available": True,
@@ -364,6 +383,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
     # ------------------------------------------------------------------
     def _set_audio_data(self, path: str, decoded) -> None:
         self.audio_path = str(path)
+        self.spectrogram = None
+        self.vorbis_spectrum_store = None
+        self.analysis_stats = {}
         self.player.set_audio(decoded.samples, decoded.sample_rate, path=str(path))
         self.duration = max(0.001, float(decoded.duration))
         self.player.set_virtual_duration(self.duration)
@@ -409,7 +431,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             options["fold_to_semitone"] = False
         return options
 
-    def _analyze_current_audio(self, *, generate_notes: bool = False) -> str | None:
+    def _analyze_current_audio(self, *, explicit: bool = False) -> str | None:
         if not self.audio_path:
             return None
         self._busy = True
@@ -421,48 +443,36 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                     "vorbis_direct",
                 )
                 if selection.selected == "vorbis_direct":
-                    if not generate_notes:
+                    if not explicit:
                         with self._lock:
                             self.spectrogram = None
+                            self.vorbis_spectrum_store = None
                             self.analysis_stats = {
                                 "requestedSource": "vorbis_direct",
                                 "selectedSource": "vorbis_direct",
                             }
                             self._status = (
                                 "Vorbis Direct を選択中です。解析を実行すると"
-                                "現在のノートを置き換えます"
+                                "採譜用スペクトルを作成します"
                             )
                         return "direct_pending"
-                    result = analyze_vorbis_direct_notes(self.audio_path)
-                    stats = result.stats.to_dict()
+                    store = analyze_vorbis_spectrum_store(self.audio_path)
+                    stats = store.stats.to_dict()
                     stats.update(
                         requestedSource="vorbis_direct",
                         selectedSource="vorbis_direct",
                     )
                     with self._lock:
-                        self._push_undo()
-                        self.notes = [note.normalized() for note in result.notes]
                         self.spectrogram = None
+                        self.vorbis_spectrum_store = store
                         self.analysis_stats = stats
-                        self.duration = max(0.001, float(result.stream_info.duration))
+                        self.duration = max(0.001, float(store.duration))
                         self.player.set_virtual_duration(self.duration)
-                        if self.notes:
-                            self.midi_min = max(
-                                0,
-                                int(math.floor(min(note.midi for note in self.notes))) - 2,
-                            )
-                            self.midi_max = min(
-                                127,
-                                int(math.ceil(max(note.midi for note in self.notes))) + 2,
-                            )
-                        else:
-                            self.midi_min, self.midi_max = 12, 120
+                        self.midi_min, self.midi_max = 0, 127
                         self.pitch_step = 1.0
-                        self.view["mode"] = "notes"
-                        self._dirty = True
-                        self._sync_notes_to_player()
+                        self.view["mode"] = "both" if self.notes else "spec"
                         self._status = (
-                            f"Vorbis Direct: {len(self.notes)}個のノート "
+                            f"Vorbis Direct: {stats['storedBins']} bins "
                             f"({stats['blocksProcessed']} blocks, "
                             f"{stats['analysisSeconds']:.2f}s)"
                         )
@@ -477,6 +487,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             spec = analyze_cqt(self.audio_path, **self._analysis_options())
             with self._lock:
                 self.spectrogram = spec
+                self.vorbis_spectrum_store = None
                 self.analysis_stats = {
                     "requestedSource": requested,
                     "selectedSource": "cqt",
@@ -504,8 +515,61 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             with self._lock:
                 self._status = "Open an audio file first"
             return self.get_state()
-        self._analyze_current_audio(generate_notes=True)
+        self._analyze_current_audio(explicit=True)
         return self.get_state()
+
+    def get_spectrum_region(
+        self,
+        start_time: float,
+        end_time: float,
+        minimum_midi: float,
+        maximum_midi: float,
+        pixel_width: int,
+        pixel_height: int,
+        threshold: float | None = None,
+    ) -> dict[str, Any]:
+        """Return only the max-pooled Vorbis cells needed by one viewport."""
+        with self._lock:
+            store = self.vorbis_spectrum_store
+            gate = (
+                float(self.settings["spectrumThreshold"]) / 100.0
+                if threshold is None
+                else _clamp(threshold, 0.0, 100.0) / 100.0
+            )
+        if store is None:
+            return {"available": False}
+
+        region = store.query_region(
+            start_time,
+            end_time,
+            minimum_midi,
+            maximum_midi,
+            pixel_width,
+            pixel_height,
+            gate,
+        )
+        query_stats = {
+            "viewportReturnedElements": region.returned_elements,
+            "viewportQuerySeconds": region.query_seconds,
+            "viewportAggregationLevel": region.aggregation_level,
+        }
+        with self._lock:
+            self.analysis_stats.update(query_stats)
+        LOGGER.debug("Vorbis spectrum viewport stats: %s", query_stats)
+        return {
+            "available": True,
+            "data": base64.b64encode(region.packed_cells).decode("ascii"),
+            "recordCount": region.returned_elements,
+            "timeBuckets": region.time_buckets,
+            "pitchBuckets": region.pitch_buckets,
+            "startTime": max(0.0, float(start_time)),
+            "endTime": min(store.duration, float(end_time)),
+            "minMidi": max(0.0, float(minimum_midi)),
+            "maxMidi": min(127.0, float(maximum_midi)),
+            "threshold": gate,
+            "aggregationLevel": region.aggregation_level,
+            "querySeconds": region.query_seconds,
+        }
 
     def get_cursor_peak(self, seconds: float, midi: float, search_range: float = 5.0) -> dict[str, Any]:
         """Return the strongest CQT bin near the cursor, matching the legacy editor helper."""

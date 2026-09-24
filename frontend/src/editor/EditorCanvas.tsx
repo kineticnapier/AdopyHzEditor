@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import type { EditorSettings, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
+import type { DirectSpectrumPayload, EditorSettings, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 
 type Props = {
   notes: NoteDto[];
@@ -8,6 +8,8 @@ type Props = {
   view: ViewState;
   playback: PlaybackState;
   spectrum: SpectrogramPayload | null;
+  directSpectrum: DirectSpectrumPayload | null;
+  onViewportSize?(size: {width:number;height:number}): void;
   onSelect(indices: number[]): void;
   onAdd(start: number, end: number, midi: number, kind: "note" | "curve", endMidi: number): Promise<void>;
   onMove(indices: number[], dx: number, dy: number): Promise<void>;
@@ -133,13 +135,28 @@ export default function EditorCanvas(props: Props) {
     ctx.putImageData(image, 0, 0);
     return canvas;
   }, [decoded, props.settings.colormap]);
+  const directSpectrumCanvas = useMemo(() => {
+    const payload=props.directSpectrum;
+    if(!payload?.data||!payload.timeBuckets||!payload.pitchBuckets)return null;
+    const canvas=document.createElement("canvas");canvas.width=payload.timeBuckets;canvas.height=payload.pitchBuckets;
+    const maybeCtx=canvas.getContext("2d");if(!maybeCtx)return null;
+    const bytes=Uint8Array.from(atob(payload.data),c=>c.charCodeAt(0));
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),image=maybeCtx.createImageData(canvas.width,canvas.height);
+    for(let offset=0;offset+5<=bytes.byteLength;offset+=5){
+      const x=view.getUint16(offset,true),pitch=view.getUint16(offset+2,true),magnitude=view.getUint8(offset+4);
+      if(x>=canvas.width||pitch>=canvas.height)continue;
+      const [r,g,b]=colorFor(Math.sqrt(magnitude/255),props.settings.colormap),y=canvas.height-1-pitch,p=(y*canvas.width+x)*4;
+      image.data[p]=r;image.data[p+1]=g;image.data[p+2]=b;image.data[p+3]=255;
+    }
+    maybeCtx.putImageData(image,0,0);return canvas;
+  },[props.directSpectrum,props.settings.colormap]);
 
   useEffect(() => {
     const el = containerRef.current; if (!el) return;
-    const observer = new ResizeObserver(([entry]) => setSize({ width: Math.max(1,entry.contentRect.width), height: Math.max(1,entry.contentRect.height) }));
+    const observer = new ResizeObserver(([entry]) => {const next={ width: Math.max(1,entry.contentRect.width), height: Math.max(1,entry.contentRect.height) };setSize(next);props.onViewportSize?.(next)});
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [props.onViewportSize]);
 
   const coords = useMemo(() => {
     const { width, height } = size, start = props.view.start, win = Math.max(.001, props.view.windowSeconds), bottom = props.view.pitchBottom - .5, visible = Math.max(1, props.view.visibleNotes);
@@ -168,6 +185,10 @@ export default function EditorCanvas(props: Props) {
       const sy=Math.max(0,(decoded.midiMax+.5-top)/full*decoded.rows), sh=Math.max(1,Math.min(decoded.rows-sy,(top-bottom)/full*decoded.rows));
       ctx.save(); ctx.globalAlpha=props.view.mode==="spec"?1:.7; ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
       ctx.drawImage(spectrumCanvas,sx,sy,sw,sh,0,0,w,h); ctx.restore();
+    }
+    if(directSpectrumCanvas&&props.view.mode!=="notes"){
+      ctx.save();ctx.globalAlpha=(props.settings.spectrumOpacity/100)*(props.view.mode==="spec"?1:.82);ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(directSpectrumCanvas,0,0,w,h);ctx.restore();
     }
 
     for(let midi=Math.floor(props.view.pitchBottom);midi<=Math.ceil(props.view.pitchBottom+props.view.visibleNotes);midi+=1){
@@ -236,7 +257,7 @@ export default function EditorCanvas(props: Props) {
     }
 
     const playX=coords.x(props.playback.time);if(playX>=0&&playX<=w){ctx.beginPath();ctx.moveTo(playX,0);ctx.lineTo(playX,h);ctx.strokeStyle="rgba(255,255,255,.92)";ctx.lineWidth=2;ctx.stroke();}
-  },[coords,decoded,drag,props.notes,props.playback.duration,props.playback.time,props.selected,props.settings,props.view,size,spectrumCanvas]);
+  },[coords,decoded,directSpectrumCanvas,drag,props.notes,props.playback.duration,props.playback.time,props.selected,props.settings,props.view,size,spectrumCanvas]);
 
   function eventPosition(event: ReactPointerEvent<HTMLCanvasElement>|ReactMouseEvent<HTMLCanvasElement>){
     const r=event.currentTarget.getBoundingClientRect(),x=event.clientX-r.left,y=event.clientY-r.top;

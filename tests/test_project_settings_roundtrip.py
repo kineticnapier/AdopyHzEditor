@@ -33,6 +33,8 @@ NON_DEFAULT_SETTINGS = {
     "analysisProfile": "Deep",
     "cqtResolution": "48 bins/octave",
     "analysisSource": "vorbis_direct",
+    "spectrumThreshold": 5.0,
+    "spectrumOpacity": 42,
     "curveShape": "smoothstep",
     "curveInterpolation": "bezier_hz",
     "targetAngle": 137.5,
@@ -64,7 +66,16 @@ class ProjectSettingsRoundTripTests(unittest.TestCase):
         bridge = Bridge()
         defaults = {
             key: bridge.settings[key]
-            for key in ("contrast", "gamma", "enhance", "harmonics", "targetAngle")
+            for key in (
+                "contrast",
+                "gamma",
+                "enhance",
+                "harmonics",
+                "targetAngle",
+                "analysisSource",
+                "spectrumThreshold",
+                "spectrumOpacity",
+            )
         }
 
         bridge._apply_project_settings({"grid_bpm": 240.0})

@@ -89,7 +89,11 @@ export default function SettingsPanel({ api, settings, notes, selected, playback
         <Row label="解析品質"><Select value={settings.analysisProfile} options={[["Fast","高速"],["Normal","標準"],["Precise","高精度"],["Full C0-C10","全域 C0-C10"]]} onChange={v=>void onPatch({analysisProfile:v})}/></Row>
         <Row label="CQT解像度"><Select value={settings.cqtResolution} options={[["profile default","自動"],["100 cents","100セント"],["50 cents","50セント"],["25 cents","25セント"],["12.5 cents","12.5セント"],["41 EDO","41平均律"],["53 EDO","53平均律"]]} onChange={v=>void onPatch({cqtResolution:v})}/></Row>
       </>}
-      <button className="wide" disabled={!api||!audioName||busy} onClick={()=>void onStateAction(()=>api!.reanalyze_audio())}>音声を解析</button><div className="hint">{settings.analysisSource==="vorbis_direct"?"実験機能です。解析すると現在のノートを置き換えます（元に戻す可）。非Vorbis音源はCQTへ戻ります。":"解析設定の変更は再解析後に反映されます。"}</div>
+      {settings.analysisSource==="vorbis_direct"&&<>
+        <Row label="表示しきい値"><Select value={String(settings.spectrumThreshold)} options={[["0","0%"],["0.5","0.5%"],["1","1%"],["2","2%"],["5","5%"],["10","10%"]]} onChange={v=>void onPatch({spectrumThreshold:Number(v)})}/></Row>
+        <Row label="表示濃度"><Range value={settings.spectrumOpacity} onChange={v=>void onPatch({spectrumOpacity:v})}/></Row>
+      </>}
+      <button className="wide" disabled={!api||!audioName||busy} onClick={()=>void onStateAction(()=>api!.reanalyze_audio())}>音声を解析</button><div className="hint">{settings.analysisSource==="vorbis_direct"?"実験機能です。解析結果は採譜用の背景として表示され、現在のノートは変更しません。しきい値の変更に再解析は不要です。非Vorbis音源はCQTへ戻ります。":"解析設定の変更は再解析後に反映されます。"}</div>
     </>}
     {page==="curve"&&<>
       <Row label="カーブ形状"><Select value={curveShape.mode} options={[["ease","イーズ"],["s_curve","S字"],["sine","サイン"],["expo_in","指数イン"],["expo_out","指数アウト"],["linear","直線"],["ease_in","イーズイン"],["ease_out","イーズアウト"],["custom","カスタム Bézier"]]} onChange={setCurveShape}/></Row>

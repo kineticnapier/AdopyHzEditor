@@ -141,7 +141,7 @@ jobs:
           tests.test_webview_lifecycle
           tests.test_web_gap_bridge
 
-      - name: Vorbis Direct integration tests
+      - name: Vorbis Direct Spectrum Layer tests
         run: >-
           python -m unittest
           tests.test_vorbis_direct
