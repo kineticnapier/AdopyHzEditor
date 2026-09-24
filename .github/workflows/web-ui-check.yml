@@ -178,6 +178,10 @@ jobs:
         working-directory: frontend
         run: npm install --no-audit --no-fund
 
+      - name: Playback follow frontend tests
+        working-directory: frontend
+        run: npm run test:follow
+
       - name: Build frontend
         working-directory: frontend
         run: npm run build

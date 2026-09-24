@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:follow": "node --experimental-strip-types --test tests/directSpectrum.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

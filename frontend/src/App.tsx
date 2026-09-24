@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AdoFAIExportDialog from "./dialogs/AdoFAIExportDialogJa";
 import AppMenus from "./components/AppMenus";
 import EditorCanvas from "./editor/EditorCanvas";
@@ -8,6 +8,7 @@ import { BlankWorkspaceDialog, HarmonicDiagramDialog, QuickHzDialog, UpdateDialo
 import Timeline from "./editor/Timeline";
 import TopToolbar from "./components/TopToolbar";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
+import { DirectSpectrumRegionCache, followViewportStart, nextPrefetchStart, spectrumRegion, spectrumRegionKey } from "./editor/directSpectrum";
 import "./dialogs.css";
 import { getBackendApi, type AppState, type BackendApi, type DirectSpectrumPayload, type EditorSettings, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./api/bridge";
 import type { ToolBackendApi } from "./api/toolsBridge";
@@ -30,6 +31,8 @@ export default function App(){
   const[pendingDestructive,setPendingDestructive]=useState<PendingDestructiveAction|null>(null);
   const peakRequest=useRef(0);
   const spectrumRequest=useRef(0);
+  const desiredSpectrumKey=useRef("");
+  const spectrumLoader=useMemo(()=>api?new DirectSpectrumRegionCache(region=>api.get_spectrum_region(region.startTime,region.endTime,region.minMidi,region.maxMidi,region.pixelWidth,region.pixelHeight,region.threshold)):null,[api]);
   const toolsApi=api as ToolBackendApi|null;
 
   function applyState(state:AppState){setSettings(state.settings);setView(state.view);setPlayback(state.playback);setNotes(state.notes);setSelected(old=>old.filter(i=>i>=0&&i<state.notes.length));setAnalysisAvailable(state.analysis.available);setAnalysisSource(state.analysis.source??"cqt");setAudioName(state.audio.name);setProjectPath(state.projectPath);setDirty(state.dirty);setBusy(state.busy);setStatus(state.status||"準備完了")}
@@ -38,25 +41,38 @@ export default function App(){
   useEffect(()=>{void getBackendApi().then(async backend=>{if(!backend)return;setApi(backend);setConnected((await backend.ping()).ok);const state=await backend.get_state();applyState(state);if(state.analysis.available&&state.analysis.source!=="vorbis_direct")await refreshSpectrum(backend)})},[]);
   useEffect(()=>{if(!api)return;let active=true;const id=window.setInterval(()=>void api.get_playback_state().then(x=>{if(active)setPlayback(x)}).catch(()=>{}),50);return()=>{active=false;window.clearInterval(id)}},[api]);
   useEffect(()=>{if(!api||!analysisAvailable||analysisSource==="vorbis_direct")return;const id=window.setTimeout(()=>void refreshSpectrum(api),140);return()=>window.clearTimeout(id)},[api,analysisAvailable,analysisSource,settings.contrast,settings.gamma,settings.enhance,settings.displayMode,settings.harmonics,settings.colormap]);
-  useEffect(()=>{
+  useLayoutEffect(()=>{
+    spectrumLoader?.invalidate();
+    spectrumRequest.current+=1;
+  },[spectrumLoader,analysisAvailable,analysisSource,settings.spectrumThreshold,view.windowSeconds,view.pitchBottom,view.visibleNotes,viewportSize.width,viewportSize.height]);
+  useLayoutEffect(()=>{
     const request=++spectrumRequest.current;
-    if(!api||!analysisAvailable||analysisSource!=="vorbis_direct"){setDirectSpectrum(null);return}
-    const id=window.setTimeout(()=>void api.get_spectrum_region(view.start,view.start+view.windowSeconds,view.pitchBottom-.5,view.pitchBottom+view.visibleNotes-.5,Math.round(viewportSize.width),Math.round(viewportSize.height)).then(payload=>{if(request===spectrumRequest.current)setDirectSpectrum(payload.available?payload:null)}).catch(e=>setStatus(String(e))),90);
-    return()=>window.clearTimeout(id);
-  },[api,analysisAvailable,analysisSource,settings.spectrumThreshold,view.start,view.windowSeconds,view.pitchBottom,view.visibleNotes,viewportSize.width,viewportSize.height]);
+    if(!spectrumLoader||!analysisAvailable||analysisSource!=="vorbis_direct"){desiredSpectrumKey.current="";setDirectSpectrum(null);return}
+    const region=spectrumRegion(view,viewportSize,settings.spectrumThreshold),key=spectrumRegionKey(region);
+    desiredSpectrumKey.current=key;
+    const prefetch=()=>{
+      if(!followPlayback||!playback.playing)return;
+      const next=nextPrefetchStart(view.start,view.windowSeconds,playback.duration);
+      if(next!==null)spectrumLoader.prefetch(spectrumRegion(view,viewportSize,settings.spectrumThreshold,next));
+    };
+    const cached=spectrumLoader.peek(region);
+    if(cached){setDirectSpectrum(cached.available?cached:null);prefetch();return}
+    setDirectSpectrum(null);
+    void spectrumLoader.load(region).then(payload=>{
+      if(request!==spectrumRequest.current||key!==desiredSpectrumKey.current||!payload)return;
+      setDirectSpectrum(payload.available?payload:null);
+      prefetch();
+    }).catch(e=>{if(request===spectrumRequest.current)setStatus(String(e))});
+  },[spectrumLoader,analysisAvailable,analysisSource,settings.spectrumThreshold,view.start,view.windowSeconds,view.pitchBottom,view.visibleNotes,viewportSize.width,viewportSize.height,followPlayback,playback.playing,playback.duration]);
   useEffect(()=>{
     if(!followPlayback||!playback.playing||view.windowSeconds<=0)return;
-    const trigger=view.start+view.windowSeconds*.82;
-    if(playback.time<view.start||playback.time>trigger){
-      const max=Math.max(0,playback.duration-view.windowSeconds);
-      const next=Math.max(0,Math.min(max,playback.time-view.windowSeconds*.2));
-      if(Math.abs(next-view.start)>.001){setView(v=>({...v,start:next}));void api?.set_view({start:next});}
-    }
+    const next=followViewportStart(view.start,view.windowSeconds,playback.time,playback.duration);
+    if(next!==null){setView(v=>({...v,start:next}));void api?.set_view({start:next});}
   },[api,followPlayback,playback.duration,playback.playing,playback.time,view.start,view.windowSeconds]);
 
   async function patch(changes:Partial<EditorSettings>){setSettings(v=>({...v,...changes}));if(api){setSettings(await api.update_settings(changes));setDirty(true)}}
-  async function updateView(changes:Partial<ViewState>){setView(v=>({...v,...changes}));if(api)setView(await api.set_view(changes))}
-  async function fitView(){if(api)setView(await api.fit_view())}
+  async function updateView(changes:Partial<ViewState>){setFollowPlayback(false);setView(v=>({...v,...changes}));if(api)setView(await api.set_view(changes))}
+  async function fitView(){setFollowPlayback(false);if(api)setView(await api.fit_view())}
   async function runStateAction(action:()=>Promise<AppState>){if(!api)return;setBusy(true);try{const state=await action();applyState(state);if(state.analysis.available&&state.analysis.source!=="vorbis_direct")await refreshSpectrum(api);else setSpectrum(null);if(!state.analysis.available)setDirectSpectrum(null)}catch(e){setStatus(String(e))}finally{setBusy(false)}}
   function requestDestructive(label:string,run:()=>void|Promise<void>,cancel?:()=>void|Promise<void>){if(dirty)setPendingDestructive({label,run,cancel});else void run()}
   async function cancelPendingDestructive(status?:string){const pending=pendingDestructive;setPendingDestructive(null);try{await pending?.cancel?.()}catch(e){setStatus(String(e));return}if(status)setStatus(status)}

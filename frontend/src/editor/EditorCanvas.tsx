@@ -116,9 +116,12 @@ function resizeNote(note: NoteDto, edge: "start" | "end", delta: number, setting
 }
 
 export default function EditorCanvas(props: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null), containerRef = useRef<HTMLDivElement>(null), lastCursorReport = useRef(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null), containerRef = useRef<HTMLDivElement>(null), playbackCursorRef = useRef<HTMLDivElement>(null), lastCursorReport = useRef(0);
+  const playbackSample = useRef({time:props.playback.time,duration:props.playback.duration,playing:props.playback.playing,speed:props.settings.speed,receivedAt:performance.now()});
+  const cursorViewport = useRef({start:props.view.start,windowSeconds:props.view.windowSeconds,width:800});
   const [size, setSize] = useState({ width: 800, height: 500 });
   const [drag, setDrag] = useState<DragState | null>(null);
+  cursorViewport.current={start:props.view.start,windowSeconds:props.view.windowSeconds,width:size.width};
   const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
   const spectrumCanvas = useMemo(() => {
     if (!decoded) return null;
@@ -157,6 +160,26 @@ export default function EditorCanvas(props: Props) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [props.onViewportSize]);
+
+  useEffect(() => {
+    playbackSample.current={time:props.playback.time,duration:props.playback.duration,playing:props.playback.playing,speed:props.settings.speed,receivedAt:performance.now()};
+  },[props.playback.time,props.playback.duration,props.playback.playing,props.settings.speed]);
+
+  useEffect(() => {
+    let frame=0;
+    const drawCursor=(now:number)=>{
+      const cursor=playbackCursorRef.current,sample=playbackSample.current,viewport=cursorViewport.current;
+      if(cursor){
+        const elapsed=sample.playing?Math.max(0,now-sample.receivedAt)/1000*Math.max(0,sample.speed):0;
+        const time=Math.min(sample.duration,sample.time+elapsed),x=(time-viewport.start)/Math.max(.001,viewport.windowSeconds)*viewport.width;
+        cursor.style.display=x>=0&&x<=viewport.width?"block":"none";
+        cursor.style.transform=`translate3d(${x}px,0,0)`;
+      }
+      frame=requestAnimationFrame(drawCursor);
+    };
+    frame=requestAnimationFrame(drawCursor);
+    return()=>cancelAnimationFrame(frame);
+  },[]);
 
   const coords = useMemo(() => {
     const { width, height } = size, start = props.view.start, win = Math.max(.001, props.view.windowSeconds), bottom = props.view.pitchBottom - .5, visible = Math.max(1, props.view.visibleNotes);
@@ -256,8 +279,7 @@ export default function EditorCanvas(props: Props) {
       ctx.restore();
     }
 
-    const playX=coords.x(props.playback.time);if(playX>=0&&playX<=w){ctx.beginPath();ctx.moveTo(playX,0);ctx.lineTo(playX,h);ctx.strokeStyle="rgba(255,255,255,.92)";ctx.lineWidth=2;ctx.stroke();}
-  },[coords,decoded,directSpectrumCanvas,drag,props.notes,props.playback.duration,props.playback.time,props.selected,props.settings,props.view,size,spectrumCanvas]);
+  },[coords,decoded,directSpectrumCanvas,drag,props.notes,props.playback.duration,props.selected,props.settings,props.view,size,spectrumCanvas]);
 
   function eventPosition(event: ReactPointerEvent<HTMLCanvasElement>|ReactMouseEvent<HTMLCanvasElement>){
     const r=event.currentTarget.getBoundingClientRect(),x=event.clientX-r.left,y=event.clientY-r.top;
@@ -333,5 +355,5 @@ export default function EditorCanvas(props: Props) {
     else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
     else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
   }
-  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り（スナップ対応）" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/></div>;
+  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り（スナップ対応）" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/><div className="playback-cursor" ref={playbackCursorRef}/></div>;
 }
