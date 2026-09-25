@@ -147,6 +147,7 @@ jobs:
           tests.test_vorbis_direct
           tests.test_vorbis_spectrum_import
           tests.test_frequency_tracks
+          tests.test_frequency_track_display
 
       - name: Launcher is Windows PowerShell 5.1 safe
         shell: python
