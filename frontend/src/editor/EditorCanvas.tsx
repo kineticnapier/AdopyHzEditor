@@ -229,16 +229,40 @@ export default function EditorCanvas(props: Props) {
     const w=size.width,h=size.height;
     ctx.fillStyle="#080b0e"; ctx.fillRect(0,0,w,h);
 
-    if (spectrumCanvas && props.view.mode !== "notes" && decoded?.duration && decoded.midiMin !== undefined && decoded.midiMax !== undefined) {
-      const sx=Math.max(0,props.view.start/decoded.duration*decoded.cols), sw=Math.max(1,Math.min(decoded.cols-sx,props.view.windowSeconds/decoded.duration*decoded.cols));
-      const full=Math.max(1e-6,decoded.midiMax-decoded.midiMin+1), top=props.view.pitchBottom+props.view.visibleNotes-.5,bottom=props.view.pitchBottom-.5;
-      const sy=Math.max(0,(decoded.midiMax+.5-top)/full*decoded.rows), sh=Math.max(1,Math.min(decoded.rows-sy,(top-bottom)/full*decoded.rows));
-      ctx.save(); ctx.globalAlpha=props.view.mode==="spec"?1:.7; ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
-      ctx.drawImage(spectrumCanvas,sx,sy,sw,sh,0,0,w,h); ctx.restore();
+    if (spectrumCanvas && props.view.mode !== "notes" && decoded?.duration && decoded.midiMin !== undefined) {
+      const viewStart=props.view.start,viewEnd=viewStart+props.view.windowSeconds;
+      const viewBottom=props.view.pitchBottom-.5,viewTop=viewBottom+props.view.visibleNotes;
+      const pitchStep=Math.max(1e-6,decoded.pitchStep??1);
+      const sourceBottom=decoded.midiMin-pitchStep/2,sourceTop=decoded.midiMin+(decoded.rows-.5)*pitchStep;
+      const timeStart=Math.max(viewStart,0),timeEnd=Math.min(viewEnd,decoded.duration);
+      const pitchBottom=Math.max(viewBottom,sourceBottom),pitchTop=Math.min(viewTop,sourceTop);
+      if(timeEnd>timeStart&&pitchTop>pitchBottom){
+        const sx=timeStart/decoded.duration*decoded.cols,sw=(timeEnd-timeStart)/decoded.duration*decoded.cols;
+        const sourcePitchSpan=Math.max(1e-6,sourceTop-sourceBottom);
+        const sy=(sourceTop-pitchTop)/sourcePitchSpan*decoded.rows,sh=(pitchTop-pitchBottom)/sourcePitchSpan*decoded.rows;
+        const dx=(timeStart-viewStart)/Math.max(.001,props.view.windowSeconds)*w,dw=(timeEnd-timeStart)/Math.max(.001,props.view.windowSeconds)*w;
+        const dy=(viewTop-pitchTop)/Math.max(1,props.view.visibleNotes)*h,dh=(pitchTop-pitchBottom)/Math.max(1,props.view.visibleNotes)*h;
+        ctx.save();ctx.globalAlpha=props.view.mode==="spec"?1:.7;ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
+        ctx.drawImage(spectrumCanvas,sx,sy,sw,sh,dx,dy,dw,dh);ctx.restore();
+      }
     }
-    if(directSpectrumCanvas&&props.view.mode!=="notes"){
-      ctx.save();ctx.globalAlpha=(props.settings.spectrumOpacity/100)*(props.view.mode==="spec"?1:.82);ctx.imageSmoothingEnabled=false;
-      ctx.drawImage(directSpectrumCanvas,0,0,w,h);ctx.restore();
+    if(directSpectrumCanvas&&props.directSpectrum&&props.view.mode!=="notes"){
+      const payload=props.directSpectrum;
+      const viewStart=props.view.start,viewEnd=viewStart+props.view.windowSeconds;
+      const viewBottom=props.view.pitchBottom-.5,viewTop=viewBottom+props.view.visibleNotes;
+      const sourceStart=payload.startTime??viewStart,sourceEnd=payload.endTime??viewEnd;
+      const sourceBottom=payload.minMidi??viewBottom,sourceTop=payload.maxMidi??viewTop;
+      const timeStart=Math.max(viewStart,sourceStart),timeEnd=Math.min(viewEnd,sourceEnd);
+      const pitchBottom=Math.max(viewBottom,sourceBottom),pitchTop=Math.min(viewTop,sourceTop);
+      if(timeEnd>timeStart&&pitchTop>pitchBottom){
+        const sourceTimeSpan=Math.max(1e-6,sourceEnd-sourceStart),sourcePitchSpan=Math.max(1e-6,sourceTop-sourceBottom);
+        const sx=(timeStart-sourceStart)/sourceTimeSpan*directSpectrumCanvas.width,sw=(timeEnd-timeStart)/sourceTimeSpan*directSpectrumCanvas.width;
+        const sy=(sourceTop-pitchTop)/sourcePitchSpan*directSpectrumCanvas.height,sh=(pitchTop-pitchBottom)/sourcePitchSpan*directSpectrumCanvas.height;
+        const dx=(timeStart-viewStart)/Math.max(.001,props.view.windowSeconds)*w,dw=(timeEnd-timeStart)/Math.max(.001,props.view.windowSeconds)*w;
+        const dy=(viewTop-pitchTop)/Math.max(1,props.view.visibleNotes)*h,dh=(pitchTop-pitchBottom)/Math.max(1,props.view.visibleNotes)*h;
+        ctx.save();ctx.globalAlpha=(props.settings.spectrumOpacity/100)*(props.view.mode==="spec"?1:.82);ctx.imageSmoothingEnabled=false;
+        ctx.drawImage(directSpectrumCanvas,sx,sy,sw,sh,dx,dy,dw,dh);ctx.restore();
+      }
     }
     if(decodedTracks&&props.view.mode!=="notes"){
       ctx.save();ctx.lineCap="round";ctx.lineJoin="round";
@@ -426,8 +450,15 @@ export default function EditorCanvas(props: Props) {
   }
   function onWheel(event:ReactWheelEvent<HTMLCanvasElement>){
     event.preventDefault();const sign=event.deltaY<0?1:-1;
-    if(event.shiftKey)void props.onView({pitchBottom:props.view.pitchBottom+sign*3});
-    else if(event.altKey)void props.onView({visibleNotes:props.view.visibleNotes-sign*4});
+    if(event.shiftKey){
+      const maxBottom=Math.max(0,128-props.view.visibleNotes);
+      void props.onView({pitchBottom:Math.max(0,Math.min(maxBottom,props.view.pitchBottom+sign*3))});
+    }
+    else if(event.altKey){
+      const visibleNotes=Math.max(6,Math.min(128,props.view.visibleNotes-sign*4));
+      const pitchBottom=Math.max(0,Math.min(props.view.pitchBottom,128-visibleNotes));
+      void props.onView({visibleNotes,pitchBottom});
+    }
     else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
     else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
   }
