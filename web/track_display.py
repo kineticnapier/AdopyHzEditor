@@ -1,11 +1,11 @@
 """Display-oriented Frequency Track viewport policy for the Web editor.
 
-The core FrequencyTrackStore keeps every derived track.  This module changes only
-how many tracks are returned to one Web viewport: long/strong tracks receive
-higher display priority, zoomed-out views get a tighter point budget, and LOD
-keeps or drops whole tracks instead of producing a wall of equally prominent
-segments.  No track data is deleted from the store and transcription still uses
-full-resolution data.
+The core FrequencyTrackStore keeps every derived track. This module changes only
+how many tracks are returned to one Web viewport: long/strong/coherent tracks
+receive higher display priority, zoomed-out views get a tighter point budget,
+and LOD keeps or drops whole tracks instead of producing a wall of similarly
+prominent segments. No track data is deleted from the store and transcription
+still uses full-resolution data.
 """
 
 from __future__ import annotations
@@ -26,13 +26,71 @@ from core.frequency_tracks import (
 _ORIGINAL_QUERY_REGION = FrequencyTrackStore.query_region
 
 
-def display_priority(duration: float, average_magnitude: float, maximum_magnitude: float) -> float:
-    """Return a deterministic display-only priority in the 0..1 range."""
+def track_continuity(times: np.ndarray, midis: np.ndarray) -> float:
+    """Return display-only temporal/path coherence in the 0..1 range.
+
+    Constant pitch and smooth glides score highly. Irregular time gaps and rapid
+    point-to-point direction reversals score lower. Total pitch movement itself
+    is not penalized, so a clean rising/falling Track remains prominent.
+    """
+    t = np.asarray(times, dtype=np.float64)
+    m = np.asarray(midis, dtype=np.float64)
+    count = min(int(t.size), int(m.size))
+    if count <= 1:
+        return 0.45
+    t = t[:count]
+    m = m[:count]
+
+    gaps = np.diff(t)
+    valid_gaps = gaps[np.isfinite(gaps) & (gaps > 1e-9)]
+    if valid_gaps.size:
+        median_gap = max(1e-9, float(np.median(valid_gaps)))
+        gap_jitter = float(np.median(np.abs(valid_gaps - median_gap))) / median_gap
+        regularity = 1.0 / (1.0 + 4.0 * gap_jitter)
+        largest_gap_ratio = float(np.max(valid_gaps)) / median_gap
+        gap_support = 1.0 / (1.0 + 0.35 * max(0.0, largest_gap_ratio - 2.0))
+        temporal = regularity * gap_support
+    else:
+        temporal = 0.45
+
+    pitch_steps = np.diff(m)
+    pitch_steps = pitch_steps[np.isfinite(pitch_steps)]
+    if pitch_steps.size < 2:
+        path = 1.0
+    else:
+        curvature = np.diff(pitch_steps)
+        typical_motion = float(np.median(np.abs(pitch_steps)))
+        typical_curvature = float(np.median(np.abs(curvature))) if curvature.size else 0.0
+        scale = max(0.08, typical_motion + 0.08)
+        smoothness = 1.0 / (1.0 + 0.70 * typical_curvature / scale)
+
+        moving = pitch_steps[np.abs(pitch_steps) > 0.03]
+        if moving.size >= 2:
+            signs = np.sign(moving)
+            reversal_rate = float(np.mean(signs[1:] != signs[:-1]))
+        else:
+            reversal_rate = 0.0
+        direction_stability = 1.0 - 0.45 * reversal_rate
+        path = smoothness * direction_stability
+
+    coherence = math.sqrt(max(0.0, temporal) * max(0.0, path))
+    return max(0.15, min(1.0, coherence))
+
+
+def display_priority(
+    duration: float,
+    average_magnitude: float,
+    maximum_magnitude: float,
+    continuity: float = 1.0,
+) -> float:
+    """Return deterministic display-only priority in the 0..1 range."""
     avg = max(0.0, min(1.0, float(average_magnitude)))
     peak = max(0.0, min(1.0, float(maximum_magnitude)))
+    coherent = max(0.0, min(1.0, float(continuity)))
     strength = 0.7 * math.sqrt(avg) + 0.3 * math.sqrt(peak)
     duration_weight = max(0.15, min(1.0, float(duration) / 0.30))
-    return max(0.0, min(1.0, strength * duration_weight))
+    continuity_weight = 0.40 + 0.60 * coherent
+    return max(0.0, min(1.0, strength * duration_weight * continuity_weight))
 
 
 def _display_point_limit(requested_limit: int, span_seconds: float) -> int:
@@ -66,9 +124,9 @@ def readable_frequency_track_region(
     """Return a readability-first viewport without mutating the Track Store.
 
     Up to 8 seconds all visible tracks are retained and only point decimation is
-    used when necessary.  Wider views apply whole-track LOD using duration and
-    magnitude.  This keeps the view deterministic while avoiding the dense
-    "fence" effect from thousands of similarly prominent short tracks.
+    used when necessary. Wider views apply whole-track LOD using duration,
+    magnitude and continuity. Continuity is measured from each full-resolution
+    Track, so small pans do not change its priority.
     """
     started = time.perf_counter()
     start = max(0.0, float(start_time))
@@ -112,10 +170,15 @@ def readable_frequency_track_region(
 
         point_count = sum(int(run.size) for run in runs)
         duration = float(store.track_end_times[track_id] - store.track_start_times[track_id])
+        continuity = track_continuity(
+            store.point_times[lo:hi],
+            store.point_midi[lo:hi],
+        )
         priority = display_priority(
             duration,
             float(store.track_average_magnitudes[track_id]),
             float(store.track_max_magnitudes[track_id]),
+            continuity,
         )
         groups.append((track_id, runs, point_count, priority))
         raw_points += point_count
@@ -123,7 +186,7 @@ def readable_frequency_track_region(
     if not groups:
         return FrequencyTrackRegion(b"", 0, 0, 1.0, time.perf_counter() - started)
 
-    # Preserve the core query's temporal decimation behavior first.  For wider
+    # Preserve the core query's temporal decimation behavior first. For wider
     # views the second stage below spends the tighter display budget by whole
     # track so low-priority fragments do not pepper the viewport.
     base_stride = max(1, int(math.ceil(raw_points / requested_limit)))
@@ -134,9 +197,9 @@ def readable_frequency_track_region(
         sampled_groups.append((track_id, sampled_runs, sampled_count, priority))
 
     if end - start <= 8.0:
-        # Zoomed in: keep every track.  If endpoint preservation pushed us a
+        # Zoomed in: keep every track. If endpoint preservation pushed us a
         # little over budget, increase the stride globally rather than dropping
-        # weak tracks.
+        # low-priority tracks.
         stride = base_stride
         kept = sampled_groups
         total = sum(item[2] for item in kept)
