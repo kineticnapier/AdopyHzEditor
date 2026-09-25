@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import math
 import threading
 from pathlib import Path
@@ -15,7 +16,13 @@ from core.audio_analysis import (
     enhance_spectrogram,
 )
 from core.audio_player import AudioPlayer, decode_audio_file
+from core.frequency_tracks import FrequencyTrackStore, build_frequency_track_store
 from core.note_model import Note, midi_to_hz, note_name
+from core.vorbis_direct import select_analysis_backend
+from core.vorbis_spectrum_store import (
+    VorbisSpectrumStore,
+    analyze_vorbis_spectrum_store,
+)
 from web.editing import EditingMixin
 from web.io import IOMixin
 from web.notes import NoteMixin
@@ -32,6 +39,7 @@ PROJECT_FILE_TYPES = (
 )
 MIDI_FILE_TYPES = ("MIDI Files (*.mid;*.midi)", "All files (*.*)")
 ADOF_FILE_TYPES = ("ADOFAI Level (*.adofai)", "All files (*.*)")
+LOGGER = logging.getLogger(__name__)
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -54,6 +62,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self._window = None
         self.player = AudioPlayer()
         self.spectrogram: Spectrogram | None = None
+        self.vorbis_spectrum_store: VorbisSpectrumStore | None = None
+        self.frequency_track_store: FrequencyTrackStore | None = None
+        self.analysis_stats: dict[str, Any] = {}
         self.audio_path: str | None = None
         self.project_path: str | None = None
         self.notes: list[Note] = []
@@ -95,6 +106,10 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             "colormap": "wavetone",
             "analysisProfile": "Normal",
             "cqtResolution": "profile default",
+            "analysisSource": "cqt",
+            "spectrumThreshold": 2.0,
+            "spectrumOpacity": 70,
+            "spectrumLayerMode": "both",
             "curveShape": "ease",
             "curveInterpolation": "bezier_pitch",
             "targetAngle": 165.0,
@@ -212,6 +227,14 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             return _int_clamp(value, 5, 500)
         if key == "targetAngle":
             return _clamp(value, 0.001, 359.999)
+        if key == "analysisSource":
+            return "vorbis_direct" if str(value) == "vorbis_direct" else "cqt"
+        if key == "spectrumThreshold":
+            return _clamp(value, 0.0, 100.0)
+        if key == "spectrumOpacity":
+            return _int_clamp(value, 0, 100)
+        if key == "spectrumLayerMode":
+            return str(value) if str(value) in {"raw", "tracks", "both"} else "both"
         if key in {"notePreview", "gridEnabled", "metronomeEnabled", "snapEnabled", "enhance"}:
             return bool(value)
         return str(value)
@@ -233,6 +256,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "midi",
                 "adofai",
                 "cursor-peak",
+                "vorbis-spectrum-layer",
+                "frequency-tracks",
             ],
         }
 
@@ -240,16 +265,31 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         return [n.normalized().to_dict() for n in self.notes]
 
     def _analysis_state(self) -> dict[str, Any]:
-        if self.spectrogram is None:
+        direct = self.vorbis_spectrum_store
+        if self.spectrogram is None and direct is None:
             return {
                 "available": False,
+                "source": str(self.settings["analysisSource"]),
+                "stats": dict(self.analysis_stats),
                 "duration": float(self.duration),
                 "midiMin": int(self.midi_min),
                 "midiMax": int(self.midi_max),
                 "pitchStep": float(self.pitch_step),
             }
+        if direct is not None:
+            return {
+                "available": True,
+                "source": "vorbis_direct",
+                "stats": dict(self.analysis_stats),
+                "duration": float(direct.duration),
+                "midiMin": 0,
+                "midiMax": 127,
+                "pitchStep": 0.0,
+            }
         return {
             "available": True,
+            "source": "cqt",
+            "stats": dict(self.analysis_stats),
             "duration": float(self.spectrogram.duration),
             "midiMin": int(self.spectrogram.midi_min),
             "midiMax": int(self.spectrogram.midi_max),
@@ -349,6 +389,10 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
     # ------------------------------------------------------------------
     def _set_audio_data(self, path: str, decoded) -> None:
         self.audio_path = str(path)
+        self.spectrogram = None
+        self.vorbis_spectrum_store = None
+        self.frequency_track_store = None
+        self.analysis_stats = {}
         self.player.set_audio(decoded.samples, decoded.sample_rate, path=str(path))
         self.duration = max(0.001, float(decoded.duration))
         self.player.set_virtual_duration(self.duration)
@@ -369,9 +413,10 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             decoded = decode_audio_file(path)
             with self._lock:
                 self._set_audio_data(path, decoded)
-            self._analyze_current_audio()
+            analysis_result = self._analyze_current_audio()
             with self._lock:
-                self._status = f"Loaded {Path(path).name}"
+                if analysis_result == "cqt":
+                    self._status = f"Loaded {Path(path).name}"
                 self._dirty = was_dirty or previous_audio != self.audio_path
             return self.get_state()
         finally:
@@ -393,20 +438,88 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             options["fold_to_semitone"] = False
         return options
 
-    def _analyze_current_audio(self) -> None:
+    def _analyze_current_audio(self, *, explicit: bool = False) -> str | None:
         if not self.audio_path:
-            return
+            return None
         self._busy = True
         try:
+            requested = str(self.settings.get("analysisSource", "cqt"))
+            if requested == "vorbis_direct":
+                selection = select_analysis_backend(
+                    self.audio_path,
+                    "vorbis_direct",
+                )
+                if selection.selected == "vorbis_direct":
+                    if not explicit:
+                        with self._lock:
+                            self.spectrogram = None
+                            self.vorbis_spectrum_store = None
+                            self.frequency_track_store = None
+                            self.analysis_stats = {
+                                "requestedSource": "vorbis_direct",
+                                "selectedSource": "vorbis_direct",
+                            }
+                            self._status = (
+                                "Vorbis Direct を選択中です。解析を実行すると"
+                                "採譜用スペクトルを作成します"
+                            )
+                        return "direct_pending"
+                    store = analyze_vorbis_spectrum_store(self.audio_path)
+                    track_store = build_frequency_track_store(store)
+                    stats = store.stats.to_dict()
+                    stats.update(track_store.stats.to_dict())
+                    stats.update(
+                        requestedSource="vorbis_direct",
+                        selectedSource="vorbis_direct",
+                    )
+                    with self._lock:
+                        self.spectrogram = None
+                        self.vorbis_spectrum_store = store
+                        self.frequency_track_store = track_store
+                        self.analysis_stats = stats
+                        self.duration = max(0.001, float(store.duration))
+                        self.player.set_virtual_duration(self.duration)
+                        self.midi_min, self.midi_max = 0, 127
+                        self.pitch_step = 1.0
+                        self.view["mode"] = "both" if self.notes else "spec"
+                        self._status = (
+                            f"Vorbis Direct: {stats['storedBins']} bins "
+                            f"/ {stats['totalTrackCount']} tracks "
+                            f"({stats['blocksProcessed']} blocks, "
+                            f"{stats['analysisSeconds']:.2f}s)"
+                        )
+                    LOGGER.info("Vorbis Direct analysis stats: %s", stats)
+                    return "vorbis_direct"
+
+                LOGGER.info(
+                    "Vorbis Direct fallback: %s",
+                    selection.fallback_reason,
+                )
+
             spec = analyze_cqt(self.audio_path, **self._analysis_options())
             with self._lock:
                 self.spectrogram = spec
+                self.vorbis_spectrum_store = None
+                self.frequency_track_store = None
+                self.analysis_stats = {
+                    "requestedSource": requested,
+                    "selectedSource": "cqt",
+                }
+                if requested == "vorbis_direct":
+                    self.analysis_stats["fallbackReason"] = (
+                        selection.fallback_reason
+                    )
                 self.duration = max(0.001, float(spec.duration))
                 self.midi_min = int(spec.midi_min)
                 self.midi_max = int(spec.midi_max)
                 self.pitch_step = float(spec.pitch_step)
                 self.player.set_virtual_duration(self.duration)
-                self._status = "Analysis ready"
+                self._status = (
+                    "Vorbis Direct はこの音源で使えないため、CQTで解析しました"
+                    if requested == "vorbis_direct"
+                    else "Analysis ready"
+                )
+            return "fallback" if requested == "vorbis_direct" else "cqt"
         finally:
             self._busy = False
 
@@ -415,8 +528,107 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             with self._lock:
                 self._status = "Open an audio file first"
             return self.get_state()
-        self._analyze_current_audio()
+        self._analyze_current_audio(explicit=True)
         return self.get_state()
+
+    def get_spectrum_region(
+        self,
+        start_time: float,
+        end_time: float,
+        minimum_midi: float,
+        maximum_midi: float,
+        pixel_width: int,
+        pixel_height: int,
+        threshold: float | None = None,
+    ) -> dict[str, Any]:
+        """Return only the max-pooled Vorbis cells needed by one viewport."""
+        with self._lock:
+            store = self.vorbis_spectrum_store
+            gate = (
+                float(self.settings["spectrumThreshold"]) / 100.0
+                if threshold is None
+                else _clamp(threshold, 0.0, 100.0) / 100.0
+            )
+        if store is None:
+            return {"available": False}
+
+        region = store.query_region(
+            start_time,
+            end_time,
+            minimum_midi,
+            maximum_midi,
+            pixel_width,
+            pixel_height,
+            gate,
+        )
+        query_stats = {
+            "viewportReturnedElements": region.returned_elements,
+            "viewportQuerySeconds": region.query_seconds,
+            "viewportAggregationLevel": region.aggregation_level,
+        }
+        with self._lock:
+            self.analysis_stats.update(query_stats)
+        LOGGER.debug("Vorbis spectrum viewport stats: %s", query_stats)
+        return {
+            "available": True,
+            "data": base64.b64encode(region.packed_cells).decode("ascii"),
+            "recordCount": region.returned_elements,
+            "timeBuckets": region.time_buckets,
+            "pitchBuckets": region.pitch_buckets,
+            "startTime": max(0.0, float(start_time)),
+            "endTime": min(store.duration, float(end_time)),
+            "minMidi": max(0.0, float(minimum_midi)),
+            "maxMidi": min(127.0, float(maximum_midi)),
+            "threshold": gate,
+            "aggregationLevel": region.aggregation_level,
+            "querySeconds": region.query_seconds,
+        }
+
+    def get_frequency_track_region(
+        self,
+        start_time: float,
+        end_time: float,
+        minimum_midi: float,
+        maximum_midi: float,
+        pixel_width: int,
+        pixel_height: int,
+    ) -> dict[str, Any]:
+        """Return a bounded set of prebuilt frequency-track segments."""
+        del pixel_height  # Reserved for future pitch-aware LOD.
+        with self._lock:
+            store = self.frequency_track_store
+        if store is None:
+            return {"available": False}
+
+        max_points = max(4_000, min(30_000, int(pixel_width) * 24))
+        region = store.query_region(
+            start_time,
+            end_time,
+            minimum_midi,
+            maximum_midi,
+            max_points=max_points,
+        )
+        query_stats = {
+            "viewportReturnedTracks": region.returned_tracks,
+            "viewportReturnedTrackPoints": region.returned_points,
+            "viewportTrackDecimationLevel": region.decimation_level,
+            "viewportTrackQuerySeconds": region.query_seconds,
+        }
+        with self._lock:
+            self.analysis_stats.update(query_stats)
+        LOGGER.debug("Frequency track viewport stats: %s", query_stats)
+        return {
+            "available": True,
+            "data": base64.b64encode(region.packed_points).decode("ascii"),
+            "trackCount": region.returned_tracks,
+            "pointCount": region.returned_points,
+            "startTime": max(0.0, float(start_time)),
+            "endTime": min(float(end_time), float(self.duration)),
+            "minMidi": max(0.0, float(minimum_midi)),
+            "maxMidi": min(127.0, float(maximum_midi)),
+            "decimationLevel": region.decimation_level,
+            "querySeconds": region.query_seconds,
+        }
 
     def get_cursor_peak(self, seconds: float, midi: float, search_range: float = 5.0) -> dict[str, Any]:
         """Return the strongest CQT bin near the cursor, matching the legacy editor helper."""

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AdoFAIExportDialog from "./dialogs/AdoFAIExportDialogJa";
 import AppMenus from "./components/AppMenus";
 import EditorCanvas from "./editor/EditorCanvas";
@@ -8,11 +8,13 @@ import { BlankWorkspaceDialog, HarmonicDiagramDialog, QuickHzDialog, UpdateDialo
 import Timeline from "./editor/Timeline";
 import TopToolbar from "./components/TopToolbar";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
+import { DirectSpectrumRegionCache, followViewportStart, nextPrefetchStart, spectrumLayersForMode, spectrumRegion, spectrumRegionKey } from "./editor/directSpectrum";
+import type { TrackSelectionRange } from "./editor/trackSelection";
 import "./dialogs.css";
-import { getBackendApi, type AppState, type BackendApi, type EditorSettings, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./api/bridge";
+import { getBackendApi, type AppState, type BackendApi, type DirectSpectrumPayload, type EditorSettings, type FrequencyTrackPayload, type NoteDto, type NoteMutationResult, type PlaybackState, type SpectrogramPayload, type ViewState } from "./api/bridge";
 import type { ToolBackendApi } from "./api/toolsBridge";
 
-const defaultSettings:EditorSettings={volume:85,speed:1,notePreview:true,previewVolume:20,previewOctave:0,previewSound:"sine",exportOctave:0,exportSemitone:0,gridEnabled:false,metronomeEnabled:false,bpm:175,offsetMs:0,metronomeVolume:35,snapEnabled:false,snapDiv:1,contrast:115,gamma:75,enhance:true,displayMode:"wavetone",harmonics:"off",colormap:"wavetone",analysisProfile:"Normal",cqtResolution:"profile default",curveShape:"ease",curveInterpolation:"bezier_pitch",targetAngle:165};
+const defaultSettings:EditorSettings={volume:85,speed:1,notePreview:true,previewVolume:20,previewOctave:0,previewSound:"sine",exportOctave:0,exportSemitone:0,gridEnabled:false,metronomeEnabled:false,bpm:175,offsetMs:0,metronomeVolume:35,snapEnabled:false,snapDiv:1,contrast:115,gamma:75,enhance:true,displayMode:"wavetone",harmonics:"off",colormap:"wavetone",analysisProfile:"Normal",cqtResolution:"profile default",analysisSource:"cqt",spectrumThreshold:2,spectrumOpacity:70,spectrumLayerMode:"both",curveShape:"ease",curveInterpolation:"bezier_pitch",targetAngle:165};
 const defaultView:ViewState={mode:"spec",start:0,windowSeconds:12,pitchBottom:12,visibleNotes:60};
 const defaultPlayback:PlaybackState={time:0,duration:60,playing:false,available:false,error:null};
 type ToolDialog="blank"|"quickHz"|"harmonic"|"update"|null;
@@ -25,32 +27,89 @@ function UnsavedChangesDialog({label,onSave,onDiscard,onCancel}:{label:string;on
 }
 
 export default function App(){
-  const[api,setApi]=useState<BackendApi|null>(null),[connected,setConnected]=useState(false),[settings,setSettings]=useState(defaultSettings),[view,setView]=useState(defaultView),[playback,setPlayback]=useState(defaultPlayback),[notes,setNotes]=useState<NoteDto[]>([]),[selected,setSelected]=useState<number[]>([]),[spectrum,setSpectrum]=useState<SpectrogramPayload|null>(null),[analysisAvailable,setAnalysisAvailable]=useState(false),[audioName,setAudioName]=useState<string|null>(null),[projectPath,setProjectPath]=useState<string|null>(null),[dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[status,setStatus]=useState("準備完了");
+  const[api,setApi]=useState<BackendApi|null>(null),[connected,setConnected]=useState(false),[settings,setSettings]=useState(defaultSettings),[view,setView]=useState(defaultView),[playback,setPlayback]=useState(defaultPlayback),[notes,setNotes]=useState<NoteDto[]>([]),[selected,setSelected]=useState<number[]>([]),[spectrum,setSpectrum]=useState<SpectrogramPayload|null>(null),[directSpectrum,setDirectSpectrum]=useState<DirectSpectrumPayload|null>(null),[frequencyTracks,setFrequencyTracks]=useState<FrequencyTrackPayload|null>(null),[analysisAvailable,setAnalysisAvailable]=useState(false),[analysisSource,setAnalysisSource]=useState("cqt"),[analysisRevision,setAnalysisRevision]=useState(0),[viewportSize,setViewportSize]=useState({width:800,height:500}),[audioName,setAudioName]=useState<string|null>(null),[projectPath,setProjectPath]=useState<string|null>(null),[dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[status,setStatus]=useState("準備完了");
   const[adoExportOpen,setAdoExportOpen]=useState(false),[helpSection,setHelpSection]=useState<string|null>(null),[toolDialog,setToolDialog]=useState<ToolDialog>(null),[followPlayback,setFollowPlayback]=useState(true);
   const[pendingDestructive,setPendingDestructive]=useState<PendingDestructiveAction|null>(null);
   const peakRequest=useRef(0);
+  const spectrumRequest=useRef(0);
+  const desiredSpectrumKey=useRef("");
+  const trackRequest=useRef(0);
+  const desiredTrackKey=useRef("");
+  const spectrumLoader=useMemo(()=>api?new DirectSpectrumRegionCache(region=>api.get_spectrum_region(region.startTime,region.endTime,region.minMidi,region.maxMidi,region.pixelWidth,region.pixelHeight,region.threshold)):null,[api]);
+  const trackLoader=useMemo(()=>api?new DirectSpectrumRegionCache<FrequencyTrackPayload>(region=>api.get_frequency_track_region(region.startTime,region.endTime,region.minMidi,region.maxMidi,region.pixelWidth,region.pixelHeight)):null,[api]);
+  const spectrumLayers=spectrumLayersForMode(settings.spectrumLayerMode);
+  const visibleSpectrum=analysisAvailable&&analysisSource!=="vorbis_direct"?spectrum:null;
+  const visibleDirectSpectrum=analysisAvailable&&analysisSource==="vorbis_direct"&&spectrumLayers.raw?directSpectrum:null;
+  const visibleFrequencyTracks=analysisAvailable&&analysisSource==="vorbis_direct"&&spectrumLayers.tracks?frequencyTracks:null;
   const toolsApi=api as ToolBackendApi|null;
 
-  function applyState(state:AppState){setSettings(state.settings);setView(state.view);setPlayback(state.playback);setNotes(state.notes);setSelected(old=>old.filter(i=>i>=0&&i<state.notes.length));setAnalysisAvailable(state.analysis.available);setAudioName(state.audio.name);setProjectPath(state.projectPath);setDirty(state.dirty);setBusy(state.busy);setStatus(state.status||"準備完了")}
+  function applyState(state:AppState){setSettings(state.settings);setView(state.view);setPlayback(state.playback);setNotes(state.notes);setSelected(old=>old.filter(i=>i>=0&&i<state.notes.length));setAnalysisAvailable(state.analysis.available);setAnalysisSource(state.analysis.source??"cqt");setAnalysisRevision(v=>v+1);setAudioName(state.audio.name);setProjectPath(state.projectPath);setDirty(state.dirty);setBusy(state.busy);setStatus(state.status||"準備完了")}
   async function refreshSpectrum(backend=api){if(!backend)return;const p=await backend.get_spectrogram(1600);setSpectrum(p.available?p:null)}
 
-  useEffect(()=>{void getBackendApi().then(async backend=>{if(!backend)return;setApi(backend);setConnected((await backend.ping()).ok);const state=await backend.get_state();applyState(state);if(state.analysis.available)await refreshSpectrum(backend)})},[]);
+  useEffect(()=>{void getBackendApi().then(async backend=>{if(!backend)return;setApi(backend);setConnected((await backend.ping()).ok);const state=await backend.get_state();applyState(state);if(state.analysis.available&&state.analysis.source!=="vorbis_direct")await refreshSpectrum(backend)})},[]);
   useEffect(()=>{if(!api)return;let active=true;const id=window.setInterval(()=>void api.get_playback_state().then(x=>{if(active)setPlayback(x)}).catch(()=>{}),50);return()=>{active=false;window.clearInterval(id)}},[api]);
-  useEffect(()=>{if(!api||!analysisAvailable)return;const id=window.setTimeout(()=>void refreshSpectrum(api),140);return()=>window.clearTimeout(id)},[api,analysisAvailable,settings.contrast,settings.gamma,settings.enhance,settings.displayMode,settings.harmonics,settings.colormap]);
+  useEffect(()=>{if(!api||!analysisAvailable||analysisSource==="vorbis_direct")return;const id=window.setTimeout(()=>void refreshSpectrum(api),140);return()=>window.clearTimeout(id)},[api,analysisAvailable,analysisSource,settings.contrast,settings.gamma,settings.enhance,settings.displayMode,settings.harmonics,settings.colormap]);
+  useLayoutEffect(()=>{
+    spectrumLoader?.invalidate();
+    spectrumRequest.current+=1;
+  },[spectrumLoader,analysisAvailable,analysisSource,analysisRevision,settings.spectrumThreshold,view.windowSeconds,view.pitchBottom,view.visibleNotes,viewportSize.width,viewportSize.height]);
+  useLayoutEffect(()=>{
+    const request=++spectrumRequest.current;
+    if(!spectrumLoader||!analysisAvailable||analysisSource!=="vorbis_direct"||!spectrumLayers.raw){desiredSpectrumKey.current="";setDirectSpectrum(null);return}
+    const region=spectrumRegion(view,viewportSize,settings.spectrumThreshold),key=spectrumRegionKey(region);
+    desiredSpectrumKey.current=key;
+    const prefetch=()=>{
+      if(!followPlayback||!playback.playing)return;
+      const next=nextPrefetchStart(view.start,view.windowSeconds,playback.duration);
+      if(next!==null)spectrumLoader.prefetch(spectrumRegion(view,viewportSize,settings.spectrumThreshold,next));
+    };
+    const cached=spectrumLoader.peek(region);
+    if(cached){setDirectSpectrum(cached.available?cached:null);prefetch();return}
+    setDirectSpectrum(null);
+    void spectrumLoader.load(region).then(payload=>{
+      if(request!==spectrumRequest.current||key!==desiredSpectrumKey.current||!payload)return;
+      setDirectSpectrum(payload.available?payload:null);
+      prefetch();
+    }).catch(e=>{if(request===spectrumRequest.current)setStatus(String(e))});
+  },[spectrumLoader,analysisAvailable,analysisSource,analysisRevision,spectrumLayers.raw,settings.spectrumThreshold,view.start,view.windowSeconds,view.pitchBottom,view.visibleNotes,viewportSize.width,viewportSize.height,followPlayback,playback.playing,playback.duration]);
+  useLayoutEffect(()=>{
+    trackLoader?.invalidate();
+    trackRequest.current+=1;
+  },[trackLoader,analysisAvailable,analysisSource,analysisRevision,view.windowSeconds,view.pitchBottom,view.visibleNotes,viewportSize.width,viewportSize.height]);
+  useLayoutEffect(()=>{
+    const request=++trackRequest.current;
+    if(!trackLoader||!analysisAvailable||analysisSource!=="vorbis_direct"||!spectrumLayers.tracks){desiredTrackKey.current="";setFrequencyTracks(null);return}
+    const region=spectrumRegion(view,viewportSize,0),key=spectrumRegionKey(region);
+    desiredTrackKey.current=key;
+    const prefetch=()=>{
+      if(!followPlayback||!playback.playing)return;
+      const next=nextPrefetchStart(view.start,view.windowSeconds,playback.duration);
+      if(next!==null)trackLoader.prefetch(spectrumRegion(view,viewportSize,0,next));
+    };
+    const cached=trackLoader.peek(region);
+    if(cached){setFrequencyTracks(cached.available?cached:null);prefetch();return}
+    setFrequencyTracks(null);
+    void trackLoader.load(region).then(payload=>{
+      if(request!==trackRequest.current||key!==desiredTrackKey.current||!payload)return;
+      setFrequencyTracks(payload.available?payload:null);
+      prefetch();
+    }).catch(e=>{if(request===trackRequest.current)setStatus(String(e))});
+  },[trackLoader,analysisAvailable,analysisSource,analysisRevision,spectrumLayers.tracks,view.start,view.windowSeconds,view.pitchBottom,view.visibleNotes,viewportSize.width,viewportSize.height,followPlayback,playback.playing,playback.duration]);
   useEffect(()=>{
     if(!followPlayback||!playback.playing||view.windowSeconds<=0)return;
-    const trigger=view.start+view.windowSeconds*.82;
-    if(playback.time<view.start||playback.time>trigger){
-      const max=Math.max(0,playback.duration-view.windowSeconds);
-      const next=Math.max(0,Math.min(max,playback.time-view.windowSeconds*.2));
-      if(Math.abs(next-view.start)>.001){setView(v=>({...v,start:next}));void api?.set_view({start:next});}
-    }
+    const next=followViewportStart(view.start,view.windowSeconds,playback.time,playback.duration);
+    if(next!==null){setView(v=>({...v,start:next}));void api?.set_view({start:next});}
   },[api,followPlayback,playback.duration,playback.playing,playback.time,view.start,view.windowSeconds]);
 
-  async function patch(changes:Partial<EditorSettings>){setSettings(v=>({...v,...changes}));if(api){setSettings(await api.update_settings(changes));setDirty(true)}}
-  async function updateView(changes:Partial<ViewState>){setView(v=>({...v,...changes}));if(api)setView(await api.set_view(changes))}
-  async function fitView(){if(api)setView(await api.fit_view())}
-  async function runStateAction(action:()=>Promise<AppState>){if(!api)return;setBusy(true);try{const state=await action();applyState(state);if(state.analysis.available)await refreshSpectrum(api);else setSpectrum(null)}catch(e){setStatus(String(e))}finally{setBusy(false)}}
+  async function patch(changes:Partial<EditorSettings>){
+    const sourceChanged=changes.analysisSource!==undefined&&changes.analysisSource!==settings.analysisSource;
+    if(sourceChanged){setAnalysisAvailable(false);setSpectrum(null);setDirectSpectrum(null);setFrequencyTracks(null)}
+    setSettings(v=>({...v,...changes}));
+    if(api){setSettings(await api.update_settings(changes));setDirty(true)}
+  }
+  async function updateView(changes:Partial<ViewState>){setFollowPlayback(false);setView(v=>({...v,...changes}));if(api)setView(await api.set_view(changes))}
+  async function fitView(){setFollowPlayback(false);if(api)setView(await api.fit_view())}
+  async function runStateAction(action:()=>Promise<AppState>){if(!api)return;setBusy(true);try{const state=await action();applyState(state);if(state.analysis.available&&state.analysis.source!=="vorbis_direct")await refreshSpectrum(api);else setSpectrum(null);if(!state.analysis.available){setDirectSpectrum(null);setFrequencyTracks(null)}}catch(e){setStatus(String(e))}finally{setBusy(false)}}
   function requestDestructive(label:string,run:()=>void|Promise<void>,cancel?:()=>void|Promise<void>){if(dirty)setPendingDestructive({label,run,cancel});else void run()}
   async function cancelPendingDestructive(status?:string){const pending=pendingDestructive;setPendingDestructive(null);try{await pending?.cancel?.()}catch(e){setStatus(String(e));return}if(status)setStatus(status)}
   async function saveThenContinue(){const pending=pendingDestructive;if(!api||!pending)return;setBusy(true);let state:AppState|undefined;try{state=await api.save_project_dialog();applyState(state)}catch(e){setStatus(String(e))}finally{setBusy(false)}if(!state)return;if(state.dirty){await cancelPendingDestructive("保存がキャンセルされたため、操作を中止しました");return}setPendingDestructive(null);await pending.run()}
@@ -73,13 +132,29 @@ export default function App(){
   async function undo(){if(api)applyMutation(await api.undo(),[])}
   async function redo(){if(api)applyMutation(await api.redo(),[])}
   async function cursorMoved(time:number,midi:number){
-    if(!api||!analysisAvailable)return;
+    if(!api||!analysisAvailable||analysisSource==="vorbis_direct")return;
     const request=++peakRequest.current;
     try{
       const peak=await api.get_cursor_peak(time,midi,5);
       if(request!==peakRequest.current||!peak.available)return;
       setStatus(`カーソル ${peak.time!.toFixed(3)}秒 / ${peak.cursorName}${signedCents(peak.cursorCents)} ${peak.cursorHz!.toFixed(2)}Hz | 近傍ピーク: ${peak.peakName}${signedCents(peak.peakCents)} ${peak.peakHz!.toFixed(2)}Hz (${peak.peakDb!.toFixed(1)} dB)`);
     }catch{/* Cursor diagnostics must not interrupt editing. */}
+  }
+  async function findTracks(range:TrackSelectionRange){
+    if(!api)return [];
+    try{
+      const result=await api.find_frequency_tracks(range.startTime,range.endTime,range.minMidi,range.maxMidi);
+      setStatus(result.status);
+      return result.trackIds;
+    }catch(e){setStatus(String(e));return []}
+  }
+  async function convertTracks(trackIds:number[],conversionMode:"fixed"|"curve",range:TrackSelectionRange|null){
+    if(!api||!trackIds.length)return;
+    setBusy(true);
+    try{
+      const result=await api.create_notes_from_tracks(trackIds,conversionMode,range?.startTime??null,range?.endTime??null);
+      applyMutation(result,result.indices??[],result.changed!==false);
+    }catch(e){setStatus(String(e))}finally{setBusy(false)}
   }
 
   const stateAction=(fn:()=>Promise<AppState>)=>void runStateAction(fn),nudgeSeconds=settings.snapEnabled?60/Math.max(1,settings.bpm)/Math.max(1,settings.snapDiv):.01;
@@ -88,12 +163,13 @@ export default function App(){
   useEffect(()=>{if(!api)return;const requested=()=>setPendingDestructive({label:"ウィンドウを閉じる",run:async()=>{await api.close_window()},cancel:async()=>{await api.cancel_window_close()}});window.addEventListener("adopyhz-close-requested",requested);return()=>window.removeEventListener("adopyhz-close-requested",requested)},[api]);
   useEditorShortcuts({api,notes,selected,playbackTime:playback.time,view,nudgeSeconds,openAudio:openAudioSafely,saveProject:()=>api&&stateAction(()=>api.save_project_dialog()),saveProjectAs:()=>api&&stateAction(()=>api.save_project_as_dialog()),loadProject:loadProjectSafely,importMidi:()=>api&&stateAction(()=>api.import_midi_dialog()),openAdoExport:()=>setAdoExportOpen(true),openHelp:()=>setHelpSection("quick_start"),setStatus,undo:()=>void undo(),redo:()=>void redo(),duplicate:()=>void duplicate(),quantize:()=>void quantize(),select:setSelected,applyMutation,move:(i,dx,dy)=>void moveNotes(i,dx,dy),stop:()=>void stopPlayback(),play:()=>void togglePlayback(),deleteSelected:()=>void deleteNotes(),mode:v=>void mode(v),seek:d=>void seekRelative(d),updateView:c=>void updateView(c)});
 
-  const menus=toolsApi?<AppMenus hasSelection={selected.length>0} hasProject={Boolean(projectPath)} onSaveProjectAs={()=>api&&stateAction(()=>api.save_project_as_dialog())} onBlankWorkspace={()=>requestDestructive("空のワークスペースへ切り替える",()=>setToolDialog("blank"))} onLoadNotesOnly={()=>requestDestructive("ノートだけ読み込む",()=>runStateAction(()=>toolsApi.load_project_notes_only_dialog()))} onMergeProject={()=>stateAction(()=>toolsApi.merge_project_notes_dialog())} onRelinkProjectAudio={()=>api&&stateAction(()=>api.relink_project_audio_dialog())} onExportSelectedMidi={()=>void toolsApi.export_selected_midi_dialog(selected).then(x=>setStatus(x.status))} onExportSelectedAdo={()=>{setAdoExportOpen(true);setStatus("ADOFAI出力で「選択ノートのみ」を使用できます")}} onDuplicate={()=>void duplicate()} onQuantize={()=>void quantize()} onSplit={()=>void splitSelected()} onHarmonicDiagram={()=>setToolDialog("harmonic")} onReanalyze={()=>stateAction(()=>toolsApi.reanalyze_audio())} onQuickHz={()=>setToolDialog("quickHz")} onUpdates={()=>setToolDialog("update")} onHelp={()=>setHelpSection("quick_start")}/>:null;
+  const menus=toolsApi?<AppMenus hasSelection={selected.length>0} hasProject={Boolean(projectPath)} onOpenAudio={openAudioSafely} onLoadProject={loadProjectSafely} onSaveProject={()=>api&&stateAction(()=>api.save_project_dialog())} onSaveProjectAs={()=>api&&stateAction(()=>api.save_project_as_dialog())} onImportMidi={()=>api&&stateAction(()=>api.import_midi_dialog())} onExportMidi={()=>void api?.export_midi_dialog().then(x=>setStatus(x.status))} onExportAdo={()=>setAdoExportOpen(true)} onBlankWorkspace={()=>requestDestructive("空のワークスペースへ切り替える",()=>setToolDialog("blank"))} onLoadNotesOnly={()=>requestDestructive("ノートだけ読み込む",()=>runStateAction(()=>toolsApi.load_project_notes_only_dialog()))} onMergeProject={()=>stateAction(()=>toolsApi.merge_project_notes_dialog())} onRelinkProjectAudio={()=>api&&stateAction(()=>api.relink_project_audio_dialog())} onExportSelectedMidi={()=>void toolsApi.export_selected_midi_dialog(selected).then(x=>setStatus(x.status))} onExportSelectedAdo={()=>{setAdoExportOpen(true);setStatus("ADOFAI出力で「選択ノートのみ」を使用できます")}} onUndo={()=>void undo()} onRedo={()=>void redo()} onDuplicate={()=>void duplicate()} onSplit={()=>void splitSelected()} onHarmonicDiagram={()=>setToolDialog("harmonic")} onReanalyze={()=>stateAction(()=>toolsApi.reanalyze_audio())} onQuickHz={()=>setToolDialog("quickHz")} onUpdates={()=>setToolDialog("update")} onHelp={()=>setHelpSection("quick_start")}/>:null;
 
   return <div className="app">
-    <TopToolbar connected={connected} busy={busy} audioName={audioName} dirty={dirty} playback={playback} view={view} menus={menus} onOpen={openAudioSafely} onLoadProject={loadProjectSafely} onSaveProject={()=>api&&stateAction(()=>api.save_project_dialog())} onSeek={t=>void seekTo(t)} onStop={()=>void stopPlayback()} onPlay={()=>void togglePlayback()} onSeekRelative={d=>void seekRelative(d)} onImportMidi={()=>api&&stateAction(()=>api.import_midi_dialog())} onExportMidi={()=>void api?.export_midi_dialog().then(x=>setStatus(x.status))} onExportAdo={()=>setAdoExportOpen(true)} onHelp={()=>setHelpSection("quick_start")} onMode={v=>void mode(v)}/>
-    <main className="workspace"><section className="editor"><EditorCanvas notes={notes} selected={selected} settings={settings} view={view} playback={playback} spectrum={spectrum} onSelect={setSelected} onAdd={addNote} onMove={moveNotes} onDuplicateMove={duplicateMove} onResize={resizeNotes} onDelete={deleteNotes} onCutRange={cutRange} onSeek={seekTo} onView={updateView} onCursorMove={(time,midi)=>void cursorMoved(time,midi)}/><Timeline view={view} playback={playback} followPlayback={followPlayback} onFollowPlayback={setFollowPlayback} onView={c=>void updateView(c)} onFit={()=>void fitView()}/></section><SettingsPanel api={api} settings={settings} notes={notes} selected={selected} playbackTime={playback.time} audioName={audioName} busy={busy} onPatch={patch} onStateAction={runStateAction} onMutation={applyMutation} onStatus={setStatus}/></main>
+    <TopToolbar connected={connected} audioName={audioName} dirty={dirty} playback={playback} view={view} menus={menus} onSeek={t=>void seekTo(t)} onStop={()=>void stopPlayback()} onPlay={()=>void togglePlayback()} onMode={v=>void mode(v)}/>
+    <main className="workspace"><section className="editor"><EditorCanvas notes={notes} selected={selected} settings={settings} view={view} playback={playback} spectrum={visibleSpectrum} directSpectrum={visibleDirectSpectrum} frequencyTracks={visibleFrequencyTracks} trackRevision={analysisRevision} onViewportSize={setViewportSize} onSelect={setSelected} onAdd={addNote} onMove={moveNotes} onDuplicateMove={duplicateMove} onResize={resizeNotes} onDelete={deleteNotes} onCutRange={cutRange} onSeek={seekTo} onView={updateView} onCursorMove={(time,midi)=>void cursorMoved(time,midi)} onTrackHover={track=>setStatus(track?`Track #${track.id} · ${track.frequency.toFixed(2)} Hz · ${track.noteName} · ${track.duration.toFixed(3)} 秒 · 強度 ${(track.magnitude*100).toFixed(1)}%`:"準備完了")} onFindTracks={findTracks} onConvertTracks={convertTracks}/><Timeline view={view} playback={playback} followPlayback={followPlayback} onFollowPlayback={setFollowPlayback} onView={c=>void updateView(c)} onFit={()=>void fitView()}/></section><SettingsPanel api={api} settings={settings} notes={notes} selected={selected} audioName={audioName} busy={busy} analysisAvailable={analysisAvailable} actualAnalysisSource={analysisSource} onPatch={patch} onStateAction={runStateAction} onMutation={applyMutation} onStatus={setStatus}/></main>
     <footer className="statusbar"><span>{busy?"処理中…":status}</span><span>{projectPath?projectPath.split(/[\\/]/).pop():"プロジェクトなし"} · ノート {notes.length}個</span></footer>
-    {adoExportOpen&&api&&<AdoFAIExportDialog api={api} selected={selected} onClose={()=>setAdoExportOpen(false)} onStatus={setStatus} onHelp={s=>setHelpSection(s??"adofai_export")}/>} {helpSection&&api&&<HelpDialog api={api} initialSection={helpSection} onClose={()=>setHelpSection(null)}/>} {toolDialog==="blank"&&toolsApi&&<BlankWorkspaceDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus} onState={state=>{applyState(state);setSpectrum(null)}}/>} {toolDialog==="quickHz"&&toolsApi&&<QuickHzDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus}/>} {toolDialog==="harmonic"&&toolsApi&&<HarmonicDiagramDialog api={toolsApi} selected={selected} onClose={()=>setToolDialog(null)} onStatus={setStatus} onMutation={applyMutation}/>} {toolDialog==="update"&&toolsApi&&<UpdateDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus}/>} {pendingDestructive&&<UnsavedChangesDialog label={pendingDestructive.label} onSave={()=>void saveThenContinue()} onDiscard={discardThenContinue} onCancel={()=>void cancelPendingDestructive()}/>}
-  </div>
+    {adoExportOpen&&api&&<AdoFAIExportDialog api={api} selected={selected} onClose={()=>setAdoExportOpen(false)} onStatus={setStatus} onHelp={s=>setHelpSection(s??"adofai_export")}/>} {helpSection&&api&&<HelpDialog api={api} initialSection={helpSection} onClose={()=>setHelpSection(null)}/>} {toolDialog==="blank"&&toolsApi&&<BlankWorkspaceDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus} onState={state=>{applyState(state);setSpectrum(null);setDirectSpectrum(null);setFrequencyTracks(null)}}/>} {toolDialog==="quickHz"&&toolsApi&&<QuickHzDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus}/>} {toolDialog==="harmonic"&&toolsApi&&<HarmonicDiagramDialog api={toolsApi} selected={selected} onClose={()=>setToolDialog(null)} onStatus={setStatus} onMutation={applyMutation}/>} {toolDialog==="update"&&toolsApi&&<UpdateDialog api={toolsApi} onClose={()=>setToolDialog(null)} onStatus={setStatus}/>} 
+    {pendingDestructive&&<UnsavedChangesDialog label={pendingDestructive.label} onSave={()=>void saveThenContinue()} onDiscard={discardThenContinue} onCancel={()=>void cancelPendingDestructive()}/>} 
+  </div>;
 }
