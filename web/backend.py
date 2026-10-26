@@ -57,8 +57,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self.audio_path: str | None = None
         self.project_path: str | None = None
         self.notes: list[Note] = []
-        self._undo_stack: list[list[dict[str, Any]]] = []
-        self._redo_stack: list[list[dict[str, Any]]] = []
+        self._undo_stack: list[tuple[Note, ...]] = []
+        self._redo_stack: list[tuple[Note, ...]] = []
         self._clipboard: list[Note] = []
         self._busy = False
         self._source_generation = 0
@@ -507,9 +507,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             best_row = int(rows[local_index])
             peak_midi = float(spec.midi_min) + best_row * pitch_step
             peak_db = float(values[local_index])
-            nearest = int(round(peak_midi))
+            nearest = int(math.floor(peak_midi + 0.5))
             cents = (peak_midi - nearest) * 100.0
-            cursor_nearest = int(round(cursor_midi))
+            cursor_nearest = int(math.floor(cursor_midi + 0.5))
 
             return {
                 "available": True,
@@ -525,13 +525,22 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "peakDb": peak_db,
             }
 
-    def get_spectrogram(self, max_columns: int = 1600) -> dict[str, Any]:
+    def get_spectrogram(self, max_columns: int = 1600, start: float | None = None, end: float | None = None) -> dict[str, Any]:
         with self._lock:
             spec = self.spectrogram
             if spec is None:
                 return {"available": False}
             data = np.asarray(spec.db, dtype=np.float32)
             rows, cols = data.shape
+            window_start = 0.0
+            window_end = float(spec.duration)
+            if start is not None or end is not None:
+                window_start = _clamp(0.0 if start is None else start, 0.0, spec.duration)
+                window_end = _clamp(spec.duration if end is None else end, window_start, spec.duration)
+                left = max(0, min(cols - 1, int(np.searchsorted(spec.frame_times, window_start, side="left"))))
+                right = max(left + 1, min(cols, int(np.searchsorted(spec.frame_times, window_end, side="right"))))
+                data = data[:, left:right]
+                cols = data.shape[1]
             max_columns = max(64, min(4096, int(max_columns)))
             if cols > max_columns:
                 edges = np.linspace(0, cols, max_columns + 1, dtype=np.int32)
@@ -564,6 +573,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "cols": int(u8.shape[1]),
                 "data": base64.b64encode(u8.tobytes(order="C")).decode("ascii"),
                 "duration": float(spec.duration),
+                "start": window_start,
+                "end": window_end,
                 "midiMin": int(spec.midi_min),
                 "midiMax": int(spec.midi_max),
                 "pitchStep": float(spec.pitch_step),

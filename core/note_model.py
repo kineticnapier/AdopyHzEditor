@@ -39,6 +39,14 @@ class Note:
         return self.kind == "curve"
 
     @property
+    def pitch_bounds(self) -> tuple[float, float]:
+        n = self.normalized()
+        values = [n.midi]
+        if n.is_curve:
+            values.extend(value for value in (n.midi_end, n.ctrl1_midi, n.ctrl2_midi) if value is not None)
+        return min(values), max(values)
+
+    @property
     def freq(self) -> float:
         return midi_to_hz(self.midi_at(0.0))
 
@@ -253,6 +261,8 @@ def hz_to_midi(freq: float) -> float:
 
 
 def note_name(midi: float) -> str:
-    m = int(round(float(midi)))
+    # MIDI is non-negative; use musical half-up rounding rather than Python's
+    # banker rounding (62.5 must label as D#4, not D4).
+    m = int(math.floor(float(midi) + 0.5))
     names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     return f"{names[m % 12]}{m // 12 - 1}"

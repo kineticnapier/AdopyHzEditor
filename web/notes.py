@@ -13,8 +13,11 @@ class NoteMixin:
     # ------------------------------------------------------------------
     # Notes / history / clipboard
     # ------------------------------------------------------------------
-    def _snapshot(self) -> list[dict[str, Any]]:
-        return self._note_dicts()
+    def _snapshot(self) -> tuple[Note, ...]:
+        # Notes are replaced, never mutated in-place. A tuple therefore gives
+        # undo history structural sharing instead of copying dictionaries for
+        # every one of up to 200 history entries.
+        return tuple(self.notes)
 
     def _push_undo(self) -> None:
         self._undo_stack.append(self._snapshot())
@@ -22,8 +25,8 @@ class NoteMixin:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
 
-    def _restore_snapshot(self, state: Iterable[dict[str, Any]]) -> None:
-        self.notes = [Note.from_dict(dict(item)) for item in state]
+    def _restore_snapshot(self, state: Iterable[Note | dict[str, Any]]) -> None:
+        self.notes = [item if isinstance(item, Note) else Note.from_dict(dict(item)) for item in state]
         self._sync_notes_to_player()
         self._dirty = True
 

@@ -288,10 +288,15 @@ class AdoFAIMixin:
 
     def preview_adofai_tiles(self, options: dict[str, Any], selected_indices: list[int] | None = None) -> dict[str, Any]:
         notes, build_opts, _workflow = self._prepare_adofai_export(options, selected_indices)
-        level, stats = build_adofai_level(notes, **build_opts)
-        points = build_tile_preview_points(level.get("angleData", []), max_preview_tiles=5000)
+        max_preview_tiles = 5000
+        debug_rows = build_adofai_debug_rows(notes, **build_opts)
+        estimated_total = sum(int(row.get("tiles_est", 0) or 0) for row in debug_rows)
+        preview_opts = dict(build_opts)
+        preview_opts["max_tiles"] = min(max_preview_tiles, int(build_opts.get("max_tiles", max_preview_tiles) or max_preview_tiles))
+        level, stats = build_adofai_level(notes, **preview_opts)
+        points = build_tile_preview_points(level.get("angleData", []), max_preview_tiles=max_preview_tiles)
         payload = [{"x": float(x), "y": float(y), "angle": float(angle)} for x, y, angle in points]
-        total = int(stats.get("floors_total", max(0, len(payload) - 1)) or 0)
+        total = max(estimated_total, int(stats.get("floors_total", max(0, len(payload) - 1)) or 0))
         return {
             "points": payload,
             "stats": stats,

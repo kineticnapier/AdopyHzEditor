@@ -58,3 +58,36 @@ export function spectrogramPitchCrop(rows: number, midiMin: number, pitchStep: n
   const sh = Math.max(1, Math.min(rows - sy, (viewTop - viewBottom) / (top - bottom) * rows));
   return { sy, sh };
 }
+
+export type NoteTimeIndex = { order: number[]; starts: number[]; maxEnds: number[] };
+
+export function buildNoteTimeIndex(notes: NoteDto[]): NoteTimeIndex {
+  const order = notes.map((_, index) => index).sort((a, b) => notes[a].start - notes[b].start || a - b);
+  const starts = order.map(index => notes[index].start), maxEnds: number[] = [];
+  let maxEnd = -Infinity;
+  for (const index of order) { maxEnd = Math.max(maxEnd, notes[index].end); maxEnds.push(maxEnd); }
+  return { order, starts, maxEnds };
+}
+
+function upperBound(values: number[], value: number) {
+  let low = 0, high = values.length;
+  while (low < high) { const mid = (low + high) >>> 1; if (values[mid] <= value) low = mid + 1; else high = mid; }
+  return low;
+}
+
+function lowerBound(values: number[], value: number) {
+  let low = 0, high = values.length;
+  while (low < high) { const mid = (low + high) >>> 1; if (values[mid] < value) low = mid + 1; else high = mid; }
+  return low;
+}
+
+export function noteCandidatesAt(index: NoteTimeIndex, time: number) {
+  const right = upperBound(index.starts, time), left = lowerBound(index.maxEnds, time);
+  return index.order.slice(left, right);
+}
+
+export function boundedGridRange(start: number, windowSeconds: number, beat: number, offset: number, maxLines = 2000) {
+  const first = Math.floor((start - offset) / beat), last = Math.ceil((start + windowSeconds - offset) / beat);
+  const total = Math.max(0, last - first + 1), stride = Math.max(1, Math.ceil(total / Math.max(1, maxLines)));
+  return { first, last, stride, count: total ? Math.floor((last - first) / stride) + 1 : 0 };
+}

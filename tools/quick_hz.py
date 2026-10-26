@@ -136,10 +136,10 @@ def GenerateHzPreview(info: HzCalculationInfo, start_floor: int, count: int) -> 
 def GenerateOutputText(info: HzCalculationInfo, start_floor: int, count: int, *, add_set_speed: bool = True) -> str:
     start = _non_negative_int(start_floor, "Start floor")
     count = ResolveGenerateCount(start, count=count)
-    steps = GenerateHzPreview(info, start, count)
     speed_actions = [set_bpm(start, info.bpm)] if add_set_speed else []
 
     preview_limit = 200
+    steps = GenerateHzPreview(info, start, min(count, preview_limit))
     lines: list[str] = [
         "# AdopyHzEditor Quick Hz Output",
         f"BPM: {info.bpm:.6f}",
@@ -158,13 +158,13 @@ def GenerateOutputText(info: HzCalculationInfo, start_floor: int, count: int, *,
         "# Relative angle preview",
     ]
 
-    for step in steps[:preview_limit]:
+    for step in steps:
         lines.append(
             f"floor {step.floor}: rel={step.relative_angle:.9f} "
             f"time=+{step.time_ms_from_start:.6f}ms"
         )
-    if len(steps) > preview_limit:
-        lines.append(f"... {len(steps) - preview_limit} more rows omitted from text preview")
+    if count > preview_limit:
+        lines.append(f"... {count - preview_limit} more rows omitted from text preview")
 
     return "\n".join(lines)
 

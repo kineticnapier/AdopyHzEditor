@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from typing import Any
 
 from exporters.adofai import build_adofai_level as _core_build_adofai_level
@@ -164,7 +165,7 @@ def replace_note_gap_pauses_with_bridge_tiles(
     def shift_before(old_floor: int) -> int:
         # Insertion happens after its Pause floor, so that floor itself does not
         # move; every later original floor moves by one for each earlier gap.
-        return sum(1 for gap_floor in gap_floors if gap_floor < old_floor)
+        return bisect_left(gap_floors, old_floor)
 
     new_angles: list[Any] = []
     for old_floor, angle in enumerate(angle_data):

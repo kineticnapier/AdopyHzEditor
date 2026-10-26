@@ -1222,12 +1222,9 @@ def build_adofai_debug_rows(
                 scaled_final = angle * frac if frac > 1e-6 else ""
                 effective_final = ""
                 if frac > 1e-6 and (limit <= 0 or emitted < limit):
-                    effective_final = final_visual_angle(
-                        mode=final_angle_mode,
-                        prev_abs=prev_abs,
-                        scaled_final_angle=angle * frac,
-                        custom_final_angle=final_custom_angle,
-                        cardinal_step=final_cardinal_step,
+                    effective_final = angle if target_used and final_angle_mode == "scaled" else final_visual_angle(
+                        mode=final_angle_mode, prev_abs=prev_abs, scaled_final_angle=angle * frac,
+                        custom_final_angle=final_custom_angle, cardinal_step=final_cardinal_step,
                     )
                     final_bpm = (freq * 60.0) * (effective_final / max(EPS, 180.0 * frac))
                     final_visual_used = abs(float(effective_final) - float(angle * frac)) > 1e-6 or abs(final_bpm - bpm) > 1e-6
@@ -2082,7 +2079,7 @@ def emit_angle_compression(
         if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
             scaled_final_angle = frac_base_angle * frac
             prev_abs = float(angle_data[-1])
-            final_angle = final_visual_angle(
+            final_angle = angle if target_used and effective_final_angle_mode == "scaled" else final_visual_angle(
                 mode=effective_final_angle_mode,
                 prev_abs=prev_abs,
                 scaled_final_angle=scaled_final_angle,
@@ -2139,7 +2136,7 @@ def emit_angle_compression(
         if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
             scaled_final_angle = frac_base_angle * frac
             prev_abs = float(angle_data[-1])
-            final_angle = final_visual_angle(
+            final_angle = angle if target_used and effective_final_angle_mode == "scaled" else final_visual_angle(
                 mode=effective_final_angle_mode,
                 prev_abs=prev_abs,
                 scaled_final_angle=scaled_final_angle,
@@ -2175,7 +2172,7 @@ def emit_angle_compression(
     if frac > 1e-6 and (max_tiles_per_note <= 0 or emitted < max_tiles_per_note):
         scaled_final_angle = frac_base_angle * frac
         prev_abs = float(angle_data[-1])
-        final_angle = final_visual_angle(
+        final_angle = angle if target_used and effective_final_angle_mode == "scaled" else final_visual_angle(
             mode=effective_final_angle_mode,
             prev_abs=prev_abs,
             scaled_final_angle=scaled_final_angle,

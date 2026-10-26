@@ -334,17 +334,21 @@ def analyze_cqt(
         cqt_bins_per_octave=bins_per_octave,
     )
     cache_path = cache_dir / f"{key}.npz"
-    if use_cache:
-        cleanup_analysis_cache(cache_dir, exclude={cache_path})
-
     if use_cache and cache_path.exists():
         try:
-            return _load_analysis_cache(cache_path, path)
+            result = _load_analysis_cache(cache_path, path)
+            # Cache cleanup uses mtime as LRU order, so reads must refresh it.
+            cache_path.touch()
+            cleanup_analysis_cache(cache_dir, exclude={cache_path})
+            return result
         except (EOFError, KeyError, OSError, TypeError, ValueError, zipfile.BadZipFile):
             try:
                 cache_path.unlink()
             except OSError:
                 pass
+
+    if use_cache:
+        cleanup_analysis_cache(cache_dir, exclude={cache_path})
 
     import math
     y, actual_sr = librosa.load(str(path), sr=sr, mono=True)

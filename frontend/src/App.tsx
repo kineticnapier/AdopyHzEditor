@@ -37,10 +37,11 @@ export default function App(){
   const toolsApi=api as ToolBackendApi|null;
 
   function applyState(state:AppState){setSettings(state.settings);setView(state.view);setPlayback(state.playback);setNotes(state.notes);setSelected(old=>old.filter(i=>i>=0&&i<state.notes.length));setAnalysisAvailable(state.analysis.available);setAudioName(state.audio.name);setProjectPath(state.projectPath);setDirty(state.dirty);setBusy(state.busy);setStatus(state.status||"準備完了")}
-  async function refreshSpectrum(backend=api){
+  async function refreshSpectrum(backend=api,range:Pick<ViewState,"start"|"windowSeconds">=view){
     if(!backend)return;
     const request=spectrumRequests.current.issue();
-    const p=await backend.get_spectrogram(1600);
+    const columns=Math.max(256,Math.min(4096,Math.ceil(window.innerWidth*(window.devicePixelRatio||1))));
+    const p=await backend.get_spectrogram(columns,range.start,range.start+range.windowSeconds);
     if(spectrumRequests.current.isCurrent(request))setSpectrum(p.available?p:null);
   }
 
@@ -57,14 +58,14 @@ export default function App(){
         const state=await backend.get_state();
         if(!active)return;
         applyState(state);
-        if(state.analysis.available)await refreshSpectrum(backend);
+        if(state.analysis.available)await refreshSpectrum(backend,state.view);
         return;
       }
     })();
     return()=>{active=false};
   },[]);
   useEffect(()=>{if(!api)return;let active=true;const id=window.setInterval(()=>void api.get_playback_state().then(x=>{if(active)setPlayback(x)}).catch(()=>{}),50);return()=>{active=false;window.clearInterval(id)}},[api]);
-  useEffect(()=>{if(!api||!analysisAvailable)return;const id=window.setTimeout(()=>void refreshSpectrum(api),140);return()=>window.clearTimeout(id)},[api,analysisAvailable,settings.contrast,settings.gamma,settings.enhance,settings.displayMode,settings.harmonics]);
+  useEffect(()=>{if(!api||!analysisAvailable)return;const id=window.setTimeout(()=>void refreshSpectrum(api,view),140);return()=>window.clearTimeout(id)},[api,analysisAvailable,settings.contrast,settings.gamma,settings.enhance,settings.displayMode,settings.harmonics,view.start,view.windowSeconds]);
   useEffect(()=>{
     if(!followPlayback||!playback.playing||view.windowSeconds<=0)return;
     const trigger=view.start+view.windowSeconds*.82;
@@ -86,7 +87,7 @@ export default function App(){
   }
   async function updateView(changes:Partial<ViewState>){setView(v=>({...v,...changes}));if(api)setView(await api.set_view(changes))}
   async function fitView(){if(api)setView(await api.fit_view())}
-  async function runStateAction(action:()=>Promise<AppState>,clearSelection=false){if(!api)return;setBusy(true);spectrumRequests.current.invalidate();try{const state=await action();applyState(state);if(clearSelection)setSelected([]);if(state.analysis.available)await refreshSpectrum(api);else setSpectrum(null)}catch(e){setStatus(String(e))}finally{setBusy(false)}}
+  async function runStateAction(action:()=>Promise<AppState>,clearSelection=false){if(!api)return;setBusy(true);spectrumRequests.current.invalidate();try{const state=await action();applyState(state);if(clearSelection)setSelected([]);if(state.analysis.available)await refreshSpectrum(api,state.view);else setSpectrum(null)}catch(e){setStatus(String(e))}finally{setBusy(false)}}
   function requestDestructive(label:string,run:()=>void|Promise<void>,cancel?:()=>void|Promise<void>){if(dirty)setPendingDestructive({label,run,cancel});else void run()}
   async function cancelPendingDestructive(status?:string){const pending=pendingDestructive;setPendingDestructive(null);try{await pending?.cancel?.()}catch(e){setStatus(String(e));return}if(status)setStatus(status)}
   async function saveThenContinue(){const pending=pendingDestructive;if(!api||!pending)return;setBusy(true);let state:AppState|undefined;try{state=await api.save_project_dialog();applyState(state)}catch(e){setStatus(String(e))}finally{setBusy(false)}if(!state)return;if(state.dirty){await cancelPendingDestructive("保存がキャンセルされたため、操作を中止しました");return}setPendingDestructive(null);await pending.run()}
