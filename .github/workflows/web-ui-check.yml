@@ -123,7 +123,10 @@ jobs:
           type("WebBridge", tuple(resolved[name] for name in web_names), {})
 
       - name: Install application test dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements-webui.txt
+        run: >-
+          python -m pip install --disable-pip-version-check
+          -r requirements.txt
+          -r requirements-webui.txt
 
       - name: Web UI bridge initialization
         run: |
