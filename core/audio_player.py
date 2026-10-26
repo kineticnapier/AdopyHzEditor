@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from bisect import bisect_right
+from dataclasses import dataclass
 import threading
 import numpy as np
 
@@ -25,6 +27,22 @@ def decode_audio_file(path: str | Path, *, sr: int = 44100) -> tuple[np.ndarray,
     return y, int(actual_sr)
 
 
+@dataclass(frozen=True)
+class PreviewSegment:
+    start: int
+    end: int
+    midi: float
+    phase: float = 0.0
+    fade_in: bool = True
+    fade_out: bool = True
+
+    def __iter__(self):
+        # Preserve the historical three-value tuple interface used by callers.
+        yield self.start
+        yield self.end
+        yield self.midi
+
+
 class AudioPlayer:
     """
     QMediaPlayerを使わない簡易プレイヤー。
@@ -38,6 +56,7 @@ class AudioPlayer:
         self.pos = 0
         self.stream = None
         self.lock = threading.RLock()
+        self._stream_control_lock = threading.Lock()
         self.playing = False
 
         # Main audio
@@ -58,7 +77,8 @@ class AudioPlayer:
         self.note_volume = 0.20
         self.note_octave_shift = 0
         self.note_instrument = "sine"
-        self.preview_notes: list[tuple[int, int, float]] = []  # start_sample, end_sample, midi
+        self.preview_notes: list[PreviewSegment | tuple[int, int, float]] = []
+        self._preview_ends: list[int] = []
 
         try:
             import sounddevice as sd  # noqa
@@ -82,15 +102,16 @@ class AudioPlayer:
         y = np.asarray(audio, dtype=np.float32)
         if y.ndim == 1:
             y = y[:, None]
-        with self.lock:
-            self.stop()
-            self.audio = y
-            self.sr = int(sr)
-            self.pos = 0
-            self._pos_float = 0.0
-            self.virtual_duration_samples = len(self.audio)
-            # srが確定したので、ノートサンプル位置は再設定が必要。
-            # main側の sync_notes_to_player が後で呼ばれる。
+        with self._stream_control_lock:
+            self._stop_stream_controlled(reset_position=True, close=True)
+            with self.lock:
+                self.audio = y
+                self.sr = int(sr)
+                self.pos = 0
+                self._pos_float = 0.0
+                self.virtual_duration_samples = len(self.audio)
+                # srが確定したので、ノートサンプル位置は再設定が必要。
+                # main側の sync_notes_to_player が後で呼ばれる。
 
     def clear_audio(self) -> None:
         """
@@ -98,22 +119,22 @@ class AudioPlayer:
         Preview/metronome settings are kept, but playback becomes silent because
         there is no main audio buffer/stream.
         """
-        with self.lock:
-            self.stop()
-            self.audio = None
-            self.pos = 0
-            self._pos_float = 0.0
-            # Keep preview_notes; MainWindow.sync_notes_to_player() will refresh
-            # them after project/workspace changes. This allows note-only
-            # playback in a blank workspace.
+        with self._stream_control_lock:
+            self._stop_stream_controlled(reset_position=True, close=True)
+            with self.lock:
+                self.audio = None
+                self.pos = 0
+                self._pos_float = 0.0
+                # Keep preview_notes; MainWindow.sync_notes_to_player() will refresh
+                # them after project/workspace changes. This allows note-only
+                # playback in a blank workspace.
 
     @property
     def duration(self) -> float:
         if self.sr <= 0:
             return 0.0
-        if self.audio is not None:
-            return float(len(self.audio) / self.sr)
-        return float(max(0, int(self.virtual_duration_samples)) / self.sr)
+        audio_samples = len(self.audio) if self.audio is not None else 0
+        return float(max(audio_samples, max(0, int(self.virtual_duration_samples))) / self.sr)
 
     @property
     def time(self) -> float:
@@ -158,7 +179,7 @@ class AudioPlayer:
         notes: objects with start, end, midi or tuples (start, end, midi)
         Curve notes are sampled into short fixed-pitch preview notes.
         """
-        prepared: list[tuple[int, int, float]] = []
+        prepared: list[PreviewSegment] = []
         sr = max(1, int(self.sr))
 
         for n in notes:
@@ -167,7 +188,8 @@ class AudioPlayer:
             except AttributeError:
                 segments = [n]
 
-            for seg in segments:
+            phase = 0.0
+            for segment_index, seg in enumerate(segments):
                 try:
                     start = float(seg.start)
                     end = float(seg.end)
@@ -177,11 +199,26 @@ class AudioPlayer:
 
                 if end <= start:
                     continue
-                prepared.append((max(0, int(start * sr)), max(1, int(end * sr)), float(midi)))
+                start_sample = max(0, int(start * sr))
+                end_sample = max(start_sample + 1, int(end * sr))
+                prepared.append(PreviewSegment(
+                    start_sample,
+                    end_sample,
+                    float(midi),
+                    phase,
+                    segment_index == 0,
+                    segment_index == len(segments) - 1,
+                ))
+                phase += 2.0 * np.pi * midi_to_hz(float(midi)) * (end_sample - start_sample) / sr
 
-        prepared.sort(key=lambda x: x[0])
+        prepared.sort(key=lambda x: x.start)
         with self.lock:
             self.preview_notes = prepared
+            max_end = 0
+            self._preview_ends = []
+            for segment in prepared:
+                max_end = max(max_end, segment.end)
+                self._preview_ends.append(max_end)
 
     def set_virtual_duration(self, seconds: float) -> None:
         """
@@ -204,13 +241,10 @@ class AudioPlayer:
 
     def seek(self, seconds: float) -> None:
         with self.lock:
-            if self.audio is None:
-                n = max(1, int(self.virtual_duration_samples))
-                self.pos = max(0, min(n - 1, int(seconds * self.sr)))
-                self._pos_float = float(self.pos)
-            else:
-                self.pos = max(0, min(len(self.audio) - 1, int(seconds * self.sr)))
-                self._pos_float = float(self.pos)
+            audio_samples = len(self.audio) if self.audio is not None else 0
+            n = max(1, audio_samples, int(self.virtual_duration_samples))
+            self.pos = max(0, min(n - 1, int(seconds * self.sr)))
+            self._pos_float = float(self.pos)
 
     def _click_wave(self, length: int = 1200, freq: float = 1800.0) -> np.ndarray:
         key = (int(length), float(freq))
@@ -272,7 +306,13 @@ class AudioPlayer:
         # ノート数がかなり多い場合でも、編集用途なら現実的。
         octave_shift = int(self.note_octave_shift)
 
-        for ns, ne, midi in self.preview_notes:
+        preview_notes = self.preview_notes
+        if len(self._preview_ends) == len(preview_notes):
+            first_active = bisect_right(self._preview_ends, block_start)
+        else:
+            first_active = 0
+        for segment in preview_notes[first_active:]:
+            ns, ne, midi = segment
             if ne <= block_start:
                 continue
             if ns > block_end:
@@ -286,7 +326,8 @@ class AudioPlayer:
             freq = midi_to_hz(float(midi) + octave_shift * 12)
             sample_index = source_positions[out_s:out_e]
             # 絶対サンプル時刻から生成するのでブロック境界で位相が飛びにくい
-            phase = 2.0 * np.pi * freq * sample_index / sr
+            phase_offset = float(getattr(segment, "phase", 2.0 * np.pi * freq * ns / sr))
+            phase = phase_offset + 2.0 * np.pi * freq * (sample_index - ns) / sr
             local = sample_index - ns
             local_sec = local / float(sr)
             instrument = str(getattr(self, "note_instrument", "sine"))
@@ -323,8 +364,10 @@ class AudioPlayer:
             note_len = max(1, ne - ns)
             fade = min(int(sr * 0.006), max(1, note_len // 4))
             env = np.ones_like(wave)
-            env = np.minimum(env, np.clip(local / fade, 0.0, 1.0))
-            env = np.minimum(env, np.clip((ne - sample_index) / fade, 0.0, 1.0))
+            if bool(getattr(segment, "fade_in", True)):
+                env = np.minimum(env, np.clip(local / fade, 0.0, 1.0))
+            if bool(getattr(segment, "fade_out", True)):
+                env = np.minimum(env, np.clip((ne - sample_index) / fade, 0.0, 1.0))
             env *= instrument_env
 
             outdata[out_s:out_e, 0] += wave * env * self.note_volume
@@ -332,43 +375,66 @@ class AudioPlayer:
     def play(self) -> None:
         if not self.available:
             return
-        with self.lock:
-            has_audio = self.audio is not None and len(self.audio) > 0
-            has_virtual = int(self.virtual_duration_samples) > 0
-            if not has_audio and not has_virtual:
-                return
-            if self.stream is None:
-                self.stream = self.sd.OutputStream(
-                    samplerate=self.sr,
+        with self._stream_control_lock:
+            with self.lock:
+                has_audio = self.audio is not None and len(self.audio) > 0
+                has_virtual = int(self.virtual_duration_samples) > 0
+                if not has_audio and not has_virtual:
+                    return
+                playback_end = max(len(self.audio) if has_audio else 0, int(self.virtual_duration_samples))
+                if self.pos >= max(0, playback_end - 1):
+                    self.pos = 0
+                    self._pos_float = 0.0
+                stream = self.stream
+                sample_rate = self.sr
+            if stream is None:
+                stream = self.sd.OutputStream(
+                    samplerate=sample_rate,
                     channels=1,
                     dtype="float32",
                     callback=self._callback,
                     blocksize=1024,
                 )
-            self.playing = True
-            self.stream.start()
+                with self.lock:
+                    self.stream = stream
+            with self.lock:
+                self.playing = True
+            try:
+                stream.start()
+            except Exception as exc:
+                with self.lock:
+                    self.playing = False
+                    self.available = False
+                    self.error = repr(exc)
 
     def pause(self) -> None:
-        with self.lock:
-            self.playing = False
-            if self.stream is not None:
-                try:
-                    self.stream.stop()
-                except Exception:
-                    pass
+        with self._stream_control_lock:
+            self._stop_stream_controlled(reset_position=False, close=False)
 
     def stop(self) -> None:
+        with self._stream_control_lock:
+            self._stop_stream_controlled(reset_position=True, close=True)
+
+    def _stop_stream_controlled(self, *, reset_position: bool, close: bool) -> None:
+        """Update player state under ``lock`` and wait for PortAudio without it."""
         with self.lock:
             self.playing = False
-            self.pos = 0
-            self._pos_float = 0.0
-            if self.stream is not None:
+            if reset_position:
+                self.pos = 0
+                self._pos_float = 0.0
+            stream = self.stream
+            if close:
+                self.stream = None
+        if stream is not None:
+            try:
+                stream.stop()
+            except Exception:
+                pass
+            if close:
                 try:
-                    self.stream.stop()
-                    self.stream.close()
+                    stream.close()
                 except Exception:
                     pass
-                self.stream = None
 
     def toggle(self) -> None:
         if self.playing:
@@ -421,6 +487,9 @@ class AudioPlayer:
 
             outdata.fill(0)
 
+            audio_samples = len(self.audio) if self.audio is not None else 0
+            playback_end = max(audio_samples, int(self.virtual_duration_samples))
+            chunk_len = int(np.searchsorted(source_positions, playback_end, side="left"))
             if self.audio is not None:
                 chunk = self._read_audio_block_speed(
                     start_pos_float,
@@ -430,11 +499,6 @@ class AudioPlayer:
                 )
                 if len(chunk) > 0:
                     outdata[:len(chunk), :] = chunk * self.volume
-                playback_end = len(self.audio)
-                chunk_len = len(chunk)
-            else:
-                playback_end = max(0, int(self.virtual_duration_samples))
-                chunk_len = int(np.searchsorted(source_positions, playback_end, side="left"))
 
             if chunk_len > 0:
                 active_positions = source_positions[:chunk_len]

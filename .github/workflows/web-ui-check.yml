@@ -30,6 +30,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libegl1
+
       - name: Python syntax
         run: >-
           python -m compileall -q
@@ -117,8 +122,11 @@ jobs:
           resolved = {**leaf, "CoreBridge": CoreBridge}
           type("WebBridge", tuple(resolved[name] for name in web_names), {})
 
-      - name: Install lightweight Web runtime dependencies
-        run: python -m pip install --disable-pip-version-check numpy mido pywebview
+      - name: Install application test dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check
+          -r requirements.txt
+          -r requirements-webui.txt
 
       - name: Web UI bridge initialization
         run: |
@@ -132,12 +140,10 @@ jobs:
           assert state["settings"]["speed"] == 1.0
           PY
 
-      - name: Web lifecycle and gap bridge tests
-        run: >-
-          python -m unittest
-          tests.test_unsaved_data_protection
-          tests.test_webview_lifecycle
-          tests.test_web_gap_bridge
+      - name: Backend and lifecycle regression tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -p "test_*.py"
 
       - name: Launcher is Windows PowerShell 5.1 safe
         shell: python
@@ -173,3 +179,7 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      - name: Frontend regression tests
+        working-directory: frontend
+        run: npm test

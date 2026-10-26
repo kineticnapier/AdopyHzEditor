@@ -212,6 +212,7 @@ class EditorView(QtWidgets.QWidget):
         self.selected_index: int | None = None
         self.selected_indices: set[int] = set()
         self._note_items: list[QtWidgets.QGraphicsRectItem] = []
+        self._note_item_groups: list[list[QtWidgets.QGraphicsItem]] = []
         self._guide_items: list[pg.InfiniteLine] = []
         self._pitch_guide_items: list[pg.InfiniteLine] = []
         self._suppress_playhead = False
@@ -402,15 +403,9 @@ class EditorView(QtWidgets.QWidget):
             else:
                 dx = max(-min_start, dx)
 
-        min_midi = min(n.midi for _, n in self._move_original_notes)
-        max_midi = max(n.midi for _, n in self._move_original_notes)
-        low = 0
-        high = 127
-        if self.spectrogram is not None:
-            low = max(0, self.spectrogram.midi_min)
-            high = min(127, self.spectrogram.midi_max)
-
-        dy = max(low - min_midi, min(dy, high - max_midi))
+        min_midi = min(n.pitch_bounds[0] for _, n in self._move_original_notes)
+        max_midi = max(n.pitch_bounds[1] for _, n in self._move_original_notes)
+        dy = max(-min_midi, min(dy, 127 - max_midi))
         return dx, int(dy)
 
     def preview_move_selected(self, dx: float, dy: int) -> None:
@@ -423,8 +418,12 @@ class EditorView(QtWidgets.QWidget):
 
         for i, n in self._move_original_notes:
             self.notes[i] = n.shifted(dx, dy).normalized()
-
-        self.redraw_notes()
+        if len(self._note_item_groups) == len(self.notes):
+            for i, _n in self._move_original_notes:
+                for item in self._note_item_groups[i]:
+                    item.setPos(float(dx), float(dy))
+        else:
+            self.redraw_notes()
 
     def finish_move_selected(self, dx: float, dy: int) -> None:
         if not self._move_active:
@@ -435,6 +434,7 @@ class EditorView(QtWidgets.QWidget):
         moved = abs(self._last_move_dx) > 1e-7 or self._last_move_dy != 0
         if moved and self._move_original_state is not None:
             self.push_undo_state(self._move_original_state)
+            self.redraw_notes()
             self.notes_changed.emit()
             self.status_changed.emit(f"Moved {len(self._move_original_notes)} note(s): {self._last_move_dx:+.3f}s, {self._last_move_dy:+d} semitone(s)")
         else:
@@ -1112,9 +1112,11 @@ class EditorView(QtWidgets.QWidget):
         for item in self._note_items:
             self.plot.plotItem.removeItem(item)
         self._note_items.clear()
+        self._note_item_groups.clear()
 
         alpha = 90 if self.mode == 0 else 220 if self.mode == 1 else 165
         for i, n in enumerate(self.notes):
+            group: list[QtWidgets.QGraphicsItem] = []
             if n.is_curve:
                 path = QtGui.QPainterPath()
                 path.moveTo(n.start, n.midi_at(0.0))
@@ -1135,6 +1137,7 @@ class EditorView(QtWidgets.QWidget):
 
                 self.plot.plotItem.addItem(item)
                 self._note_items.append(item)
+                group.append(item)
 
                 # Endpoint markers for readability.
                 for u in (0.0, 1.0):
@@ -1146,6 +1149,7 @@ class EditorView(QtWidgets.QWidget):
                     dot.setBrush(QtGui.QBrush(QtGui.QColor(255, 210, 80, min(255, alpha + 60))))
                     self.plot.plotItem.addItem(dot)
                     self._note_items.append(dot)
+                    group.append(dot)
             else:
                 rect = QtWidgets.QGraphicsRectItem(QtCore.QRectF(n.start, float(n.midi) - 0.45, n.duration, 0.9))
                 rect.setZValue(20)
@@ -1160,4 +1164,6 @@ class EditorView(QtWidgets.QWidget):
                     rect.setBrush(QtGui.QBrush(QtGui.QColor(70, 190, 255, alpha)))
                 self.plot.plotItem.addItem(rect)
                 self._note_items.append(rect)
+                group.append(rect)
+            self._note_item_groups.append(group)
 

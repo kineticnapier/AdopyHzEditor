@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AdoFAIDebugPreview, AdoFAIExportOptions, AdoFAITilePreview, BackendApi } from "./bridge";
+import { LatestRequestGate } from "../api/requestCoordinator";
 
 type Props={api:BackendApi;selected:number[];onClose():void;onStatus(text:string):void;onHelp(section?:string):void};
 export default function AdoFAIExportDialogJa({api,selected,onClose,onStatus,onHelp}:Props){
   const[options,setOptions]=useState<AdoFAIExportOptions|null>(null),[working,setWorking]=useState(false),[error,setError]=useState(""),[tile,setTile]=useState<AdoFAITilePreview|null>(null),[debug,setDebug]=useState<AdoFAIDebugPreview|null>(null),[previewMode,setPreviewMode]=useState<"none"|"tile"|"debug">("none");
-  useEffect(()=>{let alive=true;void api.get_adofai_export_defaults(selected).then(v=>{if(alive)setOptions({...v,harmonyTuning:"equal temperament"})}).catch(e=>alive&&setError(String(e)));return()=>{alive=false}},[api,selected]);
-  function patch<K extends keyof AdoFAIExportOptions>(k:K,v:AdoFAIExportOptions[K]){setOptions(o=>o?{...o,[k]:v,harmonyTuning:"equal temperament"}:o)}
+  const previewRequests=useRef(new LatestRequestGate());
+  useEffect(()=>{previewRequests.current.invalidate();setTile(null);setDebug(null);setPreviewMode("none");let alive=true;void api.get_adofai_export_defaults(selected).then(v=>{if(alive)setOptions({...v,harmonyTuning:"equal temperament"})}).catch(e=>alive&&setError(String(e)));return()=>{alive=false}},[api,selected]);
+  function invalidatePreview(){previewRequests.current.invalidate();setTile(null);setDebug(null);setPreviewMode("none")}
+  function patch<K extends keyof AdoFAIExportOptions>(k:K,v:AdoFAIExportOptions[K]){invalidatePreview();setOptions(o=>o?{...o,[k]:v,harmonyTuning:"equal temperament"}:o)}
   async function run<T>(fn:()=>Promise<T>){setWorking(true);setError("");try{return await fn()}catch(e){setError(String(e));return null}finally{setWorking(false)}}
   const fixed=options?{...options,harmonyTuning:"equal temperament" as const}:null;
   async function exportLevel(){if(!fixed)return;const r=await run(()=>api.export_adofai_advanced(fixed,selected));if(!r)return;onStatus(r.status);if(r.ok)onClose()}
-  async function tilePreview(){if(!fixed)return;const r=await run(()=>api.preview_adofai_tiles(fixed,selected));if(r){setTile(r);setDebug(null);setPreviewMode("tile")}}
-  async function debugPreview(){if(!fixed)return;const r=await run(()=>api.preview_adofai_debug(fixed,selected));if(r){setDebug(r);setTile(null);setPreviewMode("debug")}}
-  async function chooseSongSource(){const r=await run(()=>api.choose_adofai_song_source());if(r?.ok&&r.path){setOptions(o=>o?{...o,useProjectSong:true,songSourcePath:r.path!,harmonyTuning:"equal temperament"}:o);onStatus(r.status)}}
+  async function tilePreview(){if(!fixed)return;const request=previewRequests.current.issue(),snapshot={...fixed},selection=[...selected];const r=await run(()=>api.preview_adofai_tiles(snapshot,selection));if(r&&previewRequests.current.isCurrent(request)){setTile(r);setDebug(null);setPreviewMode("tile")}}
+  async function debugPreview(){if(!fixed)return;const request=previewRequests.current.issue(),snapshot={...fixed},selection=[...selected];const r=await run(()=>api.preview_adofai_debug(snapshot,selection));if(r&&previewRequests.current.isCurrent(request)){setDebug(r);setTile(null);setPreviewMode("debug")}}
+  async function chooseSongSource(){const r=await run(()=>api.choose_adofai_song_source());if(r?.ok&&r.path){invalidatePreview();setOptions(o=>o?{...o,useProjectSong:true,songSourcePath:r.path!,harmonyTuning:"equal temperament"}:o);onStatus(r.status)}}
   if(!options)return <Modal title="ADOFAI出力" onClose={onClose}><div className="dialog-loading">設定を読み込んでいます…</div></Modal>;
   const isHarmony=options.method==="harmony",isAngle=options.method==="angle_only",isZip=options.method==="rabbit_zip";
   return <Modal title="ADOFAI出力" onClose={onClose} wide={previewMode!=="none"}>

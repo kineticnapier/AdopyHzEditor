@@ -56,6 +56,10 @@ class ToolsMixin:
         with self._lock:
             self.player.stop()
             self.player.clear_audio()
+            # A blank workspace is a derived document.  Keeping the previous
+            # save target would let Ctrl+S overwrite the source project after
+            # its audio reference has deliberately been removed.
+            self.project_path = None
             self.audio_path = None
             self.spectrogram = None
             self.duration = duration
@@ -112,6 +116,7 @@ class ToolsMixin:
                 [n.normalized() for n in self.notes] + [n.normalized() for n in notes],
                 key=lambda n: (n.start, n.midi, n.end),
             )
+            self.duration = max(self.duration, max(n.end for n in self.notes))
             if self.audio_path is None or self.spectrogram is None:
                 self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
@@ -134,7 +139,15 @@ class ToolsMixin:
             self.midi_min = max(0, min(127, int(self.midi_min)))
             self.midi_max = max(self.midi_min + 1, min(127, int(self.midi_max)))
         visible = min(60, self.midi_max - self.midi_min + 1)
-        self.view.update(start=0.0, windowSeconds=min(12.0, self.duration), pitchBottom=self.midi_min, visibleNotes=visible)
+        if self.notes:
+            first = min(n.start for n in self.notes)
+            last = max(n.end for n in self.notes)
+            start = max(0.0, first - 0.25)
+            window = max(0.2, min(self.duration - start, max(1.0, last - start + 0.5)))
+        else:
+            start = 0.0
+            window = min(12.0, self.duration)
+        self.view.update(start=start, windowSeconds=window, pitchBottom=self.midi_min, visibleNotes=visible)
         self.player.set_virtual_duration(self.duration)
 
     def export_selected_midi_dialog(self, indices: list[int]) -> dict[str, Any]:
@@ -200,7 +213,7 @@ class ToolsMixin:
             chart_path,
             info,
             int(calculated["count"]),
-            start_floor=None,
+            start_floor=int(calculated["startFloor"]),
             add_set_speed=bool(options.get("addSetSpeed", True)),
         )
         output_path = SaveChartAs(data, chart_path, overwrite=bool(options.get("overwrite", False)))

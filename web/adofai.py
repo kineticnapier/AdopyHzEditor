@@ -14,6 +14,7 @@ from typing import Any
 
 import webview
 
+from core.atomic_io import atomic_write_text
 from exporters.adofai import (
     build_adofai_debug_rows,
     build_adofai_level,
@@ -287,10 +288,15 @@ class AdoFAIMixin:
 
     def preview_adofai_tiles(self, options: dict[str, Any], selected_indices: list[int] | None = None) -> dict[str, Any]:
         notes, build_opts, _workflow = self._prepare_adofai_export(options, selected_indices)
-        level, stats = build_adofai_level(notes, **build_opts)
-        points = build_tile_preview_points(level.get("angleData", []), max_preview_tiles=5000)
+        max_preview_tiles = 5000
+        debug_rows = build_adofai_debug_rows(notes, **build_opts)
+        estimated_total = sum(int(row.get("tiles_est", 0) or 0) for row in debug_rows)
+        preview_opts = dict(build_opts)
+        preview_opts["max_tiles"] = min(max_preview_tiles, int(build_opts.get("max_tiles", max_preview_tiles) or max_preview_tiles))
+        level, stats = build_adofai_level(notes, **preview_opts)
+        points = build_tile_preview_points(level.get("angleData", []), max_preview_tiles=max_preview_tiles)
         payload = [{"x": float(x), "y": float(y), "angle": float(angle)} for x, y, angle in points]
-        total = int(stats.get("floors_total", max(0, len(payload) - 1)) or 0)
+        total = max(estimated_total, int(stats.get("floors_total", max(0, len(payload) - 1)) or 0))
         return {
             "points": payload,
             "stats": stats,
@@ -352,8 +358,6 @@ class AdoFAIMixin:
             copied_song = str(copy_target)
 
         level, stats = build_adofai_level(notes, **build_opts)
-        Path(path).write_text(json.dumps(level, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-
         if copy_required and source and copy_target is not None:
             try:
                 _copy_song_atomic(Path(str(source)).resolve(), copy_target)
@@ -363,6 +367,14 @@ class AdoFAIMixin:
                     "path": str(path),
                     "status": f"Audio copy failed: {exc}",
                 }
+
+        # Do not replace an existing chart until every fallible preparation
+        # step, including the optional song copy, has succeeded.
+        atomic_write_text(
+            path,
+            json.dumps(level, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
 
         with self._lock:
             self._status = f"Exported {Path(path).name} ({stats.get('tiles_total', 0)} tiles)"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -32,7 +33,18 @@ class WebUiCompatibilityTests(unittest.TestCase):
 
         with (
             mock.patch.object(bridge, "_dialog", return_value="project.adopyhz"),
-            mock.patch.object(bridge, "_load_audio_path"),
+            mock.patch.object(
+                bridge,
+                "_prepare_audio_path",
+                return_value=(
+                    SimpleNamespace(
+                        samples=np.zeros((32, 2), dtype=np.float32),
+                        sample_rate=44100,
+                        duration=32 / 44100,
+                    ),
+                    None,
+                ),
+            ),
             mock.patch.object(web_io, "load_project", return_value=("song.wav", [note], {})),
             mock.patch.object(web_io.Path, "exists", return_value=True),
         ):

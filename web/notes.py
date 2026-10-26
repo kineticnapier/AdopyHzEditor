@@ -13,8 +13,11 @@ class NoteMixin:
     # ------------------------------------------------------------------
     # Notes / history / clipboard
     # ------------------------------------------------------------------
-    def _snapshot(self) -> list[dict[str, Any]]:
-        return self._note_dicts()
+    def _snapshot(self) -> tuple[Note, ...]:
+        # Notes are replaced, never mutated in-place. A tuple therefore gives
+        # undo history structural sharing instead of copying dictionaries for
+        # every one of up to 200 history entries.
+        return tuple(self.notes)
 
     def _push_undo(self) -> None:
         self._undo_stack.append(self._snapshot())
@@ -22,8 +25,8 @@ class NoteMixin:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
 
-    def _restore_snapshot(self, state: Iterable[dict[str, Any]]) -> None:
-        self.notes = [Note.from_dict(dict(item)) for item in state]
+    def _restore_snapshot(self, state: Iterable[Note | dict[str, Any]]) -> None:
+        self.notes = [item if isinstance(item, Note) else Note.from_dict(dict(item)) for item in state]
         self._sync_notes_to_player()
         self._dirty = True
 
@@ -44,7 +47,12 @@ class NoteMixin:
     def _snap_pitch(self, midi: float) -> float:
         step = max(1e-6, float(self.pitch_step))
         snapped = round(float(midi) / step) * step
-        return _clamp(snapped, float(self.midi_min), float(self.midi_max))
+        return self._clamp_pitch(snapped)
+
+    @staticmethod
+    def _clamp_pitch(midi: float) -> float:
+        """Clamp editable MIDI data independently from the analysis viewport."""
+        return _clamp(midi, 0.0, 127.0)
 
     def _curve_controls(self, p0: float, p3: float) -> tuple[float, float]:
         d = float(p3) - float(p0)
@@ -83,6 +91,8 @@ class NoteMixin:
             if b - a < 0.001:
                 step = 60.0 / max(1e-6, float(self.settings["bpm"])) / max(1, int(self.settings["snapDiv"])) if self.settings["snapEnabled"] else 0.02
                 b = min(self.duration, a + max(0.02, step))
+                if b - a < 0.001:
+                    a = max(0.0, b - max(0.001, min(0.02, self.duration)))
             p0 = self._snap_pitch(midi)
             self._push_undo()
             if str(kind) == "curve":
@@ -134,7 +144,7 @@ class NoteMixin:
             for n in original:
                 pitch_values.extend(v for v in (n.midi, n.midi_end, n.ctrl1_midi, n.ctrl2_midi) if v is not None)
             if pitch_values:
-                dy = _clamp(dy, self.midi_min - min(pitch_values), self.midi_max - max(pitch_values))
+                dy = _clamp(dy, -min(pitch_values), 127.0 - max(pitch_values))
 
             # Snap the group using its first note so relative spacing is preserved.
             if self.settings["snapEnabled"] and original:
@@ -204,7 +214,7 @@ class NoteMixin:
                     start = max(0.0, end - 0.001)
             updated = self._with_times(n, start, end)
             if "midi" in changes:
-                target = self._snap_pitch(float(changes["midi"]))
+                target = self._clamp_pitch(float(changes["midi"]))
                 updated = updated.with_pitch_offset(target - updated.midi)
             if "velocity" in changes:
                 v = max(0, min(127, int(round(float(changes["velocity"])))))
@@ -308,20 +318,20 @@ class NoteMixin:
     def undo(self) -> dict[str, Any]:
         with self._lock:
             if not self._undo_stack:
-                return {"notes": self._note_dicts(), "status": "元に戻せる操作がありません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "元に戻せる操作がありません"}
             self._redo_stack.append(self._snapshot())
             self._restore_snapshot(self._undo_stack.pop())
             self._status = "元に戻しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
 
     def redo(self) -> dict[str, Any]:
         with self._lock:
             if not self._redo_stack:
-                return {"notes": self._note_dicts(), "status": "やり直せる操作がありません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "やり直せる操作がありません"}
             self._undo_stack.append(self._snapshot())
             self._restore_snapshot(self._redo_stack.pop())
             self._status = "やり直しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
 
     def copy_notes(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
@@ -341,17 +351,16 @@ class NoteMixin:
     def paste_notes(self, at_time: float) -> dict[str, Any]:
         with self._lock:
             if not self._clipboard:
-                return {"notes": self._note_dicts(), "indices": [], "status": "クリップボードは空です"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "クリップボードは空です"}
             self._push_undo()
-            base = _clamp(at_time, 0.0, self.duration)
+            clipboard_end = max(item.normalized().end for item in self._clipboard)
+            base = _clamp(at_time, 0.0, max(0.0, self.duration - clipboard_end))
             new_indices: list[int] = []
             for item in self._clipboard:
                 pasted = item.with_time_offset(base).normalized()
-                if pasted.end > self.duration:
-                    pasted = pasted.shifted(dx=max(0.0, self.duration - pasted.end))
                 self.notes.append(pasted)
                 new_indices.append(len(self.notes) - 1)
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(new_indices)}個のノートを貼り付けました"
-            return {"notes": self._note_dicts(), "indices": new_indices, "status": self._status}
+            return {"notes": self._note_dicts(), "indices": new_indices, "changed": True, "status": self._status}
