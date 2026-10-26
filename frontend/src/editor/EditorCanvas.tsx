@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import type { EditorSettings, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, type NoteTimeIndex } from "./editorMath";
+import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, type NoteTimeIndex } from "./editorMath";
 
 type Props = {
   notes: NoteDto[];
@@ -207,8 +207,7 @@ export default function EditorCanvas(props: Props) {
   }
   function edgeFor(index:number,px:number){
     const n=props.notes[index];if(!n)return null;
-    const a=Math.abs(px-coords.x(n.start)),b=Math.abs(px-coords.x(n.end));if(Math.min(a,b)>8)return null;
-    return a<=b?"start":"end" as const;
+    return noteEdgeAt(coords.x(n.start),coords.x(n.end),px);
   }
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
     if(event.button!==0)return;
@@ -224,8 +223,8 @@ export default function EditorCanvas(props: Props) {
       if(event.ctrlKey){next=props.selected.includes(hit)?props.selected.filter(x=>x!==hit):[...props.selected,hit];props.onSelect(next);return;}
       if(event.shiftKey){next=Array.from(new Set([...props.selected,hit])).sort((a,b)=>a-b);props.onSelect(next);return;}
       if(!props.selected.includes(hit)){next=[hit];props.onSelect(next);}
-      const edge=edgeFor(hit,p.x);
-      const mode:DragMode=edge==="start"?"resize-start":edge==="end"?"resize-end":event.altKey?"duplicate-move":"move";
+      const edge=event.altKey?null:edgeFor(hit,p.x);
+      const mode:DragMode=event.altKey?"duplicate-move":edge==="start"?"resize-start":edge==="end"?"resize-end":"move";
       setDrag({mode,startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:next});
       return;
     }
@@ -238,7 +237,7 @@ export default function EditorCanvas(props: Props) {
     if(props.onCursorMove&&now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove(p.time,p.midi);}
     if(event.ctrlKey&&event.altKey&&props.selected.length){event.currentTarget.style.cursor="crosshair";return;}
     const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.spectrum?.pitchStep??1);
-    event.currentTarget.style.cursor=hit!==null&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":"crosshair";
+    event.currentTarget.style.cursor=hit!==null&&!event.altKey&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":"crosshair";
   }
   async function onPointerUp(event:ReactPointerEvent<HTMLCanvasElement>){
     if(!drag)return;

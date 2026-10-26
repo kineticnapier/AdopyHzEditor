@@ -5,6 +5,14 @@ function hzToMidi(hz: number) { return 69 + 12 * Math.log2(Math.max(1e-9, hz) / 
 function cubic(p0: number, p1: number, p2: number, p3: number, u: number) { const v = 1 - u; return v ** 3 * p0 + 3 * v ** 2 * u * p1 + 3 * v * u ** 2 * p2 + u ** 3 * p3; }
 function interpolationMode(note: NoteDto) { return (note.interpolation ?? "bezier_pitch").toLowerCase().replace(/[ -]/g, "_"); }
 
+export function noteEdgeAt(startPx: number, endPx: number, pointerPx: number, thresholdPx = 8): "start" | "end" | null {
+  const threshold = Math.max(0, thresholdPx);
+  if (Math.abs(endPx - startPx) <= threshold * 2) return null;
+  const startDistance = Math.abs(pointerPx - startPx), endDistance = Math.abs(pointerPx - endPx);
+  if (Math.min(startDistance, endDistance) > threshold) return null;
+  return startDistance <= endDistance ? "start" : "end";
+}
+
 export function noteMidiAt(note: NoteDto, u: number) {
   if ((note.kind ?? "note") !== "curve") return note.midi;
   const p0 = note.midi, p3 = note.midi_end ?? p0, p1 = note.ctrl1_midi ?? p0, p2 = note.ctrl2_midi ?? p3, t = Math.max(0, Math.min(1, u));

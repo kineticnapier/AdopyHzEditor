@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteIntersects, noteMidiAt, spectrogramPitchCrop } from "../src/editor/editorMath.ts";
+import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop } from "../src/editor/editorMath.ts";
 
 const curve = { start: 0, end: 100, midi: 0, velocity: 100, kind: "curve" as const, midi_end: 0, ctrl1_midi: 127, ctrl2_midi: 127 };
 
@@ -31,4 +31,15 @@ test("time index excludes notes outside the pointer time", () => {
   const notes = Array.from({length:1000},(_,i)=>({start:i,end:i+.25,midi:60,velocity:100}));
   const candidates=noteCandidatesAt(buildNoteTimeIndex(notes),500.1);
   assert.deepEqual(candidates,[500]);
+});
+
+test("short notes prioritize move instead of making their whole width a resize handle", () => {
+  assert.equal(noteEdgeAt(100, 116, 100), null);
+  assert.equal(noteEdgeAt(100, 115, 107.5), null);
+});
+
+test("long notes retain distinct resize handles", () => {
+  assert.equal(noteEdgeAt(100, 140, 104), "start");
+  assert.equal(noteEdgeAt(100, 140, 136), "end");
+  assert.equal(noteEdgeAt(100, 140, 120), null);
 });
