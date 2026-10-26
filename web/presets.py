@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from core.note_model import Note
+from core.atomic_io import atomic_write_text
 
 
 class PresetMixin:
@@ -33,10 +34,14 @@ class PresetMixin:
             return {}
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
+        except Exception as exc:
+            raise ValueError(
+                f"ノートプリセットファイルを読み込めません。元ファイルは変更していません: {path}"
+            ) from exc
         if not isinstance(raw, dict):
-            return {}
+            raise ValueError(
+                f"ノートプリセットファイルの形式が不正です。元ファイルは変更していません: {path}"
+            )
         out: dict[str, dict[str, Any]] = {}
         for raw_name, raw_note in raw.items():
             name = str(raw_name).strip()
@@ -51,7 +56,8 @@ class PresetMixin:
 
     def _save_note_preset_map(self, presets: dict[str, dict[str, Any]]) -> None:
         path = self._note_preset_path()
-        path.write_text(
+        atomic_write_text(
+            path,
             json.dumps(presets, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )

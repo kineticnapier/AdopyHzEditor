@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from core.atomic_io import atomic_write_text
 from exporters.adofai_angles import clean_angle, clean_relative_angle
 from exporters.adofai import set_bpm
 
@@ -340,7 +341,8 @@ def SaveChartAs(
         raise HzToolError("Overwrite is disabled.")
 
     try:
-        output.write_text(
+        atomic_write_text(
+            output,
             json.dumps(chart_data, ensure_ascii=False, indent=4) + "\n",
             encoding="utf-8",
         )

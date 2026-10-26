@@ -14,6 +14,7 @@ from typing import Any
 
 import webview
 
+from core.atomic_io import atomic_write_text
 from exporters.adofai import (
     build_adofai_debug_rows,
     build_adofai_level,
@@ -352,8 +353,6 @@ class AdoFAIMixin:
             copied_song = str(copy_target)
 
         level, stats = build_adofai_level(notes, **build_opts)
-        Path(path).write_text(json.dumps(level, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-
         if copy_required and source and copy_target is not None:
             try:
                 _copy_song_atomic(Path(str(source)).resolve(), copy_target)
@@ -363,6 +362,14 @@ class AdoFAIMixin:
                     "path": str(path),
                     "status": f"Audio copy failed: {exc}",
                 }
+
+        # Do not replace an existing chart until every fallible preparation
+        # step, including the optional song copy, has succeeded.
+        atomic_write_text(
+            path,
+            json.dumps(level, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
 
         with self._lock:
             self._status = f"Exported {Path(path).name} ({stats.get('tiles_total', 0)} tiles)"

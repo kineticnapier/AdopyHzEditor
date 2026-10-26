@@ -56,6 +56,10 @@ class ToolsMixin:
         with self._lock:
             self.player.stop()
             self.player.clear_audio()
+            # A blank workspace is a derived document.  Keeping the previous
+            # save target would let Ctrl+S overwrite the source project after
+            # its audio reference has deliberately been removed.
+            self.project_path = None
             self.audio_path = None
             self.spectrogram = None
             self.duration = duration

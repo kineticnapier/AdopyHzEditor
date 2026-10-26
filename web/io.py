@@ -54,6 +54,16 @@ PROJECT_SETTING_ALIASES = {"note_octave": "previewOctave"}
 
 
 class IOMixin:
+    def _normalized_project_settings(self, data: dict[str, Any]) -> dict[str, Any]:
+        settings = dict(self.settings)
+        for project_key, setting_key, _value_type in PROJECT_SETTING_FIELDS:
+            if project_key in data and setting_key in settings:
+                settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
+        for project_key, setting_key in PROJECT_SETTING_ALIASES.items():
+            if project_key in data and setting_key in settings:
+                settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
+        return settings
+
     def _project_settings(self) -> dict[str, Any]:
         s = self.settings
         saved = {project_key: value_type(s[setting_key]) for project_key, setting_key, value_type in PROJECT_SETTING_FIELDS}
@@ -61,12 +71,7 @@ class IOMixin:
         return saved
 
     def _apply_project_settings(self, data: dict[str, Any]) -> None:
-        for project_key, setting_key, _value_type in PROJECT_SETTING_FIELDS:
-            if project_key in data and setting_key in self.settings:
-                self.settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
-        for project_key, setting_key in PROJECT_SETTING_ALIASES.items():
-            if project_key in data and setting_key in self.settings:
-                self.settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
+        self.settings = self._normalized_project_settings(data)
         self._apply_player_settings()
 
     def _save_project_path(self, path: str) -> dict[str, Any]:
@@ -93,20 +98,37 @@ class IOMixin:
         path=self._dialog(webview.FileDialog.OPEN,file_types=PROJECT_FILE_TYPES)
         if not path:return self.get_state()
         audio_path,notes,settings=load_project(path)
-        with self._lock:
-            self.notes=[n.normalized() for n in notes];self._undo_stack.clear();self._redo_stack.clear();self._apply_project_settings(settings);self.project_path=str(Path(path).resolve());self._dirty=False;self._status=f"{Path(path).name} を読み込みました"
+        prepared_notes=[n.normalized() for n in notes]
+        prepared_settings=self._normalized_project_settings(settings)
+        prepared_audio=None
         if audio_path and Path(audio_path).exists():
             with self._lock:self._busy=True
-            try:self._load_audio_path(audio_path,analyze=True)
+            try:
+                # Decode and analyze before changing notes, settings, paths,
+                # history, dirty state, or the active player source.
+                prepared_audio=self._prepare_audio_path(
+                    audio_path,
+                    analyze=True,
+                    settings=prepared_settings,
+                )
             finally:
                 with self._lock:self._busy=False
-            with self._lock:
-                # Audio loading resets the player's sample-rate-dependent state.
-                # Rebuild preview notes afterwards so project notes sound immediately.
-                self._sync_notes_to_player();self._status=f"{Path(path).name} と音声を読み込みました"
-        else:
-            with self._lock:
-                self.audio_path=None;self.spectrogram=None;self.duration=max(60.0,max((n.end for n in self.notes),default=0.0));self.midi_min=12;self.midi_max=120;self.pitch_step=1.0;self.player.clear_audio();self._sync_notes_to_player()
+
+        with self._lock:
+            self.notes=prepared_notes
+            self._undo_stack.clear();self._redo_stack.clear()
+            self.settings=prepared_settings
+            self.project_path=str(Path(path).resolve())
+            self._dirty=False
+            self._status=f"{Path(path).name} を読み込みました"
+            if prepared_audio is not None and audio_path:
+                decoded,spec=prepared_audio
+                self._commit_prepared_audio(audio_path,decoded,spec)
+                self._apply_player_settings()
+                self._sync_notes_to_player()
+                self._status=f"{Path(path).name} と音声を読み込みました"
+            else:
+                self.audio_path=None;self.spectrogram=None;self.duration=max(60.0,max((n.end for n in self.notes),default=0.0));self.midi_min=12;self.midi_max=120;self.pitch_step=1.0;self.player.clear_audio();self._apply_player_settings();self._sync_notes_to_player()
                 if audio_path:
                     self._status=f"{Path(path).name} の音源が見つかりません。ファイル → プロジェクト音源を再指定… から選び直せます"
                 else:

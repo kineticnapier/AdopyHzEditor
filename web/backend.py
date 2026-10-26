@@ -183,12 +183,33 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
     def _state_dict(self) -> dict[str, Any]:
         return self.get_state()
 
-    def _load_audio_path(self, path: str, *, analyze: bool = True) -> dict[str, Any]:
+    def _prepare_audio_path(
+        self,
+        path: str,
+        *,
+        analyze: bool = True,
+        settings: dict[str, Any] | None = None,
+    ):
+        """Perform fallible decoding/analysis without mutating editor state."""
         decoded = decode_audio_file(path)
+        spec = analyze_cqt(path, **self._analysis_options(settings)) if analyze else None
+        return decoded, spec
+
+    def _commit_prepared_audio(self, path: str, decoded, spec: Spectrogram | None) -> None:
+        """Commit a fully prepared audio source while the editor lock is held."""
+        self._set_audio_data(path, decoded)
+        if spec is not None:
+            self.spectrogram = spec
+            self.duration = max(0.001, float(spec.duration))
+            self.midi_min = int(spec.midi_min)
+            self.midi_max = int(spec.midi_max)
+            self.pitch_step = float(spec.pitch_step)
+            self.player.set_virtual_duration(self.duration)
+
+    def _load_audio_path(self, path: str, *, analyze: bool = True) -> dict[str, Any]:
+        decoded, spec = self._prepare_audio_path(path, analyze=analyze)
         with self._lock:
-            self._set_audio_data(path, decoded)
-        if analyze:
-            self._analyze_current_audio()
+            self._commit_prepared_audio(path, decoded, spec)
         return self.get_state()
 
     def _normalize_setting(self, key: str, value: Any) -> Any:
@@ -377,9 +398,10 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         finally:
             self._busy = False
 
-    def _analysis_options(self) -> dict[str, Any]:
-        options = analysis_profile_options(str(self.settings["analysisProfile"]))
-        resolution = str(self.settings["cqtResolution"])
+    def _analysis_options(self, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+        source = settings if settings is not None else self.settings
+        options = analysis_profile_options(str(source["analysisProfile"]))
+        resolution = str(source["cqtResolution"])
         bins_per_octave = {
             "100 cents": 12,
             "50 cents": 24,

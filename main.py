@@ -22,6 +22,7 @@ from desktop.help_dialog import HelpDialog
 from desktop.export_adofai_dialog import ExportAdoFAIDialog
 from desktop.quick_hz_tools_dialog import QuickHzToolsDialog
 from core.note_model import Note
+from core.project_loading import resolve_project_audio_plan
 from i18n import tr, current_language, set_language
 from app_info import APP_VERSION, GITHUB_RELEASES_URL
 
@@ -2007,6 +2008,20 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             audio, notes, settings = load_project(path)
+            # Resolve every user decision before changing the current project.
+            # In particular, Cancel must preserve notes, settings, history,
+            # dirty state, save target, and the active audio as one unit.
+            plan = resolve_project_audio_plan(
+                audio,
+                notes_only=notes_only,
+                choose_mode=self.choose_project_audio_load_mode,
+                locate_audio=self.locate_missing_project_audio,
+            )
+            if not plan.accepted:
+                return
+            mode = plan.mode
+            audio = plan.audio_path
+
             self._suppress_dirty = True
             try:
                 # Apply settings first so the saved analysis_profile is used when loading audio.
@@ -2019,18 +2034,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.set_dirty(False)
             self.sync_notes_to_player()
 
-            mode = "skip" if notes_only else self.choose_project_audio_load_mode(audio)
-            if mode == "cancel":
-                return
-            if mode == "locate":
-                located = self.locate_missing_project_audio(audio)
-                if not located:
-                    self.unload_audio_to_blank_spectrogram(
-                        notes,
-                        message=tr("status.loaded_notes_only", name=Path(path).name),
-                    )
-                    return
-                audio = located
+            if plan.relinked:
                 self.set_dirty(True)
             if mode in ("load", "locate") and audio and Path(audio).exists():
                 self.load_audio(audio, reset_notes=False, clear_project=False)
