@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 
 from core.audio_player import AudioPlayer
+from web.audio import WebAudioPlayer
 
 
 class _LockCheckingStream:
@@ -45,6 +46,21 @@ class AudioStopLockingRegressionTests(unittest.TestCase):
                 else:
                     getattr(player, operation)()
                 self.assertFalse(stream.stop_timed_out)
+
+    def test_web_stop_without_reset_releases_callback_lock_and_keeps_position(self):
+        player = WebAudioPlayer()
+        stream = _LockCheckingStream(player)
+        player.stream = stream
+        player.playing = True
+        player.audio = np.zeros((20, 1), dtype=np.float32)
+        player.pos = 7
+        player._pos_float = 7.25
+
+        player.stop(reset=False)
+
+        self.assertFalse(stream.stop_timed_out)
+        self.assertEqual(player.pos, 7)
+        self.assertEqual(player._pos_float, 7.25)
 
 
 if __name__ == "__main__":

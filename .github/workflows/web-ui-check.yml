@@ -13,6 +13,8 @@ on:
       - "exporters/**"
       - "importers/**"
       - "tools/**"
+      - "native/**"
+      - "third_party/**"
       - "desktop/**"
       - "tests/**"
       - "scripts/**"
@@ -148,6 +150,14 @@ jobs:
       - name: Auto Route and Harmony timing invariants
         run: python -m unittest tests.test_auto_route_twirl tests.test_harmony_auto_route
 
+      - name: Vorbis Direct Spectrum Layer tests
+        run: >-
+          python -m unittest
+          tests.test_vorbis_direct
+          tests.test_vorbis_spectrum_import
+          tests.test_frequency_tracks
+          tests.test_frequency_track_display
+
       - name: Launcher is Windows PowerShell 5.1 safe
         shell: python
         run: |
@@ -178,6 +188,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install --no-audit --no-fund
+
+      - name: Playback follow frontend tests
+        working-directory: frontend
+        run: npm run test:follow
 
       - name: Build frontend
         working-directory: frontend

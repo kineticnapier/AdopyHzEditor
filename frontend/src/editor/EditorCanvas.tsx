@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import type { EditorSettings, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
+import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, type NoteTimeIndex } from "./editorMath";
+import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 
 type Props = {
   notes: NoteDto[];
@@ -9,6 +10,10 @@ type Props = {
   view: ViewState;
   playback: PlaybackState;
   spectrum: SpectrogramPayload | null;
+  directSpectrum: DirectSpectrumPayload | null;
+  frequencyTracks: FrequencyTrackPayload | null;
+  trackRevision: number;
+  onViewportSize?(size: {width:number;height:number}): void;
   onSelect(indices: number[]): void;
   onAdd(start: number, end: number, midi: number, kind: "note" | "curve", endMidi: number): Promise<void>;
   onMove(indices: number[], dx: number, dy: number): Promise<void>;
@@ -19,11 +24,15 @@ type Props = {
   onSeek(time: number): Promise<void>;
   onView(changes: Partial<ViewState>): Promise<void>;
   onCursorMove?(time: number, midi: number): void;
+  onTrackHover?(track: {id:number;frequency:number;noteName:string;duration:number;magnitude:number}|null): void;
+  onFindTracks(range: TrackSelectionRange): Promise<number[]>;
+  onConvertTracks(trackIds: number[], mode: "fixed" | "curve", range: TrackSelectionRange | null): Promise<void>;
 };
 
-type DragMode = "create" | "curve" | "region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
-type DragState = { mode: DragMode; startTime: number; startMidi: number; nowTime: number; nowMidi: number; indices: number[] };
+type DragMode = "create" | "curve" | "region" | "track-region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
+type DragState = { mode: DragMode; startTime: number; startMidi: number; nowTime: number; nowMidi: number; indices: number[]; trackAdditive?: boolean };
 
+function midiToHz(midi: number) { return 440 * 2 ** ((midi - 69) / 12); }
 function hitNote(notes: NoteDto[], index: NoteTimeIndex, time: number, midi: number, pitchStep = 1) {
   const hits: Array<[number, number]> = [];
   noteCandidatesAt(index,time).forEach(noteIndex => {
@@ -63,6 +72,14 @@ function decodeSpectrum(payload: SpectrogramPayload | null) {
   for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
   return { ...payload, rows: payload.rows, cols: payload.cols, bytes };
 }
+function decodeFrequencyTracks(payload: FrequencyTrackPayload | null) {
+  if(!payload?.available||!payload.data||!payload.pointCount)return null;
+  const raw=atob(payload.data),bytes=Uint8Array.from(raw,c=>c.charCodeAt(0)),stride=18,count=Math.min(payload.pointCount,Math.floor(bytes.byteLength/stride)),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const ids=new Uint32Array(count),times=new Float32Array(count),midis=new Float32Array(count),magnitudes=new Float32Array(count),durations=new Float32Array(count),flags=new Uint8Array(count);
+  for(let i=0;i<count;i+=1){const offset=i*stride;ids[i]=view.getUint32(offset,true);times[i]=view.getFloat32(offset+4,true);midis[i]=view.getFloat32(offset+8,true);magnitudes[i]=view.getUint8(offset+12)/255;durations[i]=view.getFloat32(offset+13,true);flags[i]=view.getUint8(offset+17);}
+  return{ids,times,midis,magnitudes,durations,flags,count};
+}
+function midiLabel(midi:number){const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],rounded=Math.round(midi);return `${names[((rounded%12)+12)%12]}${Math.floor(rounded/12)-1}`;}
 function snapTime(settings: EditorSettings, duration: number, time: number) {
   const t = Math.max(0, Math.min(duration, time));
   if (!settings.snapEnabled) return t;
@@ -96,7 +113,20 @@ export default function EditorCanvas(props: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const selectedSet=useMemo(()=>new Set(props.selected),[props.selected]);
   const noteTimeIndex=useMemo(()=>buildNoteTimeIndex(props.notes),[props.notes]);
+  const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
+  const [trackRange, setTrackRange] = useState<TrackSelectionRange | null>(null);
+  const [useTrackRange, setUseTrackRange] = useState(false);
+  const [convertingTracks, setConvertingTracks] = useState(false);
   const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
+  const decodedTracks = useMemo(() => decodeFrequencyTracks(props.frequencyTracks), [props.frequencyTracks]);
+  const selectedTrackSet = useMemo(() => new Set(selectedTracks), [selectedTracks]);
+
+  useEffect(()=>{
+    setSelectedTracks([]);
+    setTrackRange(null);
+    setUseTrackRange(false);
+  },[props.trackRevision]);
+
   const spectrumCanvas = useMemo(() => {
     if (!decoded) return null;
     const canvas = document.createElement("canvas");
@@ -112,13 +142,28 @@ export default function EditorCanvas(props: Props) {
     ctx.putImageData(image, 0, 0);
     return canvas;
   }, [decoded, props.settings.colormap]);
+  const directSpectrumCanvas = useMemo(() => {
+    const payload=props.directSpectrum;
+    if(!payload?.data||!payload.timeBuckets||!payload.pitchBuckets)return null;
+    const canvas=document.createElement("canvas");canvas.width=payload.timeBuckets;canvas.height=payload.pitchBuckets;
+    const maybeCtx=canvas.getContext("2d");if(!maybeCtx)return null;
+    const bytes=Uint8Array.from(atob(payload.data),c=>c.charCodeAt(0));
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),image=maybeCtx.createImageData(canvas.width,canvas.height);
+    for(let offset=0;offset+5<=bytes.byteLength;offset+=5){
+      const x=view.getUint16(offset,true),pitch=view.getUint16(offset+2,true),magnitude=view.getUint8(offset+4);
+      if(x>=canvas.width||pitch>=canvas.height)continue;
+      const [r,g,b]=colorFor(Math.sqrt(magnitude/255),props.settings.colormap),y=canvas.height-1-pitch,p=(y*canvas.width+x)*4;
+      image.data[p]=r;image.data[p+1]=g;image.data[p+2]=b;image.data[p+3]=255;
+    }
+    maybeCtx.putImageData(image,0,0);return canvas;
+  },[props.directSpectrum,props.settings.colormap]);
 
   useEffect(() => {
     const el = containerRef.current; if (!el) return;
-    const observer = new ResizeObserver(([entry]) => setSize({ width: Math.max(1,entry.contentRect.width), height: Math.max(1,entry.contentRect.height) }));
+    const observer = new ResizeObserver(([entry]) => {const next={ width: Math.max(1,entry.contentRect.width), height: Math.max(1,entry.contentRect.height) };setSize(next);props.onViewportSize?.(next)});
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [props.onViewportSize]);
 
   const coords = useMemo(() => {
     const { width, height } = size, start = props.view.start, win = Math.max(.001, props.view.windowSeconds), bottom = props.view.pitchBottom - .5, visible = Math.max(1, props.view.visibleNotes);
@@ -148,6 +193,35 @@ export default function EditorCanvas(props: Props) {
       const {sy,sh}=spectrogramPitchCrop(decoded.rows,decoded.midiMin,decoded.pitchStep??1,bottom,top);
       ctx.save(); ctx.globalAlpha=props.view.mode==="spec"?1:.7; ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
       ctx.drawImage(spectrumCanvas,sx,sy,sw,sh,0,0,w,h); ctx.restore();
+    }
+    if(directSpectrumCanvas&&props.directSpectrum&&props.view.mode!=="notes"){
+      const payload=props.directSpectrum;
+      const viewStart=props.view.start,viewEnd=viewStart+props.view.windowSeconds;
+      const viewBottom=props.view.pitchBottom-.5,viewTop=viewBottom+props.view.visibleNotes;
+      const sourceStart=payload.startTime??viewStart,sourceEnd=payload.endTime??viewEnd;
+      const sourceBottom=payload.minMidi??viewBottom,sourceTop=payload.maxMidi??viewTop;
+      const timeStart=Math.max(viewStart,sourceStart),timeEnd=Math.min(viewEnd,sourceEnd);
+      const pitchBottom=Math.max(viewBottom,sourceBottom),pitchTop=Math.min(viewTop,sourceTop);
+      if(timeEnd>timeStart&&pitchTop>pitchBottom){
+        const sourceTimeSpan=Math.max(1e-6,sourceEnd-sourceStart),sourcePitchSpan=Math.max(1e-6,sourceTop-sourceBottom);
+        const sx=(timeStart-sourceStart)/sourceTimeSpan*directSpectrumCanvas.width,sw=(timeEnd-timeStart)/sourceTimeSpan*directSpectrumCanvas.width;
+        const sy=(sourceTop-pitchTop)/sourcePitchSpan*directSpectrumCanvas.height,sh=(pitchTop-pitchBottom)/sourcePitchSpan*directSpectrumCanvas.height;
+        const dx=(timeStart-viewStart)/Math.max(.001,props.view.windowSeconds)*w,dw=(timeEnd-timeStart)/Math.max(.001,props.view.windowSeconds)*w;
+        const dy=(viewTop-pitchTop)/Math.max(1,props.view.visibleNotes)*h,dh=(pitchTop-pitchBottom)/Math.max(1,props.view.visibleNotes)*h;
+        ctx.save();ctx.globalAlpha=(props.settings.spectrumOpacity/100)*(props.view.mode==="spec"?1:.82);ctx.imageSmoothingEnabled=false;
+        ctx.drawImage(directSpectrumCanvas,sx,sy,sw,sh,dx,dy,dw,dh);ctx.restore();
+      }
+    }
+    if(decodedTracks&&props.view.mode!=="notes"){
+      ctx.save();ctx.lineCap="round";ctx.lineJoin="round";
+      for(let i=0;i<decodedTracks.count;i+=1){
+        const trackId=decodedTracks.ids[i],selectedTrack=selectedTrackSet.has(trackId),x=coords.x(decodedTracks.times[i]),y=coords.y(decodedTracks.midis[i]),m=decodedTracks.magnitudes[i],duration=decodedTracks.durations[i],strength=Math.sqrt(m),durationWeight=Math.max(.25,Math.min(1,duration/.2));
+        if((decodedTracks.flags[i]&1)!==0||i===0||decodedTracks.ids[i]!==decodedTracks.ids[i-1]){ctx.beginPath();ctx.arc(x,y,selectedTrack?Math.max(1.7,2.2*strength):Math.max(.65,1.3*strength),0,Math.PI*2);ctx.fillStyle=selectedTrack?"rgba(255,235,95,.98)":`rgba(155,245,255,${(.12+.58*strength)*durationWeight})`;ctx.fill();continue;}
+        const averageStrength=Math.sqrt((m+decodedTracks.magnitudes[i-1])/2);
+        ctx.beginPath();ctx.moveTo(coords.x(decodedTracks.times[i-1]),coords.y(decodedTracks.midis[i-1]));ctx.lineTo(x,y);
+        ctx.strokeStyle=selectedTrack?"rgba(255,235,95,.98)":`rgba(135,240,255,${(.16+.76*averageStrength)*durationWeight})`;ctx.lineWidth=selectedTrack?2.8+.8*averageStrength:.65+1.75*averageStrength+Math.min(1.1,duration*.55);ctx.stroke();
+      }
+      ctx.restore();
     }
 
     for(let midi=Math.floor(props.view.pitchBottom);midi<=Math.ceil(props.view.pitchBottom+props.view.visibleNotes);midi+=1){
@@ -185,7 +259,7 @@ export default function EditorCanvas(props: Props) {
 
     props.notes.forEach((note,index)=>drawNote(note,selectedSet.has(index)));
 
-  },[coords,decoded,props.notes,props.selected,props.settings,props.view,selectedSet,size,spectrumCanvas]);
+  },[coords,decoded,decodedTracks,directSpectrumCanvas,props.directSpectrum,props.notes,props.settings,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas]);
 
   useEffect(()=>{
     const canvas=playheadRef.current;if(!canvas)return;const dpr=window.devicePixelRatio||1;
@@ -197,9 +271,38 @@ export default function EditorCanvas(props: Props) {
       for(const index of drag.indices){const note=props.notes[index];if(!note)continue;const ghost=drag.mode==="resize-start"?resizeNote(note,"start",rawDx,props.settings,props.playback.duration):drag.mode==="resize-end"?resizeNote(note,"end",rawDx,props.settings,props.playback.duration):shiftNote(note,dx,dy);const x1=coords.x(ghost.start),x2=coords.x(ghost.end);ctx.save();ctx.globalAlpha=.72;ctx.setLineDash([5,3]);
         if((ghost.kind??"note")==="curve"){const steps=Math.max(8,Math.min(96,Math.round((ghost.end-ghost.start)/.02)));ctx.beginPath();for(let i=0;i<=steps;i++){const u=i/steps;i?ctx.lineTo(coords.x(ghost.start+(ghost.end-ghost.start)*u),coords.y(noteMidiAt(ghost,u))):ctx.moveTo(coords.x(ghost.start),coords.y(noteMidiAt(ghost,0)))}ctx.strokeStyle=drag.mode==="duplicate-move"?"#67e8a7":"#8dd7ff";ctx.lineWidth=3;ctx.stroke()}else{const yt=coords.y(ghost.midi+.43),yb=coords.y(ghost.midi-.43);ctx.fillStyle=drag.mode==="duplicate-move"?"rgba(72,220,145,.45)":"rgba(90,190,255,.38)";ctx.fillRect(x1,yt,Math.max(2,x2-x1),Math.max(2,yb-yt));ctx.strokeStyle=drag.mode==="duplicate-move"?"#7af0b2":"#9ddcff";ctx.strokeRect(x1,yt,Math.max(2,x2-x1),Math.max(2,yb-yt))}ctx.restore()}
     }
-    if(drag){const shownStart=drag.mode==="cut-range"?snapTime(props.settings,props.playback.duration,drag.startTime):drag.startTime,shownNow=drag.mode==="cut-range"?snapTime(props.settings,props.playback.duration,drag.nowTime):drag.nowTime,x1=coords.x(shownStart),x2=coords.x(shownNow),y1=coords.y(drag.startMidi),y2=coords.y(drag.nowMidi);ctx.save();ctx.setLineDash([6,4]);if(drag.mode==="cut-range"){ctx.strokeStyle="rgba(255,120,120,.98)";ctx.fillStyle="rgba(255,80,80,.2)";ctx.fillRect(Math.min(x1,x2),0,Math.abs(x2-x1),size.height);ctx.strokeRect(Math.min(x1,x2),0,Math.abs(x2-x1),size.height)}else{ctx.strokeStyle="rgba(255,255,255,.9)";ctx.fillStyle="rgba(70,175,255,.16)";if(drag.mode==="region"){ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1))}else if(drag.mode==="create"){const ym=coords.y((drag.startMidi+drag.nowMidi)/2),rh=Math.abs(coords.y(0)-coords.y(.9));ctx.fillRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);ctx.strokeRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh)}else if(drag.mode==="curve"){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}}ctx.restore()}
+    if(drag){
+      const shownStart=drag.mode==="cut-range"?snapTime(props.settings,props.playback.duration,drag.startTime):drag.startTime;
+      const shownNow=drag.mode==="cut-range"?snapTime(props.settings,props.playback.duration,drag.nowTime):drag.nowTime;
+      const x1=coords.x(shownStart),x2=coords.x(shownNow),y1=coords.y(drag.startMidi),y2=coords.y(drag.nowMidi);
+      ctx.save();ctx.setLineDash([6,4]);
+      if(drag.mode==="cut-range"){
+        ctx.strokeStyle="rgba(255,120,120,.98)";ctx.fillStyle="rgba(255,80,80,.2)";
+        ctx.fillRect(Math.min(x1,x2),0,Math.abs(x2-x1),size.height);ctx.strokeRect(Math.min(x1,x2),0,Math.abs(x2-x1),size.height);
+      }else{
+        ctx.strokeStyle=drag.mode==="track-region"?"rgba(255,235,95,.98)":"rgba(255,255,255,.9)";ctx.fillStyle=drag.mode==="track-region"?"rgba(255,220,70,.14)":"rgba(70,175,255,.16)";
+        if(drag.mode==="region"||drag.mode==="track-region"){ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));}
+        else if(drag.mode==="create"){const ym=coords.y((drag.startMidi+drag.nowMidi)/2),rh=Math.abs(coords.y(0)-coords.y(.9));ctx.fillRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);ctx.strokeRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);}
+        else if(drag.mode==="curve"){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();}
+      }
+      ctx.restore();
+    }
     const x=coords.x(props.playback.time);if(x>=0&&x<=size.width){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,size.height);ctx.strokeStyle="rgba(255,255,255,.92)";ctx.lineWidth=2;ctx.stroke()}
   },[coords,drag,props.notes,props.playback.duration,props.playback.time,props.settings,size]);
+
+  function hoveredTrack(px:number,py:number){
+    if(!decodedTracks||props.view.mode==="notes")return null;
+    let bestDistance=64,best:null|{id:number;frequency:number;noteName:string;duration:number;magnitude:number}=null;
+    for(let i=0;i<decodedTracks.count;i+=1){
+      const bx=coords.x(decodedTracks.times[i]),by=coords.y(decodedTracks.midis[i]);let distance=(px-bx)**2+(py-by)**2,midi=decodedTracks.midis[i],magnitude=decodedTracks.magnitudes[i];
+      if((decodedTracks.flags[i]&1)===0&&i>0&&decodedTracks.ids[i]===decodedTracks.ids[i-1]){
+        const ax=coords.x(decodedTracks.times[i-1]),ay=coords.y(decodedTracks.midis[i-1]),dx=bx-ax,dy=by-ay,length=Math.max(1e-9,dx*dx+dy*dy),fraction=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/length)),qx=ax+dx*fraction,qy=ay+dy*fraction;
+        distance=(px-qx)**2+(py-qy)**2;midi=decodedTracks.midis[i-1]+(decodedTracks.midis[i]-decodedTracks.midis[i-1])*fraction;magnitude=decodedTracks.magnitudes[i-1]+(decodedTracks.magnitudes[i]-decodedTracks.magnitudes[i-1])*fraction;
+      }
+      if(distance<bestDistance){bestDistance=distance;best={id:decodedTracks.ids[i],frequency:midiToHz(midi),noteName:midiLabel(midi),duration:decodedTracks.durations[i],magnitude};}
+    }
+    return best;
+  }
 
   function eventPosition(event: ReactPointerEvent<HTMLCanvasElement>|ReactMouseEvent<HTMLCanvasElement>){
     const r=event.currentTarget.getBoundingClientRect(),x=event.clientX-r.left,y=event.clientY-r.top;
@@ -209,16 +312,19 @@ export default function EditorCanvas(props: Props) {
     const n=props.notes[index];if(!n)return null;
     return noteEdgeAt(coords.x(n.start),coords.x(n.end),px);
   }
+  function clearTrackSelection(){setSelectedTracks([]);setTrackRange(null);setUseTrackRange(false);}
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
     if(event.button!==0)return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const p=eventPosition(event);
     if(event.ctrlKey&&event.altKey&&props.selected.length){
+      clearTrackSelection();
       setDrag({mode:"cut-range",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:props.selected});
       return;
     }
     const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.spectrum?.pitchStep??1);
     if(hit!==null){
+      clearTrackSelection();
       let next=props.selected;
       if(event.ctrlKey){next=props.selected.includes(hit)?props.selected.filter(x=>x!==hit):[...props.selected,hit];props.onSelect(next);return;}
       if(event.shiftKey){next=Array.from(new Set([...props.selected,hit])).sort((a,b)=>a-b);props.onSelect(next);return;}
@@ -228,20 +334,41 @@ export default function EditorCanvas(props: Props) {
       setDrag({mode,startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:next});
       return;
     }
+    const trackHit=hoveredTrack(p.x,p.y);
+    if(trackHit){
+      setSelectedTracks(current=>updateTrackSelection(current,trackHit.id,event.ctrlKey));
+      setTrackRange(null);setUseTrackRange(false);props.onSelect([]);
+      return;
+    }
+    if(event.shiftKey&&decodedTracks){
+      setDrag({mode:"track-region",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:[],trackAdditive:event.ctrlKey});
+      return;
+    }
+    clearTrackSelection();
     setDrag({mode:event.ctrlKey?"region":event.altKey?"curve":"create",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:[]});
   }
   function onPointerMove(event:ReactPointerEvent<HTMLCanvasElement>){
     const p=eventPosition(event);
     if(drag){setDrag({...drag,nowTime:p.time,nowMidi:p.midi});return;}
     const now=performance.now();
-    if(props.onCursorMove&&now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove(p.time,p.midi);}
+    const track=hoveredTrack(p.x,p.y);
+    if(now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove?.(p.time,p.midi);props.onTrackHover?.(track);}
     if(event.ctrlKey&&event.altKey&&props.selected.length){event.currentTarget.style.cursor="crosshair";return;}
     const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.spectrum?.pitchStep??1);
-    event.currentTarget.style.cursor=hit!==null&&!event.altKey&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":"crosshair";
+    event.currentTarget.style.cursor=hit!==null&&!event.altKey&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":track?"pointer":"crosshair";
   }
   async function onPointerUp(event:ReactPointerEvent<HTMLCanvasElement>){
     if(!drag)return;
     const p=eventPosition(event),cur={...drag,nowTime:p.time,nowMidi:p.midi};setDrag(null);
+    if(cur.mode==="track-region"){
+      const range=normalizeTrackRange(cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi);
+      if(range.endTime-range.startTime>=.001){
+        const ids=await props.onFindTracks(range);
+        setSelectedTracks(current=>mergeTrackSelection(current,ids,Boolean(cur.trackAdditive)));
+        setTrackRange(range);setUseTrackRange(ids.length>0);props.onSelect([]);
+      }
+      return;
+    }
     if(cur.mode==="cut-range"){
       const a=snapTime(props.settings,props.playback.duration,cur.startTime),b=snapTime(props.settings,props.playback.duration,cur.nowTime);
       if(Math.abs(b-a)>=.001)await props.onCutRange(cur.indices,Math.min(a,b),Math.max(a,b));
@@ -273,10 +400,34 @@ export default function EditorCanvas(props: Props) {
   }
   function onWheel(event:ReactWheelEvent<HTMLCanvasElement>){
     event.preventDefault();const sign=event.deltaY<0?1:-1;
-    if(event.shiftKey)void props.onView({pitchBottom:props.view.pitchBottom+sign*3});
-    else if(event.altKey)void props.onView({visibleNotes:props.view.visibleNotes-sign*4});
+    if(event.shiftKey){
+      const maxBottom=Math.max(0,128-props.view.visibleNotes);
+      void props.onView({pitchBottom:Math.max(0,Math.min(maxBottom,props.view.pitchBottom+sign*3))});
+    }
+    else if(event.altKey){
+      const visibleNotes=Math.max(6,Math.min(128,props.view.visibleNotes-sign*4));
+      const pitchBottom=Math.max(0,Math.min(props.view.pitchBottom,128-visibleNotes));
+      void props.onView({visibleNotes,pitchBottom});
+    }
     else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
     else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
   }
-  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り（スナップ対応）" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/><canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/></div>;
+  async function convertSelectedTracks(mode:"fixed"|"curve"){
+    if(!selectedTracks.length||convertingTracks)return;
+    setConvertingTracks(true);
+    try{await props.onConvertTracks(selectedTracks,mode,useTrackRange?trackRange:null);}finally{setConvertingTracks(false)}
+  }
+
+  const panelButtonStyle={border:"1px solid #22262b",borderRadius:5,background:"#454c54",color:"#eef2f6",padding:"5px 8px",minHeight:28,cursor:"pointer"} as const;
+  return <div className="canvas-wrap" ref={containerRef}>
+    <canvas ref={canvasRef} title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/>
+    <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
+    {selectedTracks.length>0&&<div onPointerDown={event=>event.stopPropagation()} style={{position:"absolute",zIndex:4,top:8,right:8,display:"flex",alignItems:"center",gap:7,padding:"7px 9px",border:"1px solid #545c64",borderRadius:6,background:"rgba(35,40,46,.94)",boxShadow:"0 2px 10px rgba(0,0,0,.35)",fontSize:12}}>
+      <strong>Track {selectedTracks.length}本</strong>
+      {trackRange&&<label style={{display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}><input type="checkbox" checked={useTrackRange} onChange={event=>setUseTrackRange(event.target.checked)}/>矩形範囲 {trackRange.startTime.toFixed(2)}–{trackRange.endTime.toFixed(2)}s</label>}
+      <button style={panelButtonStyle} disabled={convertingTracks} onClick={()=>void convertSelectedTracks("fixed")}>固定Note化</button>
+      <button style={panelButtonStyle} disabled={convertingTracks} onClick={()=>void convertSelectedTracks("curve")}>Curve Note化</button>
+      <button style={panelButtonStyle} disabled={convertingTracks} onClick={clearTrackSelection}>解除</button>
+    </div>}
+  </div>;
 }
