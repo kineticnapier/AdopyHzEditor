@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from fractions import Fraction
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from functools import wraps
 import json
 import math
 from typing import Any
@@ -16,9 +19,35 @@ from exporters.adofai_angles import (
 
 EPS = 1e-9
 
-CURRENT_VISUAL_ROUTE_STATE: dict[str, Any] | None = None
-CURRENT_TWIRL_ACTIVE = False
-CURRENT_GENERATED_RELATIVES: list[float] = []
+
+@dataclass
+class _BuildContext:
+    visual_route_state: dict[str, Any] | None = None
+    twirl_active: bool = False
+    generated_relatives: list[float] = field(default_factory=list)
+
+
+_BUILD_CONTEXT: ContextVar[_BuildContext | None] = ContextVar("adofai_build_context", default=None)
+
+
+def _build_context() -> _BuildContext:
+    context = _BUILD_CONTEXT.get()
+    if context is None:
+        context = _BuildContext()
+        _BUILD_CONTEXT.set(context)
+    return context
+
+
+def _with_isolated_build_context(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        token = _BUILD_CONTEXT.set(_BuildContext())
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _BUILD_CONTEXT.reset(token)
+
+    return wrapped
 
 AUTO_ROUTE_LOOKAHEAD = 32
 AUTO_ROUTE_MIN_TWIRL_GAP = 4
@@ -59,10 +88,11 @@ def add_relative(angle_data: list[Any], rel: float, *, twirled: bool | None = No
     # Record the requested relative angle. For twirl upward exports, angleData is
     # rebuilt from this list and the actual Twirl action floors at the end of
     # build_adofai_level(), so floor/index timing cannot drift.
-    CURRENT_GENERATED_RELATIVES.append(clean_relative_angle(rel))
+    context = _build_context()
+    context.generated_relatives.append(clean_relative_angle(rel))
 
     prev = float(angle_data[-1])
-    active = CURRENT_TWIRL_ACTIVE if twirled is None else bool(twirled)
+    active = context.twirl_active if twirled is None else bool(twirled)
     if active:
         # Twirl applies to this tile's relative-angle formula.
         cur = prev - 180.0 + float(rel)
@@ -124,20 +154,21 @@ def apply_twirl_angledata_rebuild(
 ) -> dict[str, int | float]:
     if not visual_path_twirl_enabled(visual_path_mode):
         return {}
-    if not CURRENT_GENERATED_RELATIVES:
+    context = _build_context()
+    if not context.generated_relatives:
         return {}
 
     twirl_floors, route_stats = plan_auto_route_twirls(
-        CURRENT_GENERATED_RELATIVES,
+        context.generated_relatives,
         preferred_heading=visual_path_angle,
         meaningful_floors=meaningful_floors,
     )
     actions.extend(twirl_event(floor) for floor in twirl_floors)
-    rebuilt = rebuild_angle_data_from_relatives(CURRENT_GENERATED_RELATIVES, actions)
+    rebuilt = rebuild_angle_data_from_relatives(context.generated_relatives, actions)
     angle_data[:] = rebuilt
 
-    if CURRENT_VISUAL_ROUTE_STATE is not None:
-        CURRENT_VISUAL_ROUTE_STATE.update(route_stats)
+    if context.visual_route_state is not None:
+        context.visual_route_state.update(route_stats)
     return route_stats
 
 
@@ -184,12 +215,12 @@ def twirl_event(floor: int) -> dict[str, Any]:
 
 
 def consume_pending_visual_twirl(actions: list[dict[str, Any]], floor: int) -> None:
-    state = CURRENT_VISUAL_ROUTE_STATE
+    state = _build_context().visual_route_state
     if state is None or not state.get("pending_twirl"):
         return
 
     # Keep the Twirl event on the generated tile's floor. The timing of the
-    # reversed relative-angle formula is handled by toggling CURRENT_TWIRL_ACTIVE
+    # reversed relative-angle formula is handled by the build context's Twirl state
     # before add_relative() for this same tile; do not shift the event floor.
     actions.append(twirl_event(floor))
     state["pending_twirl"] = False
@@ -618,10 +649,9 @@ def shape_visual_relative(
       bounded-lookahead post-pass plans Twirls over the complete sequence and
       then rebuilds absolute angleData from those same timing relatives.
     """
-    global CURRENT_TWIRL_ACTIVE
-
+    context = _build_context()
     base_rel = clean_relative_angle(rel)
-    current_twirl = bool(CURRENT_TWIRL_ACTIVE)
+    current_twirl = bool(context.twirl_active)
 
     if not visual_path_enabled(visual_path_mode):
         return base_rel, False, current_twirl
@@ -637,7 +667,7 @@ def shape_visual_relative(
             angle_data,
             base_rel,
             preferred_heading=visual_path_angle,
-            route_state=CURRENT_VISUAL_ROUTE_STATE,
+            route_state=context.visual_route_state,
         )
         return shaped, changed, current_twirl
 
@@ -3202,6 +3232,7 @@ def emit_harmony_polyrhythm(
     return floor, emitted, current_bpm, tiny_intervals, remapped_angles, target_angle_used, setspeed_events, visual_path_tiles, harmony_pause_events, harmony_rest_seconds
 
 
+@_with_isolated_build_context
 def build_adofai_level(
     notes: list[Note],
     *,
@@ -3249,20 +3280,20 @@ def build_adofai_level(
     actions = level["actions"]
     apply_track_visual(level, actions, track_visual)
 
-    global CURRENT_VISUAL_ROUTE_STATE, CURRENT_TWIRL_ACTIVE, CURRENT_GENERATED_RELATIVES
-    CURRENT_TWIRL_ACTIVE = False
-    CURRENT_GENERATED_RELATIVES = []
+    context = _build_context()
+    context.twirl_active = False
+    context.generated_relatives = []
     if visual_path_avoid_enabled(visual_path_mode):
-        CURRENT_VISUAL_ROUTE_STATE = make_visual_route_state(angle_data)
+        context.visual_route_state = make_visual_route_state(angle_data)
     elif visual_path_twirl_enabled(visual_path_mode):
-        CURRENT_VISUAL_ROUTE_STATE = {
+        context.visual_route_state = {
             "twirl_turns": 0,
             "planner_lookahead": AUTO_ROUTE_LOOKAHEAD,
             "max_downward_run": 0,
             "max_heading_deviation": 0.0,
         }
     else:
-        CURRENT_VISUAL_ROUTE_STATE = None
+        context.visual_route_state = None
 
     method_key = (method or "rabbit_zip").lower().replace(" ", "_").replace("-", "_")
     use_phase_continuous_glide = bool(phase_continuous_glide)
@@ -3353,11 +3384,11 @@ def build_adofai_level(
             "visual_position_y": round(float(visual_position_y), 6),
             "position_track_events": 0,
             "visual_path_tiles": visual_path_tiles,
-            "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
-            "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
-            "visual_route_twirls": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("twirl_turns", 0)),
-            "visual_route_max_downward_run": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("max_downward_run", 0)),
-            "visual_route_max_heading_deviation": float((CURRENT_VISUAL_ROUTE_STATE or {}).get("max_heading_deviation", 0.0)),
+            "visual_route_avoid_turns": int((context.visual_route_state or {}).get("avoid_turns", 0)),
+            "visual_route_base_safe_tiles": int((context.visual_route_state or {}).get("base_safe_tiles", 0)),
+            "visual_route_twirls": int((context.visual_route_state or {}).get("twirl_turns", 0)),
+            "visual_route_max_downward_run": int((context.visual_route_state or {}).get("max_downward_run", 0)),
+            "visual_route_max_heading_deviation": float((context.visual_route_state or {}).get("max_heading_deviation", 0.0)),
             "phase_continuous_glide": bool(use_phase_continuous_glide),
             "input_notes_total": len(notes),
             "base_bpm": round(float(base_bpm), 6),
@@ -3592,11 +3623,11 @@ def build_adofai_level(
         "visual_position_x": round(float(visual_position_x), 6),
         "visual_position_y": round(float(visual_position_y), 6),
         "position_track_events": position_track_events,
-        "visual_route_avoid_turns": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("avoid_turns", 0)),
-        "visual_route_base_safe_tiles": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("base_safe_tiles", 0)),
-        "visual_route_twirls": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("twirl_turns", 0)),
-        "visual_route_max_downward_run": int((CURRENT_VISUAL_ROUTE_STATE or {}).get("max_downward_run", 0)),
-        "visual_route_max_heading_deviation": float((CURRENT_VISUAL_ROUTE_STATE or {}).get("max_heading_deviation", 0.0)),
+        "visual_route_avoid_turns": int((context.visual_route_state or {}).get("avoid_turns", 0)),
+        "visual_route_base_safe_tiles": int((context.visual_route_state or {}).get("base_safe_tiles", 0)),
+        "visual_route_twirls": int((context.visual_route_state or {}).get("twirl_turns", 0)),
+        "visual_route_max_downward_run": int((context.visual_route_state or {}).get("max_downward_run", 0)),
+        "visual_route_max_heading_deviation": float((context.visual_route_state or {}).get("max_heading_deviation", 0.0)),
         "curve_step_sec": round(float(curve_step_sec), 6),
         "curve_pitch_step": round(float(curve_pitch_step), 6),
         "phase_continuous_glide": bool(use_phase_continuous_glide),
