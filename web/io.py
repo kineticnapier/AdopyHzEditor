@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Any
 
 import webview
-from mido import MidiFile, merge_tracks, tick2second
 
 from exporters.adofai import build_adofai_level
 from exporters.midi import export_midi
+from importers.midi import import_midi
 from core.note_model import Note
 from core.project_io import load_project, save_project
 
@@ -169,18 +169,7 @@ class IOMixin:
     def import_midi_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.OPEN,file_types=MIDI_FILE_TYPES)
         if not path:return self.get_state()
-        midi=MidiFile(path);tempo=500000;now=0.0;active:dict[tuple[int,int],list[tuple[float,int]]]={};imported:list[Note]=[]
-        for msg in merge_tracks(midi.tracks):
-            now+=tick2second(msg.time,midi.ticks_per_beat,tempo)
-            if msg.type=="set_tempo":tempo=int(msg.tempo);continue
-            if msg.type=="note_on" and int(msg.velocity)>0:
-                key=(int(getattr(msg,"channel",0)),int(msg.note));active.setdefault(key,[]).append((now,int(msg.velocity)))
-            elif msg.type in {"note_off","note_on"}:
-                key=(int(getattr(msg,"channel",0)),int(msg.note));stack=active.get(key)
-                if stack:
-                    start,velocity=stack.pop(0)
-                    if now>start:imported.append(Note(start,now,float(msg.note),velocity).normalized())
-        imported.sort(key=lambda n:(n.start,n.midi,n.end))
+        result=import_midi(path);imported=result.notes
         with self._lock:
             self._push_undo();self.notes.extend(imported);self.notes.sort(key=lambda n:(n.start,n.midi,n.end))
             if imported:self.duration=max(self.duration,max(n.end for n in imported))

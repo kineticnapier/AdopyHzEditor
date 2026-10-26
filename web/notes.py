@@ -44,7 +44,12 @@ class NoteMixin:
     def _snap_pitch(self, midi: float) -> float:
         step = max(1e-6, float(self.pitch_step))
         snapped = round(float(midi) / step) * step
-        return _clamp(snapped, float(self.midi_min), float(self.midi_max))
+        return self._clamp_pitch(snapped)
+
+    @staticmethod
+    def _clamp_pitch(midi: float) -> float:
+        """Clamp editable MIDI data independently from the analysis viewport."""
+        return _clamp(midi, 0.0, 127.0)
 
     def _curve_controls(self, p0: float, p3: float) -> tuple[float, float]:
         d = float(p3) - float(p0)
@@ -83,6 +88,8 @@ class NoteMixin:
             if b - a < 0.001:
                 step = 60.0 / max(1e-6, float(self.settings["bpm"])) / max(1, int(self.settings["snapDiv"])) if self.settings["snapEnabled"] else 0.02
                 b = min(self.duration, a + max(0.02, step))
+                if b - a < 0.001:
+                    a = max(0.0, b - max(0.001, min(0.02, self.duration)))
             p0 = self._snap_pitch(midi)
             self._push_undo()
             if str(kind) == "curve":
@@ -134,7 +141,7 @@ class NoteMixin:
             for n in original:
                 pitch_values.extend(v for v in (n.midi, n.midi_end, n.ctrl1_midi, n.ctrl2_midi) if v is not None)
             if pitch_values:
-                dy = _clamp(dy, self.midi_min - min(pitch_values), self.midi_max - max(pitch_values))
+                dy = _clamp(dy, -min(pitch_values), 127.0 - max(pitch_values))
 
             # Snap the group using its first note so relative spacing is preserved.
             if self.settings["snapEnabled"] and original:
@@ -204,7 +211,7 @@ class NoteMixin:
                     start = max(0.0, end - 0.001)
             updated = self._with_times(n, start, end)
             if "midi" in changes:
-                target = self._snap_pitch(float(changes["midi"]))
+                target = self._clamp_pitch(float(changes["midi"]))
                 updated = updated.with_pitch_offset(target - updated.midi)
             if "velocity" in changes:
                 v = max(0, min(127, int(round(float(changes["velocity"])))))
@@ -343,12 +350,11 @@ class NoteMixin:
             if not self._clipboard:
                 return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "クリップボードは空です"}
             self._push_undo()
-            base = _clamp(at_time, 0.0, self.duration)
+            clipboard_end = max(item.normalized().end for item in self._clipboard)
+            base = _clamp(at_time, 0.0, max(0.0, self.duration - clipboard_end))
             new_indices: list[int] = []
             for item in self._clipboard:
                 pasted = item.with_time_offset(base).normalized()
-                if pasted.end > self.duration:
-                    pasted = pasted.shifted(dx=max(0.0, self.duration - pasted.end))
                 self.notes.append(pasted)
                 new_indices.append(len(self.notes) - 1)
             self._dirty = True

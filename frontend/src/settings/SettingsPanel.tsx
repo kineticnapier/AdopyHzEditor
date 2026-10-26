@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import NotePresetPanel from "./NotePresetPanel";
 import type { AppState, BackendApi, EditorSettings, NoteDto, NoteMutationResult } from "./bridge";
+import { commitNumericText } from "./numericInputModel";
 
 type Page = "note" | "playback" | "export" | "grid" | "view" | "analysis" | "curve";
 const pages: Array<[Page, string]> = [["note","ノート"],["playback","再生"],["export","出力"],["grid","グリッド"],["view","表示"],["analysis","解析"],["curve","カーブ"]];
@@ -119,5 +120,10 @@ function BulkEditor({api,selected,onMutation,onStatus}:{api:BackendApi;selected:
 
 function Row({label,children}:{label:string;children:ReactNode}){return <label className="row"><span>{label}</span><div>{children}</div></label>}
 function Range({value,min=0,max=100,disabled=false,onChange}:{value:number;min?:number;max?:number;disabled?:boolean;onChange(v:number):void}){return <div className="range-wrap"><input type="range" min={min} max={max} value={value} disabled={disabled} onChange={e=>onChange(+e.target.value)}/><output>{value}</output></div>}
-function NumberInput({value,min,max,step,suffix,disabled=false,onChange}:{value:number;min:number;max:number;step:number;suffix?:string;disabled?:boolean;onChange(v:number):void}){return <div className="number-wrap"><input type="number" value={Number.isFinite(value)?value:0} min={min} max={max} step={step} disabled={disabled} onChange={e=>{const v=+e.target.value;if(Number.isFinite(v))onChange(v)}}/>{suffix&&<span>{suffix}</span>}</div>}
+function NumberInput({value,min,max,step,suffix,disabled=false,onChange}:{value:number;min:number;max:number;step:number;suffix?:string;disabled?:boolean;onChange(v:number):void}){
+  const fallback=Number.isFinite(value)?value:0,[text,setText]=useState(String(fallback)),[editing,setEditing]=useState(false);
+  useEffect(()=>{if(!editing)setText(String(fallback))},[editing,fallback]);
+  function commit(){const next=commitNumericText(text,fallback,min,max);setEditing(false);setText(String(next));if(next!==fallback)onChange(next)}
+  return <div className="number-wrap"><input type="number" value={text} min={min} max={max} step={step} disabled={disabled} onFocus={()=>setEditing(true)} onChange={e=>setText(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();else if(e.key==="Escape"){setText(String(fallback));e.currentTarget.blur()}}}/>{suffix&&<span>{suffix}</span>}</div>
+}
 function Select({value,options,disabled=false,onChange}:{value:string;options:Array<[string,string]>;disabled?:boolean;onChange(v:string):void}){return <select value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}>{options.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}

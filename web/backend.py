@@ -366,6 +366,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             if "start" in changes:
                 max_start = max(0.0, self.duration - float(self.view["windowSeconds"]))
                 self.view["start"] = _clamp(changes["start"], 0.0, max_start)
+            elif "windowSeconds" in changes:
+                max_start = max(0.0, self.duration - float(self.view["windowSeconds"]))
+                self.view["start"] = _clamp(self.view["start"], 0.0, max_start)
             if "pitchBottom" in changes:
                 self.view["pitchBottom"] = _int_clamp(changes["pitchBottom"], 0, 127)
             if "visibleNotes" in changes:
@@ -575,7 +578,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             "time": float(state.position),
             "duration": float(max(self.duration, state.duration, 0.001)),
             "playing": bool(state.playing),
-            "available": bool(state.audio_loaded or self.duration > 0),
+            "available": bool(self.player.available and (state.audio_loaded or self.duration > 0)),
             "error": state.error,
         }
 

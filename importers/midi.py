@@ -428,7 +428,7 @@ def import_midi(path: str | Path, *, min_duration_seconds: float = 0.001) -> Mid
     # Sort note_off before note_on at the same tick so repeated notes do not
     # accidentally overlap forever.
     type_order = {"note_off": 0, "note_on": 1}
-    all_events.sort(key=lambda e: (int(e["tick"]), int(e.get("track", 0)), type_order.get(str(e["type"]), 9)))
+    all_events.sort(key=lambda e: (int(e["tick"]), type_order.get(str(e["type"]), 9), int(e.get("track", 0))))
 
     active: dict[tuple[int, int], list[dict[str, Any]]] = {}
     notes: list[Note] = []

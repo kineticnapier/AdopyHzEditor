@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import type { EditorSettings, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
+import { noteIntersects, noteMidiAt, spectrogramPitchCrop } from "./editorMath";
 
 type Props = {
   notes: NoteDto[];
@@ -23,18 +24,6 @@ type Props = {
 type DragMode = "create" | "curve" | "region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
 type DragState = { mode: DragMode; startTime: number; startMidi: number; nowTime: number; nowMidi: number; indices: number[] };
 
-function midiToHz(midi: number) { return 440 * 2 ** ((midi - 69) / 12); }
-function hzToMidi(hz: number) { return 69 + 12 * Math.log2(Math.max(1e-9, hz) / 440); }
-function cubic(p0: number, p1: number, p2: number, p3: number, u: number) { const v = 1 - u; return v ** 3 * p0 + 3 * v ** 2 * u * p1 + 3 * v * u ** 2 * p2 + u ** 3 * p3; }
-function noteMidiAt(note: NoteDto, u: number) {
-  if ((note.kind ?? "note") !== "curve") return note.midi;
-  const p0 = note.midi, p3 = note.midi_end ?? p0, p1 = note.ctrl1_midi ?? p0, p2 = note.ctrl2_midi ?? p3, t = Math.max(0, Math.min(1, u));
-  const mode = note.interpolation ?? "bezier_pitch";
-  if (mode === "linear_pitch") return p0 + (p3 - p0) * t;
-  if (mode === "linear_hz") return hzToMidi(midiToHz(p0) + (midiToHz(p3) - midiToHz(p0)) * t);
-  if (mode === "bezier_hz" || mode === "hz_bezier") return hzToMidi(cubic(midiToHz(p0), midiToHz(p1), midiToHz(p2), midiToHz(p3), t));
-  return cubic(p0, p1, p2, p3, t);
-}
 function hitNote(notes: NoteDto[], time: number, midi: number, pitchStep = 1) {
   const hits: Array<[number, number]> = [];
   notes.forEach((note, index) => {
@@ -46,19 +35,6 @@ function hitNote(notes: NoteDto[], time: number, midi: number, pitchStep = 1) {
   });
   hits.sort((a, b) => a[0] - b[0]);
   return hits[0]?.[1] ?? null;
-}
-function noteIntersects(note: NoteDto, x1: number, x2: number, y1: number, y2: number) {
-  const xmin = Math.min(x1, x2), xmax = Math.max(x1, x2), ymin = Math.min(y1, y2), ymax = Math.max(y1, y2);
-  if (note.end < xmin || note.start > xmax) return false;
-  if ((note.kind ?? "note") !== "curve") return note.midi + .55 >= ymin && note.midi - .55 <= ymax;
-  for (let i = 0; i <= 32; i += 1) {
-    const u = i / 32, t = note.start + (note.end - note.start) * u;
-    if (t >= xmin && t <= xmax) {
-      const y = noteMidiAt(note, u);
-      if (y + .55 >= ymin && y - .55 <= ymax) return true;
-    }
-  }
-  return false;
 }
 function colorFor(v: number, map: string): [number, number, number] {
   const x = Math.max(0, Math.min(1, v));
@@ -164,8 +140,8 @@ export default function EditorCanvas(props: Props) {
 
     if (spectrumCanvas && props.view.mode !== "notes" && decoded?.duration && decoded.midiMin !== undefined && decoded.midiMax !== undefined) {
       const sx=Math.max(0,props.view.start/decoded.duration*decoded.cols), sw=Math.max(1,Math.min(decoded.cols-sx,props.view.windowSeconds/decoded.duration*decoded.cols));
-      const full=Math.max(1e-6,decoded.midiMax-decoded.midiMin+1), top=props.view.pitchBottom+props.view.visibleNotes-.5,bottom=props.view.pitchBottom-.5;
-      const sy=Math.max(0,(decoded.midiMax+.5-top)/full*decoded.rows), sh=Math.max(1,Math.min(decoded.rows-sy,(top-bottom)/full*decoded.rows));
+      const top=props.view.pitchBottom+props.view.visibleNotes-.5,bottom=props.view.pitchBottom-.5;
+      const {sy,sh}=spectrogramPitchCrop(decoded.rows,decoded.midiMin,decoded.pitchStep??1,bottom,top);
       ctx.save(); ctx.globalAlpha=props.view.mode==="spec"?1:.7; ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
       ctx.drawImage(spectrumCanvas,sx,sy,sw,sh,0,0,w,h); ctx.restore();
     }
