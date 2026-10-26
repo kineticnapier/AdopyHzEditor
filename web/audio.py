@@ -89,6 +89,9 @@ class WebAudioPlayer(AudioPlayer):
         with self.lock:
             pos = int(self.pos)
             pos_float = float(self._pos_float)
-            super().stop()
+
+        super().stop()
+
+        with self.lock:
             self.pos = pos
             self._pos_float = pos_float

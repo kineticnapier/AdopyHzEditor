@@ -11,14 +11,12 @@ type Props={
 
 export default function Timeline({view,playback,followPlayback,onFollowPlayback,onView,onFit}:Props){
   const max=Math.max(0,playback.duration-view.windowSeconds);
+  const pitchTop=Math.min(128,view.pitchBottom+view.visibleNotes);
   return <div className="timeline">
-    <b>タイムライン</b>
-    <input aria-label="表示開始位置" type="range" min={0} max={Math.max(.001,max)} step={Math.max(.001,max/1000)} value={Math.min(view.start,max)} onChange={e=>onView({start:+e.target.value})}/>
-    <label htmlFor="timeline-window-seconds">表示秒数</label><input id="timeline-window-seconds" type="number" min={.2} max={Math.max(.2,playback.duration)} step={.1} value={view.windowSeconds} onChange={e=>onView({windowSeconds:+e.target.value})}/>
-    <label htmlFor="timeline-pitch-bottom">下端音高</label><input id="timeline-pitch-bottom" type="number" min={0} max={127} value={view.pitchBottom} onChange={e=>onView({pitchBottom:+e.target.value})}/>
-    <button aria-label="下端音高を12下げる" onClick={()=>onView({pitchBottom:view.pitchBottom-12})}>−12</button><button aria-label="下端音高を12上げる" onClick={()=>onView({pitchBottom:view.pitchBottom+12})}>+12</button>
-    <label htmlFor="timeline-visible-notes">音域</label><input id="timeline-visible-notes" type="number" min={6} max={128} value={view.visibleNotes} onChange={e=>onView({visibleNotes:+e.target.value})}/>
-    <button onClick={onFit}>全体表示</button>
-    <label className="timeline-follow"><input type="checkbox" checked={followPlayback} onChange={e=>onFollowPlayback(e.target.checked)}/>再生追従</label>
+    <input className="timeline-slider" aria-label="表示開始位置" type="range" min={0} max={Math.max(.001,max)} step={Math.max(.001,max/1000)} value={Math.min(view.start,max)} onChange={e=>onView({start:+e.target.value})}/>
+    <label className="timeline-field" htmlFor="timeline-window-seconds"><span>Window</span><input id="timeline-window-seconds" type="number" min={.2} max={Math.max(.2,playback.duration)} step={.1} value={view.windowSeconds} onChange={e=>onView({windowSeconds:+e.target.value})}/><small>s</small></label>
+    <label className="timeline-field pitch-field"><span>Pitch</span><input aria-label="下端音高" type="number" min={0} max={127} step={1} value={view.pitchBottom} onChange={e=>onView({pitchBottom:+e.target.value})}/><small>–</small><input aria-label="上端音高" type="number" min={Math.min(128,view.pitchBottom+6)} max={128} step={1} value={pitchTop} onChange={e=>onView({visibleNotes:Math.max(6,Math.min(128,+e.target.value-view.pitchBottom))})}/></label>
+    <button onClick={onFit} title="全体表示">Fit</button>
+    <label className="timeline-follow"><input type="checkbox" checked={followPlayback} onChange={e=>onFollowPlayback(e.target.checked)}/>Follow</label>
   </div>;
 }
