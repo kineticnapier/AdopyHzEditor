@@ -301,6 +301,10 @@ export default function EditorCanvas(props: Props) {
       await props.onAdd(a,b,p0,"curve",p3);
     }else await props.onAdd(a,b,(cur.startMidi+cur.nowMidi)/2,"note",cur.nowMidi);
   }
+  function cancelDrag(event:ReactPointerEvent<HTMLCanvasElement>){
+    if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);
+    setDrag(null);
+  }
   async function onContextMenu(event:ReactMouseEvent<HTMLCanvasElement>){
     event.preventDefault();const p=eventPosition(event),hit=hitNote(props.notes,p.time,p.midi,props.spectrum?.pitchStep??1);if(hit===null)return;
     await props.onDelete(props.selected.includes(hit)&&props.selected.length>1?props.selected:[hit]);
@@ -312,5 +316,5 @@ export default function EditorCanvas(props: Props) {
     else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
     else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
   }
-  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り（スナップ対応）" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/></div>;
+  return <div className="canvas-wrap" ref={containerRef}><canvas ref={canvasRef} title="Ctrl+Alt+ドラッグ: 選択ノートの時間範囲を切り取り（スナップ対応）" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/></div>;
 }

@@ -101,6 +101,7 @@ class IOMixin:
         prepared_notes=[n.normalized() for n in notes]
         prepared_settings=self._normalized_project_settings(settings)
         prepared_audio=None
+        source_request=self._reserve_source_request()
         if audio_path and Path(audio_path).exists():
             with self._lock:self._busy=True
             try:
@@ -115,6 +116,8 @@ class IOMixin:
                 with self._lock:self._busy=False
 
         with self._lock:
+            if source_request != self._source_generation:
+                return self._state_dict()
             self.notes=prepared_notes
             self._undo_stack.clear();self._redo_stack.clear()
             self.settings=prepared_settings
@@ -123,7 +126,12 @@ class IOMixin:
             self._status=f"{Path(path).name} を読み込みました"
             if prepared_audio is not None and audio_path:
                 decoded,spec=prepared_audio
-                self._commit_prepared_audio(audio_path,decoded,spec)
+                self._commit_prepared_audio(
+                    audio_path,
+                    decoded,
+                    spec,
+                    source_generation=source_request,
+                )
                 self._apply_player_settings()
                 self._sync_notes_to_player()
                 self._status=f"{Path(path).name} と音声を読み込みました"

@@ -14,8 +14,8 @@ from core.audio_analysis import (
     analyze_cqt,
     enhance_spectrogram,
 )
-from core.audio_player import AudioPlayer, decode_audio_file
 from core.note_model import Note, midi_to_hz, note_name
+from web.audio import WebAudioPlayer, decode_audio_file
 from web.editing import EditingMixin
 from web.io import IOMixin
 from web.notes import NoteMixin
@@ -52,7 +52,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._window = None
-        self.player = AudioPlayer()
+        self.player = WebAudioPlayer()
         self.spectrogram: Spectrogram | None = None
         self.audio_path: str | None = None
         self.project_path: str | None = None
@@ -61,6 +61,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self._redo_stack: list[list[dict[str, Any]]] = []
         self._clipboard: list[Note] = []
         self._busy = False
+        self._source_generation = 0
+        self._analysis_generation = 0
+        self._analysis_inflight = 0
         self._status = "Ready"
         self._dirty = False
         self._allow_window_close = False
@@ -195,8 +198,26 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         spec = analyze_cqt(path, **self._analysis_options(settings)) if analyze else None
         return decoded, spec
 
-    def _commit_prepared_audio(self, path: str, decoded, spec: Spectrogram | None) -> None:
+    def _reserve_source_request(self) -> int:
+        with self._lock:
+            self._source_generation += 1
+            self._analysis_generation += 1
+            return self._source_generation
+
+    def _commit_prepared_audio(
+        self,
+        path: str,
+        decoded,
+        spec: Spectrogram | None,
+        *,
+        source_generation: int | None = None,
+    ) -> bool:
         """Commit a fully prepared audio source while the editor lock is held."""
+        if source_generation is not None and source_generation != self._source_generation:
+            return False
+        if source_generation is None:
+            self._source_generation += 1
+            self._analysis_generation += 1
         self._set_audio_data(path, decoded)
         if spec is not None:
             self.spectrogram = spec
@@ -205,11 +226,13 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             self.midi_max = int(spec.midi_max)
             self.pitch_step = float(spec.pitch_step)
             self.player.set_virtual_duration(self.duration)
+        return True
 
     def _load_audio_path(self, path: str, *, analyze: bool = True) -> dict[str, Any]:
+        request = self._reserve_source_request()
         decoded, spec = self._prepare_audio_path(path, analyze=analyze)
         with self._lock:
-            self._commit_prepared_audio(path, decoded, spec)
+            self._commit_prepared_audio(path, decoded, spec, source_generation=request)
         return self.get_state()
 
     def _normalize_setting(self, key: str, value: Any) -> Any:
@@ -416,12 +439,25 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         return options
 
     def _analyze_current_audio(self) -> None:
-        if not self.audio_path:
-            return
-        self._busy = True
+        with self._lock:
+            if not self.audio_path:
+                return
+            path = self.audio_path
+            options = self._analysis_options()
+            source_generation = self._source_generation
+            self._analysis_generation += 1
+            generation = self._analysis_generation
+            self._analysis_inflight += 1
+            self._busy = True
         try:
-            spec = analyze_cqt(self.audio_path, **self._analysis_options())
+            spec = analyze_cqt(path, **options)
             with self._lock:
+                if (
+                    generation != self._analysis_generation
+                    or source_generation != self._source_generation
+                    or path != self.audio_path
+                ):
+                    return
                 self.spectrogram = spec
                 self.duration = max(0.001, float(spec.duration))
                 self.midi_min = int(spec.midi_min)
@@ -430,7 +466,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 self.player.set_virtual_duration(self.duration)
                 self._status = "Analysis ready"
         finally:
-            self._busy = False
+            with self._lock:
+                self._analysis_inflight = max(0, self._analysis_inflight - 1)
+                self._busy = self._analysis_inflight > 0
 
     def reanalyze_audio(self) -> dict[str, Any]:
         if not self.audio_path:

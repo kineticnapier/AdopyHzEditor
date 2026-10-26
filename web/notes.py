@@ -308,20 +308,20 @@ class NoteMixin:
     def undo(self) -> dict[str, Any]:
         with self._lock:
             if not self._undo_stack:
-                return {"notes": self._note_dicts(), "status": "元に戻せる操作がありません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "元に戻せる操作がありません"}
             self._redo_stack.append(self._snapshot())
             self._restore_snapshot(self._undo_stack.pop())
             self._status = "元に戻しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
 
     def redo(self) -> dict[str, Any]:
         with self._lock:
             if not self._redo_stack:
-                return {"notes": self._note_dicts(), "status": "やり直せる操作がありません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "やり直せる操作がありません"}
             self._undo_stack.append(self._snapshot())
             self._restore_snapshot(self._redo_stack.pop())
             self._status = "やり直しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
 
     def copy_notes(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
@@ -341,7 +341,7 @@ class NoteMixin:
     def paste_notes(self, at_time: float) -> dict[str, Any]:
         with self._lock:
             if not self._clipboard:
-                return {"notes": self._note_dicts(), "indices": [], "status": "クリップボードは空です"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "クリップボードは空です"}
             self._push_undo()
             base = _clamp(at_time, 0.0, self.duration)
             new_indices: list[int] = []
@@ -354,4 +354,4 @@ class NoteMixin:
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(new_indices)}個のノートを貼り付けました"
-            return {"notes": self._note_dicts(), "indices": new_indices, "status": self._status}
+            return {"notes": self._note_dicts(), "indices": new_indices, "changed": True, "status": self._status}
