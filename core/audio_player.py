@@ -56,6 +56,7 @@ class AudioPlayer:
         self.pos = 0
         self.stream = None
         self.lock = threading.RLock()
+        self._stream_control_lock = threading.Lock()
         self.playing = False
 
         # Main audio
@@ -101,15 +102,16 @@ class AudioPlayer:
         y = np.asarray(audio, dtype=np.float32)
         if y.ndim == 1:
             y = y[:, None]
-        with self.lock:
-            self.stop()
-            self.audio = y
-            self.sr = int(sr)
-            self.pos = 0
-            self._pos_float = 0.0
-            self.virtual_duration_samples = len(self.audio)
-            # srが確定したので、ノートサンプル位置は再設定が必要。
-            # main側の sync_notes_to_player が後で呼ばれる。
+        with self._stream_control_lock:
+            self._stop_stream_controlled(reset_position=True, close=True)
+            with self.lock:
+                self.audio = y
+                self.sr = int(sr)
+                self.pos = 0
+                self._pos_float = 0.0
+                self.virtual_duration_samples = len(self.audio)
+                # srが確定したので、ノートサンプル位置は再設定が必要。
+                # main側の sync_notes_to_player が後で呼ばれる。
 
     def clear_audio(self) -> None:
         """
@@ -117,14 +119,15 @@ class AudioPlayer:
         Preview/metronome settings are kept, but playback becomes silent because
         there is no main audio buffer/stream.
         """
-        with self.lock:
-            self.stop()
-            self.audio = None
-            self.pos = 0
-            self._pos_float = 0.0
-            # Keep preview_notes; MainWindow.sync_notes_to_player() will refresh
-            # them after project/workspace changes. This allows note-only
-            # playback in a blank workspace.
+        with self._stream_control_lock:
+            self._stop_stream_controlled(reset_position=True, close=True)
+            with self.lock:
+                self.audio = None
+                self.pos = 0
+                self._pos_float = 0.0
+                # Keep preview_notes; MainWindow.sync_notes_to_player() will refresh
+                # them after project/workspace changes. This allows note-only
+                # playback in a blank workspace.
 
     @property
     def duration(self) -> float:
@@ -372,47 +375,66 @@ class AudioPlayer:
     def play(self) -> None:
         if not self.available:
             return
-        with self.lock:
-            has_audio = self.audio is not None and len(self.audio) > 0
-            has_virtual = int(self.virtual_duration_samples) > 0
-            if not has_audio and not has_virtual:
-                return
-            playback_end = max(len(self.audio) if has_audio else 0, int(self.virtual_duration_samples))
-            if self.pos >= max(0, playback_end - 1):
-                self.pos = 0
-                self._pos_float = 0.0
-            if self.stream is None:
-                self.stream = self.sd.OutputStream(
-                    samplerate=self.sr,
+        with self._stream_control_lock:
+            with self.lock:
+                has_audio = self.audio is not None and len(self.audio) > 0
+                has_virtual = int(self.virtual_duration_samples) > 0
+                if not has_audio and not has_virtual:
+                    return
+                playback_end = max(len(self.audio) if has_audio else 0, int(self.virtual_duration_samples))
+                if self.pos >= max(0, playback_end - 1):
+                    self.pos = 0
+                    self._pos_float = 0.0
+                stream = self.stream
+                sample_rate = self.sr
+            if stream is None:
+                stream = self.sd.OutputStream(
+                    samplerate=sample_rate,
                     channels=1,
                     dtype="float32",
                     callback=self._callback,
                     blocksize=1024,
                 )
-            self.playing = True
-            self.stream.start()
+                with self.lock:
+                    self.stream = stream
+            with self.lock:
+                self.playing = True
+            try:
+                stream.start()
+            except Exception as exc:
+                with self.lock:
+                    self.playing = False
+                    self.available = False
+                    self.error = repr(exc)
 
     def pause(self) -> None:
-        with self.lock:
-            self.playing = False
-            if self.stream is not None:
-                try:
-                    self.stream.stop()
-                except Exception:
-                    pass
+        with self._stream_control_lock:
+            self._stop_stream_controlled(reset_position=False, close=False)
 
     def stop(self) -> None:
+        with self._stream_control_lock:
+            self._stop_stream_controlled(reset_position=True, close=True)
+
+    def _stop_stream_controlled(self, *, reset_position: bool, close: bool) -> None:
+        """Update player state under ``lock`` and wait for PortAudio without it."""
         with self.lock:
             self.playing = False
-            self.pos = 0
-            self._pos_float = 0.0
-            if self.stream is not None:
+            if reset_position:
+                self.pos = 0
+                self._pos_float = 0.0
+            stream = self.stream
+            if close:
+                self.stream = None
+        if stream is not None:
+            try:
+                stream.stop()
+            except Exception:
+                pass
+            if close:
                 try:
-                    self.stream.stop()
-                    self.stream.close()
+                    stream.close()
                 except Exception:
                     pass
-                self.stream = None
 
     def toggle(self) -> None:
         if self.playing:
