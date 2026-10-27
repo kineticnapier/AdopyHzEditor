@@ -17,9 +17,9 @@ import webview
 from core.atomic_io import atomic_write_text
 from exporters.adofai import (
     build_adofai_debug_rows,
-    build_adofai_level,
     build_tile_preview_points,
 )
+from web.gap_bridge import build_adofai_level_with_gap_bridges as build_adofai_level
 from app_metadata import APP_VERSION, GITHUB_RELEASES_URL
 from i18n import tr
 
