@@ -135,7 +135,8 @@ class DirectAnalysisStateRound2Tests(unittest.TestCase):
                         fallback_reason=None,
                     ),
                 ),
-                mock.patch.object(web_backend, "analyze_cqt") as cqt:
+                mock.patch.object(web_backend, "analyze_cqt") as cqt,
+            ):
                     state = bridge.load_project_dialog()
 
         cqt.assert_not_called()
@@ -185,7 +186,8 @@ class DirectAnalysisStateRound2Tests(unittest.TestCase):
                     web_backend,
                     "analyze_cqt",
                     return_value=spec,
-                ) as cqt:
+                ) as cqt,
+            ):
                     state = bridge.load_project_dialog()
 
         cqt.assert_called_once()
@@ -222,7 +224,8 @@ class DirectAnalysisStateRound2Tests(unittest.TestCase):
                         fallback_reason=None,
                     ),
                 ),
-                mock.patch.object(web_backend, "analyze_cqt") as cqt:
+                mock.patch.object(web_backend, "analyze_cqt") as cqt,
+            ):
                     state = bridge.relink_project_audio_dialog()
 
         cqt.assert_not_called()

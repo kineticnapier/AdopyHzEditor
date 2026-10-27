@@ -35,7 +35,7 @@ class WebUiCompatibilityTests(unittest.TestCase):
             mock.patch.object(bridge, "_dialog", return_value="project.adopyhz"),
             mock.patch.object(
                 bridge,
-                "_prepare_audio_path",
+                "_prepare_requested_audio_path",
                 return_value=(
                     SimpleNamespace(
                         samples=np.zeros((32, 2), dtype=np.float32),
@@ -43,6 +43,8 @@ class WebUiCompatibilityTests(unittest.TestCase):
                         duration=32 / 44100,
                     ),
                     None,
+                    {},
+                    "cqt",
                 ),
             ),
             mock.patch.object(web_io, "load_project", return_value=("song.wav", [note], {})),

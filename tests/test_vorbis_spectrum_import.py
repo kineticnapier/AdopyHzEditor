@@ -184,6 +184,7 @@ class VorbisSpectrumWebIntegrationTests(unittest.TestCase):
         from web_ui import Bridge
 
         bridge = Bridge()
+        bridge.audio_path = "song.ogg"
         bridge.vorbis_spectrum_store = self._store()
         result = bridge.get_spectrum_region(0, 1, 0, 127, 800, 400, 2.0)
 

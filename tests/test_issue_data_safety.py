@@ -54,7 +54,7 @@ class IssueDataSafetyTests(unittest.TestCase):
             mock.patch.object(bridge, "_dialog", return_value="new.adopyhz"),
             mock.patch.object(web_io, "load_project", return_value=("broken.wav", [new_note], {"grid_bpm": 200})),
             mock.patch.object(web_io.Path, "exists", return_value=True),
-            mock.patch.object(bridge, "_prepare_audio_path", side_effect=RuntimeError("decode failed")),
+            mock.patch.object(bridge, "_prepare_requested_audio_path", side_effect=RuntimeError("decode failed")),
         ):
             with self.assertRaisesRegex(RuntimeError, "decode failed"):
                 bridge.load_project_dialog()
