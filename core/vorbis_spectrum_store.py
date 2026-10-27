@@ -261,7 +261,12 @@ class VorbisSpectrumStore:
                     continue
                 time_indices = np.clip(
                     (
-                        (plane_times[chunk_rows[row_positions]] - start)
+                        (
+                            self.center_times[
+                                global_indices[chunk_rows[row_positions]]
+                            ]
+                            - start
+                        )
                         * time_scale
                     ).astype(np.int32),
                     0,
