@@ -185,6 +185,58 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         spec = analyze_cqt(path, **self._analysis_options(settings)) if analyze else None
         return decoded, spec
 
+    def _prepare_requested_audio_path(
+        self,
+        path: str,
+        *,
+        settings: dict[str, Any] | None = None,
+    ):
+        """Prepare the analysis source requested by project/editor settings.
+
+        Direct-compatible Vorbis sources are decoded but intentionally left in
+        an explicit pending state; expensive Spectrum/Track construction remains
+        a user-triggered analysis operation. Only unsupported Direct requests
+        fall back to CQT.
+        """
+        source = settings if settings is not None else self.settings
+        requested = str(source.get("analysisSource", "cqt"))
+        decoded = decode_audio_file(path)
+        if requested == "vorbis_direct":
+            selection = select_analysis_backend(path, "vorbis_direct")
+            if selection.selected == "vorbis_direct":
+                return (
+                    decoded,
+                    None,
+                    {
+                        "requestedSource": "vorbis_direct",
+                        "selectedSource": "vorbis_direct",
+                        "pending": True,
+                    },
+                    "direct_pending",
+                )
+            spec = analyze_cqt(path, **self._analysis_options(source))
+            return (
+                decoded,
+                spec,
+                {
+                    "requestedSource": "vorbis_direct",
+                    "selectedSource": "cqt",
+                    "fallbackReason": selection.fallback_reason,
+                },
+                "fallback",
+            )
+
+        spec = analyze_cqt(path, **self._analysis_options(source))
+        return (
+            decoded,
+            spec,
+            {
+                "requestedSource": "cqt",
+                "selectedSource": "cqt",
+            },
+            "cqt",
+        )
+
     def _reserve_source_request(self) -> int:
         with self._lock:
             self._source_generation += 1
@@ -198,6 +250,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         spec: Spectrogram | None,
         *,
         source_generation: int | None = None,
+        analysis_stats: dict[str, Any] | None = None,
+        direct_pending: bool = False,
     ) -> bool:
         """Commit a fully prepared audio source while the editor lock is held."""
         if source_generation is not None and source_generation != self._source_generation:
@@ -213,13 +267,39 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             self.midi_max = int(spec.midi_max)
             self.pitch_step = float(spec.pitch_step)
             self.player.set_virtual_duration(self.duration)
+        elif direct_pending:
+            self.midi_min, self.midi_max = 0, 127
+            self.pitch_step = 1.0
+        if analysis_stats is not None:
+            self.analysis_stats = dict(analysis_stats)
         return True
 
     def _load_audio_path(self, path: str, *, analyze: bool = True) -> dict[str, Any]:
         request = self._reserve_source_request()
-        decoded, spec = self._prepare_audio_path(path, analyze=analyze)
         with self._lock:
-            self._commit_prepared_audio(path, decoded, spec, source_generation=request)
+            settings_snapshot = dict(self.settings)
+        if analyze:
+            decoded, spec, stats, kind = self._prepare_requested_audio_path(
+                path,
+                settings=settings_snapshot,
+            )
+        else:
+            decoded, spec = self._prepare_audio_path(
+                path,
+                analyze=False,
+                settings=settings_snapshot,
+            )
+            stats = {}
+            kind = "decoded"
+        with self._lock:
+            self._commit_prepared_audio(
+                path,
+                decoded,
+                spec,
+                source_generation=request,
+                analysis_stats=stats,
+                direct_pending=kind == "direct_pending",
+            )
         return self.get_state()
 
     def _normalize_setting(self, key: str, value: Any) -> Any:
@@ -281,8 +361,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         return [n.normalized().to_dict() for n in self.notes]
 
     def _analysis_state(self) -> dict[str, Any]:
-        direct = self.vorbis_spectrum_store
-        if self.spectrogram is None and direct is None:
+        direct = self.vorbis_spectrum_store if self.audio_path else None
+        if not self.audio_path or (self.spectrogram is None and direct is None):
             return {
                 "available": False,
                 "source": str(self.settings["analysisSource"]),
@@ -406,13 +486,25 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
     # ------------------------------------------------------------------
     # Audio / analysis
     # ------------------------------------------------------------------
-    def _set_audio_data(self, path: str, decoded) -> None:
-        self.audio_path = str(path)
-        self.project_audio_reference = str(path)
+    def _clear_analysis_state(self) -> None:
+        """Drop all analysis products tied to the previously active source."""
         self.spectrogram = None
         self.vorbis_spectrum_store = None
         self.frequency_track_store = None
         self.analysis_stats = {}
+
+    def _detach_active_audio(self) -> None:
+        """Invalidate the current source and remove all source-derived state."""
+        self._source_generation += 1
+        self._analysis_generation += 1
+        self.audio_path = None
+        self._clear_analysis_state()
+        self.player.clear_audio()
+
+    def _set_audio_data(self, path: str, decoded) -> None:
+        self.audio_path = str(path)
+        self.project_audio_reference = str(path)
+        self._clear_analysis_state()
         self.player.set_audio(decoded.samples, decoded.sample_rate, path=str(path))
         self.duration = max(0.001, float(decoded.duration))
         self.player.set_virtual_duration(self.duration)
@@ -659,7 +751,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
     ) -> dict[str, Any]:
         """Return only the max-pooled Vorbis cells needed by one viewport."""
         with self._lock:
-            store = self.vorbis_spectrum_store
+            store = self.vorbis_spectrum_store if self.audio_path else None
             gate = (
                 float(self.settings["spectrumThreshold"]) / 100.0
                 if threshold is None
@@ -712,7 +804,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         """Return a bounded set of prebuilt frequency-track segments."""
         del pixel_height  # Reserved for future pitch-aware LOD.
         with self._lock:
-            store = self.frequency_track_store
+            store = self.frequency_track_store if self.audio_path else None
         if store is None:
             return {"available": False}
 
