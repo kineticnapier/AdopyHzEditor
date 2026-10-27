@@ -26,6 +26,8 @@ from core.vorbis_spectrum_store import (
 from web.editing import EditingMixin
 from web.io import IOMixin
 from web.notes import NoteMixin
+from web.track_display import readable_frequency_track_region
+from web.track_transcription import TrackTranscriptionMixin
 
 
 AUDIO_FILE_TYPES = (
@@ -50,7 +52,7 @@ def _int_clamp(value: Any, lo: int, hi: int) -> int:
     return max(lo, min(hi, int(round(float(value)))))
 
 
-class Bridge(EditingMixin, NoteMixin, IOMixin):
+class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
     """Stateful Python backend for the React/TypeScript editor shell.
 
     pywebview executes exposed API calls in worker threads, so mutable editor
@@ -673,7 +675,8 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             return {"available": False}
 
         max_points = max(4_000, min(30_000, int(pixel_width) * 24))
-        region = store.query_region(
+        region = readable_frequency_track_region(
+            store,
             start_time,
             end_time,
             minimum_midi,
