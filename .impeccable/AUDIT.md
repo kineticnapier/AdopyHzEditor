@@ -1,7 +1,9 @@
 # Impeccable UI audit
 
-Audit target: `frontend/src`  
-Product truth: `PRODUCT.md`  
+Audit target: `frontend/src`
+
+Product truth: `PRODUCT.md`
+
 Scope: React Web Editor and its pywebview desktop surface
 
 ## Workflow assessment
