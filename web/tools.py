@@ -46,6 +46,9 @@ class ToolsMixin:
 
     def apply_blank_workspace(self, options: dict[str, Any]) -> dict[str, Any]:
         duration = max(1.0, min(36000.0, float(options.get("duration", self.duration))))
+        # Existing notes are explicitly preserved by this operation, so the
+        # editable document duration must not become shorter than their tail.
+        duration = max(duration, max((float(n.end) for n in self.notes), default=0.0))
         midi_min = max(0, min(127, int(options.get("midiMin", self.midi_min))))
         midi_max = max(0, min(127, int(options.get("midiMax", self.midi_max))))
         if midi_max <= midi_min:
@@ -117,7 +120,7 @@ class ToolsMixin:
                 key=lambda n: (n.start, n.midi, n.end),
             )
             self.duration = max(self.duration, max(n.end for n in self.notes))
-            if self.audio_path is None or self.spectrogram is None:
+            if self.audio_path is None:
                 self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
             self._dirty = True
