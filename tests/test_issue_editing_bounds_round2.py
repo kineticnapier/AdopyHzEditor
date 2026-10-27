@@ -15,7 +15,7 @@ class EditingBoundsRound2Tests(unittest.TestCase):
         bridge = Bridge()
         bridge.audio_path = str(Path("song.ogg").resolve())
         bridge.spectrogram = None
-        bridge.vorbis_spectrum_store = SimpleNamespace()
+        bridge.vorbis_spectrum_store = SimpleNamespace(duration=180.0)
         bridge.duration = 180.0
         bridge.midi_min = 0
         bridge.midi_max = 127
