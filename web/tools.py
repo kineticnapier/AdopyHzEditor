@@ -55,13 +55,12 @@ class ToolsMixin:
 
         with self._lock:
             self.player.stop()
-            self.player.clear_audio()
-            # A blank workspace is a derived document.  Keeping the previous
+            self._detach_active_audio()
+            # A blank workspace is a derived document. Keeping the previous
             # save target would let Ctrl+S overwrite the source project after
             # its audio reference has deliberately been removed.
             self.project_path = None
-            self.audio_path = None
-            self.spectrogram = None
+            self.project_audio_reference = None
             self.duration = duration
             self.midi_min = midi_min
             self.midi_max = midi_max
@@ -92,9 +91,8 @@ class ToolsMixin:
             # Notes-only loading creates a derived workspace. Keeping the source
             # project path would let a normal save overwrite it without audio.
             self.project_path = None
-            self.audio_path = None
-            self.spectrogram = None
-            self.player.clear_audio()
+            self._detach_active_audio()
+            self.project_audio_reference = None
             self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
             self._dirty = True
