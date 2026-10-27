@@ -110,9 +110,12 @@ def _resolve_audio_path(project_path: Path, data: dict[str, Any]) -> str | None:
         except Exception:
             pass
 
-    # Return something user-facing for the missing-audio dialog.
+    # Return a stable project-relative reference for the missing-audio dialog
+    # and for a later save/relink. A legacy relative audio_path must not become
+    # relative to the process working directory when it is saved again.
     if raw_audio:
-        return str(raw_audio)
+        raw_path = Path(str(raw_audio))
+        return str(raw_path if raw_path.is_absolute() else project_dir / raw_path)
     if rel_audio:
         return str(project_dir / str(rel_audio))
     return None
