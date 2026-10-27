@@ -67,11 +67,32 @@ def _intersects_track_rect(
     for index in range(local_t.size - 1):
         t0 = float(local_t[index])
         t1 = float(local_t[index + 1])
-        if max(t0, t1) < start_time or min(t0, t1) > end_time:
-            continue
         m0 = float(local_m[index])
         m1 = float(local_m[index + 1])
-        if max(m0, m1) >= minimum_midi and min(m0, m1) <= maximum_midi:
+        segment_start = min(t0, t1)
+        segment_end = max(t0, t1)
+        clipped_start = max(segment_start, start_time)
+        clipped_end = min(segment_end, end_time)
+        if clipped_end < clipped_start:
+            continue
+
+        # Test pitch over the same clipped time interval. Checking the time and
+        # pitch projections independently can select a diagonal segment whose
+        # high-pitch part occurs only after the rectangle's time range (#125).
+        if abs(t1 - t0) <= 1e-12:
+            clipped_min_midi = min(m0, m1)
+            clipped_max_midi = max(m0, m1)
+        else:
+            u0 = (clipped_start - t0) / (t1 - t0)
+            u1 = (clipped_end - t0) / (t1 - t0)
+            cm0 = m0 + (m1 - m0) * u0
+            cm1 = m0 + (m1 - m0) * u1
+            clipped_min_midi = min(cm0, cm1)
+            clipped_max_midi = max(cm0, cm1)
+        if (
+            clipped_max_midi >= minimum_midi
+            and clipped_min_midi <= maximum_midi
+        ):
             return True
     return False
 
