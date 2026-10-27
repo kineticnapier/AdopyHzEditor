@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 from core.note_model import Note
@@ -9,15 +10,32 @@ def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, float(value)))
 
 
+@dataclass(frozen=True)
+class EditorSnapshot:
+    """Undo state for document properties changed by note operations."""
+
+    notes: tuple[Note, ...]
+    duration: float
+    midi_min: int
+    midi_max: int
+
+
 class NoteMixin:
     # ------------------------------------------------------------------
     # Notes / history / clipboard
     # ------------------------------------------------------------------
-    def _snapshot(self) -> tuple[Note, ...]:
+    def _snapshot(self) -> EditorSnapshot:
         # Notes are replaced, never mutated in-place. A tuple therefore gives
         # undo history structural sharing instead of copying dictionaries for
-        # every one of up to 200 history entries.
-        return tuple(self.notes)
+        # every one of up to 200 history entries. Duration and editable pitch
+        # bounds are part of the same logical document state because imports
+        # and composition tools may change them together with notes.
+        return EditorSnapshot(
+            notes=tuple(self.notes),
+            duration=float(self.duration),
+            midi_min=int(self.midi_min),
+            midi_max=int(self.midi_max),
+        )
 
     def _push_undo(self) -> None:
         self._undo_stack.append(self._snapshot())
@@ -25,8 +43,27 @@ class NoteMixin:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
 
-    def _restore_snapshot(self, state: Iterable[Note | dict[str, Any]]) -> None:
-        self.notes = [item if isinstance(item, Note) else Note.from_dict(dict(item)) for item in state]
+    def _restore_snapshot(self, state: EditorSnapshot | Iterable[Note | dict[str, Any]]) -> None:
+        if isinstance(state, EditorSnapshot):
+            items: Iterable[Note | dict[str, Any]] = state.notes
+            self.duration = max(0.001, float(state.duration))
+            self.midi_min = max(0, min(127, int(state.midi_min)))
+            self.midi_max = max(self.midi_min, min(127, int(state.midi_max)))
+            window = min(
+                max(0.2, float(self.view.get("windowSeconds", 12.0))),
+                max(0.2, self.duration),
+            )
+            self.view["windowSeconds"] = window
+            self.view["start"] = _clamp(
+                float(self.view.get("start", 0.0)),
+                0.0,
+                max(0.0, self.duration - window),
+            )
+        else:
+            # Backward-compatible fallback for tests/extensions that supplied
+            # the pre-snapshot note iterable directly.
+            items = state
+        self.notes = [item if isinstance(item, Note) else Note.from_dict(dict(item)) for item in items]
         self._sync_notes_to_player()
         self._dirty = True
 
