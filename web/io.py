@@ -200,7 +200,11 @@ class IOMixin:
                     self.midi_min=12;self.midi_max=120
                 else:
                     self.midi_min=max(0,min(127,int(saved_midi_min)))
-                    self.midi_max=max(self.midi_min+1,min(127,int(saved_midi_max)))
+                    self.midi_max=max(0,min(127,int(saved_midi_max)))
+                    if self.midi_max <= self.midi_min:
+                        self.midi_max=min(127,self.midi_min+1)
+                        if self.midi_max <= self.midi_min:
+                            self.midi_min=max(0,self.midi_max-1)
                 self.pitch_step=1.0;self.player.clear_audio();self._apply_player_settings();self._sync_notes_to_player()
                 if audio_path:
                     self._status=f"{Path(path).name} の音源が見つかりません。ファイル → プロジェクト音源を再指定… から選び直せます"
