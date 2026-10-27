@@ -50,6 +50,63 @@ def _int_clamp(value: Any, lo: int, hi: int) -> int:
     return max(lo, min(hi, int(round(float(value)))))
 
 
+def _spectrogram_render_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contrast": float(settings["contrast"]) / 100.0,
+        "gamma": float(settings["gamma"]) / 100.0,
+        "per_bin": bool(settings["enhance"]),
+        "display_mode": str(settings["displayMode"]),
+        "harmonic_mode": str(settings["harmonics"]),
+    }
+
+
+def _spectrogram_render_key(settings: dict[str, Any]) -> tuple[object, ...]:
+    render = _spectrogram_render_settings(settings)
+    return (
+        render["contrast"],
+        render["gamma"],
+        render["per_bin"],
+        render["display_mode"],
+        render["harmonic_mode"],
+    )
+
+
+def _pool_absolute_time_columns(
+    data: np.ndarray,
+    left: int,
+    right: int,
+    max_columns: int,
+) -> tuple[np.ndarray, int, int]:
+    """Pool time columns on an absolute column grid, not viewport-local edges."""
+    total_columns = int(data.shape[1])
+    left = max(0, min(total_columns - 1, int(left)))
+    right = max(left + 1, min(total_columns, int(right)))
+    limit = max(1, int(max_columns))
+    visible = right - left
+    if visible <= limit:
+        return data[:, left:right], left, right
+
+    # Reserve two columns for possible left/right alignment expansion. This
+    # keeps the returned width bounded while the bucket phase remains anchored
+    # to absolute CQT column zero for equal zoom levels.
+    bucket_target = max(1, limit - 2)
+    stride = max(1, int(math.ceil(visible / bucket_target)))
+    aligned_left = (left // stride) * stride
+    aligned_right = min(
+        total_columns,
+        int(math.ceil(right / stride)) * stride,
+    )
+    starts = range(aligned_left, aligned_right, stride)
+    pooled = np.empty(
+        (data.shape[0], len(starts)),
+        dtype=data.dtype,
+    )
+    for index, a in enumerate(starts):
+        b = min(total_columns, a + stride)
+        pooled[:, index] = np.max(data[:, a:b], axis=1)
+    return pooled, aligned_left, aligned_right
+
+
 class Bridge(EditingMixin, NoteMixin, IOMixin):
     """Stateful Python backend for the React/TypeScript editor shell.
 
@@ -62,6 +119,9 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self._window = None
         self.player = WebAudioPlayer()
         self.spectrogram: Spectrogram | None = None
+        self._spectrogram_render_cache_spec: Spectrogram | None = None
+        self._spectrogram_render_cache_key: tuple[object, ...] | None = None
+        self._spectrogram_render_cache_u8: np.ndarray | None = None
         self.vorbis_spectrum_store: VorbisSpectrumStore | None = None
         self.frequency_track_store: FrequencyTrackStore | None = None
         self.analysis_stats: dict[str, Any] = {}
@@ -747,56 +807,69 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             }
 
     def get_spectrogram(self, max_columns: int = 1600, start: float | None = None, end: float | None = None) -> dict[str, Any]:
-        # Spectrogram objects are replaced atomically and their arrays are not
-        # mutated after publication. Snapshot the object and render settings
-        # under the Bridge lock, then release it before expensive NumPy work so
-        # viewport/edit requests are not serialized behind image generation.
+        # Enhancement/threshold statistics must be stable for one source and
+        # setting set. Build one full-song uint8 render and only slice/pool that
+        # immutable result for viewport requests (#129). The heavy work remains
+        # outside the shared Bridge lock (#141).
         with self._lock:
             spec = self.spectrogram
             if spec is None:
                 return {"available": False}
-            render_settings = {
-                "contrast": float(self.settings["contrast"]) / 100.0,
-                "gamma": float(self.settings["gamma"]) / 100.0,
-                "per_bin": bool(self.settings["enhance"]),
-                "display_mode": str(self.settings["displayMode"]),
-                "harmonic_mode": str(self.settings["harmonics"]),
-            }
+            render_settings = _spectrogram_render_settings(self.settings)
+            render_key = _spectrogram_render_key(self.settings)
+            if (
+                self._spectrogram_render_cache_spec is spec
+                and self._spectrogram_render_cache_key == render_key
+                and self._spectrogram_render_cache_u8 is not None
+            ):
+                full_u8 = self._spectrogram_render_cache_u8
+            else:
+                full_u8 = None
 
-        data = np.asarray(spec.db, dtype=np.float32)
-        rows, cols = data.shape
+        if full_u8 is None:
+            enhanced = enhance_spectrogram(
+                np.asarray(spec.db, dtype=np.float32),
+                **render_settings,
+            )
+            full_u8 = np.rint(
+                np.clip(enhanced, 0.0, 1.0) * 255.0
+            ).astype(np.uint8)
+            full_u8.setflags(write=False)
+            with self._lock:
+                if (
+                    self.spectrogram is not spec
+                    or _spectrogram_render_key(self.settings) != render_key
+                ):
+                    return {"available": False, "stale": True}
+                self._spectrogram_render_cache_spec = spec
+                self._spectrogram_render_cache_key = render_key
+                self._spectrogram_render_cache_u8 = full_u8
+
+        total_cols = int(full_u8.shape[1])
         window_start = 0.0
         window_end = float(spec.duration)
+        left = 0
+        right = total_cols
         if start is not None or end is not None:
             window_start = _clamp(0.0 if start is None else start, 0.0, spec.duration)
             window_end = _clamp(spec.duration if end is None else end, window_start, spec.duration)
-            left = max(0, min(cols - 1, int(np.searchsorted(spec.frame_times, window_start, side="left"))))
-            right = max(left + 1, min(cols, int(np.searchsorted(spec.frame_times, window_end, side="right"))))
-            data = data[:, left:right]
-            cols = data.shape[1]
-        max_columns = max(64, min(4096, int(max_columns)))
-        if cols > max_columns:
-            edges = np.linspace(0, cols, max_columns + 1, dtype=np.int32)
-            reduced = np.empty((rows, max_columns), dtype=np.float32)
-            for i in range(max_columns):
-                a, b = int(edges[i]), int(edges[i + 1])
-                if b <= a:
-                    b = min(cols, a + 1)
-                reduced[:, i] = np.max(data[:, a:b], axis=1)
-            data = reduced
-            cols = max_columns
+            left = max(0, min(total_cols - 1, int(np.searchsorted(spec.frame_times, window_start, side="left"))))
+            right = max(left + 1, min(total_cols, int(np.searchsorted(spec.frame_times, window_end, side="right"))))
 
-        enhanced = enhance_spectrogram(data, **render_settings)
-        lo = float(np.min(enhanced)) if enhanced.size else 0.0
-        hi = float(np.max(enhanced)) if enhanced.size else 1.0
-        if hi <= lo + 1e-12:
-            u8 = np.zeros_like(enhanced, dtype=np.uint8)
-        else:
-            u8 = np.clip((enhanced - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+        max_columns = max(64, min(4096, int(max_columns)))
+        u8, _aligned_left, _aligned_right = _pool_absolute_time_columns(
+            full_u8,
+            left,
+            right,
+            max_columns,
+        )
         encoded = base64.b64encode(u8.tobytes(order="C")).decode("ascii")
 
         with self._lock:
-            if self.spectrogram is not spec:
+            if (
+                self.spectrogram is not spec
+                or _spectrogram_render_key(self.settings) != render_key
+            ):
                 return {"available": False, "stale": True}
         return {
             "available": True,
