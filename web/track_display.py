@@ -10,6 +10,7 @@ still uses full-resolution data.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 import math
 import time
 from typing import Any
@@ -73,6 +74,49 @@ def track_continuity(times: np.ndarray, midis: np.ndarray) -> float:
     return max(0.15, min(1.0, coherence))
 
 
+_CONTINUITY_CACHE_MAX_STORES = 4
+_TRACK_CONTINUITY_CACHE: OrderedDict[tuple[object, ...], dict[int, float]] = OrderedDict()
+
+
+def _continuity_cache_key(store: Any) -> tuple[object, ...] | None:
+    fingerprint = getattr(store, "source_fingerprint", None)
+    if fingerprint is None:
+        return None
+    try:
+        key = tuple(fingerprint)
+        hash(key)
+    except (TypeError, ValueError):
+        return None
+    return key
+
+
+def _cached_track_continuity(
+    store: Any,
+    track_id: int,
+    lo: int,
+    hi: int,
+) -> float:
+    key = _continuity_cache_key(store)
+    if key is None:
+        return track_continuity(store.point_times[lo:hi], store.point_midi[lo:hi])
+    bucket = _TRACK_CONTINUITY_CACHE.get(key)
+    if bucket is None:
+        bucket = {}
+        _TRACK_CONTINUITY_CACHE[key] = bucket
+        while len(_TRACK_CONTINUITY_CACHE) > _CONTINUITY_CACHE_MAX_STORES:
+            _TRACK_CONTINUITY_CACHE.popitem(last=False)
+    else:
+        _TRACK_CONTINUITY_CACHE.move_to_end(key)
+    cached = bucket.get(int(track_id))
+    if cached is None:
+        cached = track_continuity(
+            store.point_times[lo:hi],
+            store.point_midi[lo:hi],
+        )
+        bucket[int(track_id)] = cached
+    return cached
+
+
 def display_priority(
     duration: float,
     average_magnitude: float,
@@ -130,7 +174,9 @@ def readable_frequency_track_region(
     midi_min = max(0.0, min(127.0, float(minimum_midi)))
     midi_max = max(midi_min, min(127.0, float(maximum_midi)))
     requested_limit = max(256, min(65_000, int(max_points)))
-    display_limit = _display_point_limit(requested_limit, end - start)
+    span_seconds = end - start
+    short_view = span_seconds <= 8.0
+    display_limit = _display_point_limit(requested_limit, span_seconds)
 
     if end <= start or midi_max <= midi_min or not int(store.point_count):
         return FrequencyTrackRegion(b"", 0, 0, 1.0, time.perf_counter() - started)
@@ -166,16 +212,18 @@ def readable_frequency_track_region(
 
         point_count = sum(int(run.size) for run in runs)
         duration = float(store.track_end_times[track_id] - store.track_start_times[track_id])
-        continuity = track_continuity(
-            store.point_times[lo:hi],
-            store.point_midi[lo:hi],
-        )
-        priority = display_priority(
-            duration,
-            float(store.track_average_magnitudes[track_id]),
-            float(store.track_max_magnitudes[track_id]),
-            continuity,
-        )
+        if short_view:
+            # <=8 s retains every Track whenever the point budget permits, so
+            # continuity ranking has no effect on the normal result (#154).
+            priority = 0.0
+        else:
+            continuity = _cached_track_continuity(store, track_id, lo, hi)
+            priority = display_priority(
+                duration,
+                float(store.track_average_magnitudes[track_id]),
+                float(store.track_max_magnitudes[track_id]),
+                continuity,
+            )
         groups.append((track_id, runs, point_count, priority))
         raw_points += point_count
 
@@ -192,21 +240,62 @@ def readable_frequency_track_region(
         sampled_count = sum(int(run.size) for run in sampled_runs)
         sampled_groups.append((track_id, sampled_runs, sampled_count, priority))
 
-    if end - start <= 8.0:
-        # Zoomed in: keep every track. If endpoint preservation pushed us a
-        # little over budget, increase the stride globally rather than dropping
-        # low-priority tracks.
-        stride = base_stride
-        kept = sampled_groups
-        total = sum(item[2] for item in kept)
-        while total > display_limit and stride < raw_points:
-            stride = max(stride + 1, int(math.ceil(stride * 1.25)))
+    if short_view:
+        # Zoomed in: keep every Track while the endpoint-preserving minimum can
+        # fit in the point budget. Increase stride globally for ordinary dense
+        # tracks without spending continuity CPU on a ranking that is unused.
+        minimum_stride = max(2, raw_points + 1)
+        minimum_groups: list[tuple[int, list[np.ndarray], int, float]] = []
+        minimum_total = 0
+        for track_id, runs, _count, _priority in groups:
+            sampled_runs = [_sample_run(run, minimum_stride) for run in runs]
+            count = sum(int(run.size) for run in sampled_runs)
+            minimum_groups.append((track_id, sampled_runs, count, 0.0))
+            minimum_total += count
+
+        if minimum_total > display_limit:
+            # One/two-point runs cannot be reduced by stride. In that exceptional
+            # case the all-Tracks promise is mathematically impossible, so keep
+            # deterministic whole Tracks by duration/strength until the strict
+            # budget is exhausted (#183). Continuity is still intentionally not
+            # evaluated in the short-view path.
+            ranked = []
+            for track_id, runs, count, _priority in minimum_groups:
+                duration = float(
+                    store.track_end_times[track_id]
+                    - store.track_start_times[track_id]
+                )
+                priority = display_priority(
+                    duration,
+                    float(store.track_average_magnitudes[track_id]),
+                    float(store.track_max_magnitudes[track_id]),
+                    1.0,
+                )
+                ranked.append((track_id, runs, count, priority))
+            ranked.sort(key=lambda item: (-item[3], item[0]))
             kept = []
-            for track_id, runs, _count, priority in groups:
-                sampled_runs = [_sample_run(run, stride) for run in runs]
-                count = sum(int(run.size) for run in sampled_runs)
-                kept.append((track_id, sampled_runs, count, priority))
+            remaining = display_limit
+            for item in ranked:
+                if item[2] <= remaining:
+                    kept.append(item)
+                    remaining -= item[2]
+                if remaining <= 0:
+                    break
+        else:
+            stride = base_stride
+            kept = sampled_groups
             total = sum(item[2] for item in kept)
+            while total > display_limit and stride < minimum_stride:
+                growth = max(1.25, total / max(1, display_limit))
+                stride = max(stride + 1, int(math.ceil(stride * growth)))
+                kept = []
+                for track_id, runs, _count, priority in groups:
+                    sampled_runs = [_sample_run(run, stride) for run in runs]
+                    count = sum(int(run.size) for run in sampled_runs)
+                    kept.append((track_id, sampled_runs, count, priority))
+                total = sum(item[2] for item in kept)
+            if total > display_limit:
+                kept = minimum_groups
     else:
         ranked = sorted(sampled_groups, key=lambda item: (-item[3], item[0]))
         kept = []
