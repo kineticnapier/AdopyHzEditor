@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from core.note_model import Note
-from web.editing import EditingMixin, MIN_NOTE_DURATION
+from web.editing import MIN_NOTE_DURATION
 
 
 _MAX_TRACK_SELECTION = 10_000
@@ -67,11 +67,32 @@ def _intersects_track_rect(
     for index in range(local_t.size - 1):
         t0 = float(local_t[index])
         t1 = float(local_t[index + 1])
-        if max(t0, t1) < start_time or min(t0, t1) > end_time:
-            continue
         m0 = float(local_m[index])
         m1 = float(local_m[index + 1])
-        if max(m0, m1) >= minimum_midi and min(m0, m1) <= maximum_midi:
+        segment_start = min(t0, t1)
+        segment_end = max(t0, t1)
+        clipped_start = max(segment_start, start_time)
+        clipped_end = min(segment_end, end_time)
+        if clipped_end < clipped_start:
+            continue
+
+        # Test pitch over the same clipped time interval. Checking the time and
+        # pitch projections independently can select a diagonal segment whose
+        # high-pitch part occurs only after the rectangle's time range (#125).
+        if abs(t1 - t0) <= 1e-12:
+            clipped_min_midi = min(m0, m1)
+            clipped_max_midi = max(m0, m1)
+        else:
+            u0 = (clipped_start - t0) / (t1 - t0)
+            u1 = (clipped_end - t0) / (t1 - t0)
+            cm0 = m0 + (m1 - m0) * u0
+            cm1 = m0 + (m1 - m0) * u1
+            clipped_min_midi = min(cm0, cm1)
+            clipped_max_midi = max(cm0, cm1)
+        if (
+            clipped_max_midi >= minimum_midi
+            and clipped_min_midi <= maximum_midi
+        ):
             return True
     return False
 
@@ -242,7 +263,7 @@ def _curve_note(
 
 
 def find_frequency_tracks(
-    self: EditingMixin,
+    self: Any,
     start_time: float,
     end_time: float,
     minimum_midi: float,
@@ -278,7 +299,7 @@ def find_frequency_tracks(
 
 
 def create_notes_from_tracks(
-    self: EditingMixin,
+    self: Any,
     track_ids: list[int],
     mode: str = "fixed",
     start_time: float | None = None,
@@ -364,10 +385,35 @@ def create_notes_from_tracks(
         }
 
 
-def install_track_transcription() -> None:
-    """Install Phase C methods once onto the shared editing mixin."""
-    if getattr(EditingMixin, "_track_transcription_installed", False):
-        return
-    EditingMixin.find_frequency_tracks = find_frequency_tracks  # type: ignore[attr-defined]
-    EditingMixin.create_notes_from_tracks = create_notes_from_tracks  # type: ignore[attr-defined]
-    EditingMixin._track_transcription_installed = True  # type: ignore[attr-defined]
+class TrackTranscriptionMixin:
+    """Explicit Web bridge surface for Frequency Track selection/transcription."""
+
+    def find_frequency_tracks(
+        self,
+        start_time: float,
+        end_time: float,
+        minimum_midi: float,
+        maximum_midi: float,
+    ) -> dict[str, Any]:
+        return find_frequency_tracks(
+            self,
+            start_time,
+            end_time,
+            minimum_midi,
+            maximum_midi,
+        )
+
+    def create_notes_from_tracks(
+        self,
+        track_ids: list[int],
+        mode: str = "fixed",
+        start_time: float | None = None,
+        end_time: float | None = None,
+    ) -> dict[str, Any]:
+        return create_notes_from_tracks(
+            self,
+            track_ids,
+            mode,
+            start_time,
+            end_time,
+        )
