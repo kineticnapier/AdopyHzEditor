@@ -354,7 +354,18 @@ class NoteMixin:
                 return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "クリップボードは空です"}
             self._push_undo()
             clipboard_end = max(item.normalized().end for item in self._clipboard)
-            base = _clamp(at_time, 0.0, max(0.0, self.duration - clipboard_end))
+            max_base = max(0.0, self.duration - clipboard_end)
+            base = _clamp(at_time, 0.0, max_base)
+            if self.settings["snapEnabled"]:
+                base = self._snap_time(base)
+                if base > max_base + 1e-12:
+                    step = (
+                        60.0
+                        / max(1e-6, float(self.settings["bpm"]))
+                        / max(1, int(self.settings["snapDiv"]))
+                    )
+                    base = self._snap_time(max(0.0, base - step))
+                base = _clamp(base, 0.0, max_base)
             new_indices: list[int] = []
             for item in self._clipboard:
                 pasted = item.with_time_offset(base).normalized()
