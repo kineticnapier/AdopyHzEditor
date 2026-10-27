@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
 type Props = {
   hasSelection:boolean;
@@ -33,9 +33,18 @@ type MenuProps={id:MenuId;label:string;active:MenuId|null;setActive(v:MenuId|nul
 
 function Menu({id,label,active,setActive,children}:MenuProps){
   const open=active===id;
+  const popupId=useId(),popupRef=useRef<HTMLDivElement>(null);
+  const focusItem=(edge:"first"|"last")=>window.requestAnimationFrame(()=>{const items=popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');items?.[edge==="first"?0:Math.max(0,items.length-1)]?.focus()});
+  function navigate(event:ReactKeyboardEvent<HTMLDivElement>){
+    const items=Array.from(popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')??[]),index=items.indexOf(document.activeElement as HTMLButtonElement);
+    if(event.key==="ArrowDown"){event.preventDefault();items[(index+1+items.length)%items.length]?.focus()}
+    else if(event.key==="ArrowUp"){event.preventDefault();items[(index-1+items.length)%items.length]?.focus()}
+    else if(event.key==="Home"){event.preventDefault();items[0]?.focus()}
+    else if(event.key==="End"){event.preventDefault();items.at(-1)?.focus()}
+  }
   return <div className={open?"app-menu open":"app-menu"} onMouseEnter={()=>{if(active!==null&&!open)setActive(id)}}>
-    <button className="app-menu-trigger" type="button" aria-haspopup="menu" aria-expanded={open} onClick={()=>setActive(open?null:id)}>{label}</button>
-    {open&&<div className="app-menu-popup" role="menu">{children}</div>}
+    <button className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
+    {open&&<div ref={popupRef} id={popupId} className="app-menu-popup" role="menu" onKeyDown={navigate}>{children}</div>}
   </div>;
 }
 
@@ -48,13 +57,24 @@ export default function AppMenus(p:Props){
   const rootRef=useRef<HTMLElement>(null);
   useEffect(()=>{
     const down=(e:PointerEvent)=>{const r=rootRef.current;if(r&&!r.contains(e.target as Node))setActive(null)};
-    const key=(e:KeyboardEvent)=>{if(e.key==="Escape")setActive(null)};
+    const key=(e:KeyboardEvent)=>{if(e.key==="Escape"&&active){const id=active;setActive(null);window.requestAnimationFrame(()=>rootRef.current?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`)?.focus())}};
     window.addEventListener("pointerdown",down);
     window.addEventListener("keydown",key);
     return()=>{window.removeEventListener("pointerdown",down);window.removeEventListener("keydown",key)};
-  },[]);
-  const close=()=>setActive(null);
-  return <nav className="app-menus" ref={rootRef}>
+  },[active]);
+  const focusTrigger=(id:MenuId)=>window.requestAnimationFrame(()=>rootRef.current?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`)?.focus());
+  const close=()=>{const id=active;setActive(null);if(id)focusTrigger(id)};
+  const menuIds:MenuId[]=["file","edit","analyze","tools","options","help"];
+  function traverseMenus(event:ReactKeyboardEvent<HTMLElement>){
+    if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;
+    const target=(event.target as HTMLElement).closest<HTMLButtonElement>("[data-menu-id]"),current=(active??target?.dataset.menuId) as MenuId|undefined;
+    if(!current)return;
+    event.preventDefault();
+    const index=menuIds.indexOf(current),next=menuIds[(index+(event.key==="ArrowRight"?1:-1)+menuIds.length)%menuIds.length];
+    if(active)setActive(next);
+    focusTrigger(next);
+  }
+  return <nav className="app-menus" aria-label="アプリケーションメニュー" ref={rootRef} onKeyDown={traverseMenus}>
     <Menu id="file" label="ファイル" active={active} setActive={setActive}>
       <Action close={close} shortcut="Ctrl+O" onClick={p.onOpenAudio}>音声を開く…</Action>
       <Action close={close} shortcut="Ctrl+L" onClick={p.onLoadProject}>プロジェクトを開く…</Action>
