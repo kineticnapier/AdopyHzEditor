@@ -18,12 +18,8 @@ import numpy as np
 
 from core.frequency_tracks import (
     FrequencyTrackRegion,
-    FrequencyTrackStore,
     _PACKED_TRACK_POINT_DTYPE,
 )
-
-
-_ORIGINAL_QUERY_REGION = FrequencyTrackStore.query_region
 
 
 def track_continuity(times: np.ndarray, midis: np.ndarray) -> float:
@@ -258,11 +254,3 @@ def readable_frequency_track_region(
         decimation_level=max(1.0, raw_points / max(1, cursor)),
         query_seconds=time.perf_counter() - started,
     )
-
-
-def install_frequency_track_display_policy() -> None:
-    """Install the Web-only readability policy once."""
-    if getattr(FrequencyTrackStore, "_web_readability_policy_installed", False):
-        return
-    FrequencyTrackStore.query_region = readable_frequency_track_region  # type: ignore[method-assign]
-    FrequencyTrackStore._web_readability_policy_installed = True  # type: ignore[attr-defined]
