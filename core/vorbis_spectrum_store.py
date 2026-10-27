@@ -9,6 +9,7 @@ are applied only when a caller asks for a region to draw.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import math
 from pathlib import Path
 import time
@@ -29,6 +30,31 @@ _PACKED_CELL_DTYPE = np.dtype(
 def _readonly(values: np.ndarray) -> np.ndarray:
     values.setflags(write=False)
     return values
+
+
+@lru_cache(maxsize=16)
+def _cached_bin_midi(sample_rate: int, block_size: int) -> np.ndarray:
+    """Return the immutable MIDI coordinate table for one native MDCT size."""
+    frequencies = (
+        np.arange(int(block_size) // 2, dtype=np.float64) + 0.5
+    ) * int(sample_rate) / int(block_size)
+    return _readonly(69.0 + 12.0 * np.log2(frequencies / 440.0))
+
+
+def _candidate_time_bounds(
+    center_times: np.ndarray,
+    start_time: float,
+    end_time: float,
+    maximum_span: float,
+) -> tuple[int, int]:
+    """Bound overlap candidates with binary search before exact span checks."""
+    left = int(np.searchsorted(
+        center_times,
+        float(start_time) - max(0.0, float(maximum_span)),
+        side="left",
+    ))
+    right = int(np.searchsorted(center_times, float(end_time), side="right"))
+    return left, right
 
 
 @dataclass(frozen=True)
@@ -141,9 +167,25 @@ class VorbisSpectrumStore:
         if end <= start or midi_max <= midi_min or not self.center_times.size:
             return SpectrumRegion(b"", 0, 1, 1, 1.0, time.perf_counter() - started)
 
+        # center_times are emitted in stream order. A block can only overlap
+        # the viewport when its center lies no earlier than one maximum block
+        # span before start, so binary search reduces the exact overlap check
+        # from O(total blocks) to O(log N + viewport candidates).
+        maximum_span = max(
+            int(self.stream_info.short_block_size),
+            int(self.stream_info.long_block_size),
+        ) / (2.0 * max(1, int(self.stream_info.sample_rate)))
+        candidate_left, candidate_right = _candidate_time_bounds(
+            self.center_times,
+            start,
+            end,
+            maximum_span,
+        )
+        candidate_times = self.center_times[candidate_left:candidate_right]
+        candidate_spans = self.spans[candidate_left:candidate_right]
         overlaps = (
-            (self.center_times <= end)
-            & (self.center_times + self.spans >= start)
+            (candidate_times <= end)
+            & (candidate_times + candidate_spans >= start)
         )
         visible_blocks = int(np.count_nonzero(overlaps))
         if not visible_blocks:
@@ -151,10 +193,10 @@ class VorbisSpectrumStore:
 
         native_pitch_bins = 1
         for plane in self.planes:
-            frequencies = (
-                np.arange(plane.block_size // 2, dtype=np.float64) + 0.5
-            ) * self.stream_info.sample_rate / plane.block_size
-            midi = 69.0 + 12.0 * np.log2(frequencies / 440.0)
+            midi = _cached_bin_midi(
+                self.stream_info.sample_rate,
+                plane.block_size,
+            )
             native_pitch_bins = max(
                 native_pitch_bins,
                 int(np.count_nonzero((midi >= midi_min) & (midi <= midi_max))),
@@ -174,18 +216,24 @@ class VorbisSpectrumStore:
 
         for plane in self.planes:
             global_indices = plane.block_indices
-            plane_times = self.center_times[global_indices]
-            plane_spans = self.spans[global_indices]
-            rows = np.flatnonzero(
+            row_left = int(np.searchsorted(global_indices, candidate_left, side="left"))
+            row_right = int(np.searchsorted(global_indices, candidate_right, side="left"))
+            if row_right <= row_left:
+                continue
+            candidate_rows = np.arange(row_left, row_right, dtype=np.int64)
+            candidate_globals = global_indices[candidate_rows]
+            plane_times = self.center_times[candidate_globals]
+            plane_spans = self.spans[candidate_globals]
+            rows = candidate_rows[np.flatnonzero(
                 (plane_times <= end) & (plane_times + plane_spans >= start)
-            )
+            )]
             if not rows.size:
                 continue
 
-            frequencies = (
-                np.arange(plane.block_size // 2, dtype=np.float64) + 0.5
-            ) * self.stream_info.sample_rate / plane.block_size
-            bin_midi = 69.0 + 12.0 * np.log2(frequencies / 440.0)
+            bin_midi = _cached_bin_midi(
+                self.stream_info.sample_rate,
+                plane.block_size,
+            )
             bins = np.flatnonzero(
                 (bin_midi >= midi_min) & (bin_midi <= midi_max)
             )
