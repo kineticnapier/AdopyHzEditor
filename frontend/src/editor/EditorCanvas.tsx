@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
+import { midiLabel, midiToHz } from "./musicMath";
+
+export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
+export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
 
 type Props = {
   notes: NoteDto[];
@@ -12,7 +16,7 @@ type Props = {
   spectrum: SpectrogramPayload | null;
   directSpectrum: DirectSpectrumPayload | null;
   frequencyTracks: FrequencyTrackPayload | null;
-  trackRevision: number;
+  trackSelection: TrackSelectionState;
   onViewportSize?(size: {width:number;height:number}): void;
   onSelect(indices: number[]): void;
   onAdd(start: number, end: number, midi: number, kind: "note" | "curve", endMidi: number): Promise<void>;
@@ -24,15 +28,14 @@ type Props = {
   onSeek(time: number): Promise<void>;
   onView(changes: Partial<ViewState>): Promise<void>;
   onCursorMove?(time: number, midi: number): void;
-  onTrackHover?(track: {id:number;frequency:number;noteName:string;duration:number;magnitude:number}|null): void;
+  onTrackHover?(track: TrackHoverInfo|null): void;
+  onTrackSelectionChange(selection:TrackSelectionState):void;
   onFindTracks(range: TrackSelectionRange): Promise<number[]>;
-  onConvertTracks(trackIds: number[], mode: "fixed" | "curve", range: TrackSelectionRange | null): Promise<void>;
 };
 
 type DragMode = "create" | "curve" | "region" | "track-region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
 type DragState = { mode: DragMode; startTime: number; startMidi: number; nowTime: number; nowMidi: number; indices: number[]; trackAdditive?: boolean };
 
-function midiToHz(midi: number) { return 440 * 2 ** ((midi - 69) / 12); }
 function hitNote(notes: NoteDto[], index: NoteTimeIndex, time: number, midi: number, pitchStep = 1) {
   const hits: Array<[number, number]> = [];
   noteCandidatesAt(index,time).forEach(noteIndex => {
@@ -79,7 +82,6 @@ function decodeFrequencyTracks(payload: FrequencyTrackPayload | null) {
   for(let i=0;i<count;i+=1){const offset=i*stride;ids[i]=view.getUint32(offset,true);times[i]=view.getFloat32(offset+4,true);midis[i]=view.getFloat32(offset+8,true);magnitudes[i]=view.getUint8(offset+12)/255;durations[i]=view.getFloat32(offset+13,true);flags[i]=view.getUint8(offset+17);}
   return{ids,times,midis,magnitudes,durations,flags,count};
 }
-function midiLabel(midi:number){const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],rounded=Math.round(midi);return `${names[((rounded%12)+12)%12]}${Math.floor(rounded/12)-1}`;}
 function snapTime(settings: EditorSettings, duration: number, time: number) {
   const t = Math.max(0, Math.min(duration, time));
   if (!settings.snapEnabled) return t;
@@ -113,19 +115,9 @@ export default function EditorCanvas(props: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const selectedSet=useMemo(()=>new Set(props.selected),[props.selected]);
   const noteTimeIndex=useMemo(()=>buildNoteTimeIndex(props.notes),[props.notes]);
-  const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
-  const [trackRange, setTrackRange] = useState<TrackSelectionRange | null>(null);
-  const [useTrackRange, setUseTrackRange] = useState(false);
-  const [convertingTracks, setConvertingTracks] = useState(false);
   const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
   const decodedTracks = useMemo(() => decodeFrequencyTracks(props.frequencyTracks), [props.frequencyTracks]);
-  const selectedTrackSet = useMemo(() => new Set(selectedTracks), [selectedTracks]);
-
-  useEffect(()=>{
-    setSelectedTracks([]);
-    setTrackRange(null);
-    setUseTrackRange(false);
-  },[props.trackRevision]);
+  const selectedTrackSet = useMemo(() => new Set(props.trackSelection.ids), [props.trackSelection.ids]);
 
   const spectrumCanvas = useMemo(() => {
     if (!decoded) return null;
@@ -312,7 +304,7 @@ export default function EditorCanvas(props: Props) {
     const n=props.notes[index];if(!n)return null;
     return noteEdgeAt(coords.x(n.start),coords.x(n.end),px);
   }
-  function clearTrackSelection(){setSelectedTracks([]);setTrackRange(null);setUseTrackRange(false);}
+  function clearTrackSelection(){props.onTrackSelectionChange({ids:[],range:null,useRange:false});}
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
     if(event.button!==0)return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -336,8 +328,8 @@ export default function EditorCanvas(props: Props) {
     }
     const trackHit=hoveredTrack(p.x,p.y);
     if(trackHit){
-      setSelectedTracks(current=>updateTrackSelection(current,trackHit.id,event.ctrlKey));
-      setTrackRange(null);setUseTrackRange(false);props.onSelect([]);
+      props.onTrackSelectionChange({ids:updateTrackSelection(props.trackSelection.ids,trackHit.id,event.ctrlKey),range:null,useRange:false});
+      props.onSelect([]);
       return;
     }
     if(event.shiftKey&&decodedTracks){
@@ -364,8 +356,8 @@ export default function EditorCanvas(props: Props) {
       const range=normalizeTrackRange(cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi);
       if(range.endTime-range.startTime>=.001){
         const ids=await props.onFindTracks(range);
-        setSelectedTracks(current=>mergeTrackSelection(current,ids,Boolean(cur.trackAdditive)));
-        setTrackRange(range);setUseTrackRange(ids.length>0);props.onSelect([]);
+        props.onTrackSelectionChange({ids:mergeTrackSelection(props.trackSelection.ids,ids,Boolean(cur.trackAdditive)),range,useRange:ids.length>0});
+        props.onSelect([]);
       }
       return;
     }
@@ -412,22 +404,8 @@ export default function EditorCanvas(props: Props) {
     else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
     else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
   }
-  async function convertSelectedTracks(mode:"fixed"|"curve"){
-    if(!selectedTracks.length||convertingTracks)return;
-    setConvertingTracks(true);
-    try{await props.onConvertTracks(selectedTracks,mode,useTrackRange?trackRange:null);}finally{setConvertingTracks(false)}
-  }
-
-  const panelButtonStyle={border:"1px solid #22262b",borderRadius:5,background:"#454c54",color:"#eef2f6",padding:"5px 8px",minHeight:28,cursor:"pointer"} as const;
   return <div className="canvas-wrap" ref={containerRef}>
-    <canvas ref={canvasRef} title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/>
+    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。操作方法はF1で確認できます。" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
-    {selectedTracks.length>0&&<div onPointerDown={event=>event.stopPropagation()} style={{position:"absolute",zIndex:4,top:8,right:8,display:"flex",alignItems:"center",gap:7,padding:"7px 9px",border:"1px solid #545c64",borderRadius:6,background:"rgba(35,40,46,.94)",boxShadow:"0 2px 10px rgba(0,0,0,.35)",fontSize:12}}>
-      <strong>Track {selectedTracks.length}本</strong>
-      {trackRange&&<label style={{display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}><input type="checkbox" checked={useTrackRange} onChange={event=>setUseTrackRange(event.target.checked)}/>矩形範囲 {trackRange.startTime.toFixed(2)}–{trackRange.endTime.toFixed(2)}s</label>}
-      <button style={panelButtonStyle} disabled={convertingTracks} onClick={()=>void convertSelectedTracks("fixed")}>固定Note化</button>
-      <button style={panelButtonStyle} disabled={convertingTracks} onClick={()=>void convertSelectedTracks("curve")}>Curve Note化</button>
-      <button style={panelButtonStyle} disabled={convertingTracks} onClick={clearTrackSelection}>解除</button>
-    </div>}
   </div>;
 }
