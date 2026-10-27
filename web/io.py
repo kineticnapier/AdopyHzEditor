@@ -18,6 +18,43 @@ MIDI_FILE_TYPES = ("MIDIファイル (*.mid;*.midi)", "すべてのファイル 
 ADOF_FILE_TYPES = ("ADOFAI譜面 (*.adofai)", "すべてのファイル (*.*)")
 
 
+# One canonical settings baseline is used both for a fresh Bridge and when
+# restoring an older project that omits newer keys. Missing project fields must
+# never inherit values from the previously-open document.
+DEFAULT_EDITOR_SETTINGS: dict[str, Any] = {
+    "volume": 85,
+    "speed": 1.0,
+    "notePreview": True,
+    "previewVolume": 20,
+    "previewOctave": 0,
+    "previewSound": "sine",
+    "exportOctave": 0,
+    "exportSemitone": 0,
+    "gridEnabled": False,
+    "metronomeEnabled": False,
+    "bpm": 175.0,
+    "offsetMs": 0.0,
+    "metronomeVolume": 35,
+    "snapEnabled": False,
+    "snapDiv": 1,
+    "contrast": 115,
+    "gamma": 75,
+    "enhance": True,
+    "displayMode": "wavetone",
+    "harmonics": "off",
+    "colormap": "wavetone",
+    "analysisProfile": "Normal",
+    "cqtResolution": "profile default",
+    "analysisSource": "cqt",
+    "spectrumThreshold": 2.0,
+    "spectrumOpacity": 70,
+    "spectrumLayerMode": "both",
+    "curveShape": "ease",
+    "curveInterpolation": "bezier_pitch",
+    "targetAngle": 165.0,
+}
+
+
 # Keep the on-disk key, Web UI setting key, and saved value type together so
 # adding a setting cannot update the save path without also updating restore.
 PROJECT_SETTING_FIELDS: tuple[tuple[str, str, type], ...] = (
@@ -59,7 +96,7 @@ PROJECT_SETTING_ALIASES = {"note_octave": "previewOctave"}
 
 class IOMixin:
     def _normalized_project_settings(self, data: dict[str, Any]) -> dict[str, Any]:
-        settings = dict(self.settings)
+        settings = dict(DEFAULT_EDITOR_SETTINGS)
         for project_key, setting_key, _value_type in PROJECT_SETTING_FIELDS:
             if project_key in data and setting_key in settings:
                 settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
@@ -72,6 +109,12 @@ class IOMixin:
         s = self.settings
         saved = {project_key: value_type(s[setting_key]) for project_key, setting_key, value_type in PROJECT_SETTING_FIELDS}
         saved["web_ui"] = True
+        # Workspace bounds are document metadata rather than user preferences.
+        # Keeping them in the existing settings object preserves project-format
+        # compatibility while allowing blank workspaces to round-trip exactly.
+        saved["workspace_duration"] = float(self.duration)
+        saved["workspace_midi_min"] = int(self.midi_min)
+        saved["workspace_midi_max"] = int(self.midi_max)
         return saved
 
     def _apply_project_settings(self, data: dict[str, Any]) -> None:
@@ -81,7 +124,10 @@ class IOMixin:
     def _save_project_path(self, path: str) -> dict[str, Any]:
         if not Path(path).suffix:path+=".adopyhz"
         with self._lock:
-            save_project(path,audio_path=self.audio_path,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._dirty=False;self._status=f"{Path(path).name} を保存しました";return self._state_dict()
+            # Keep an unresolved project audio reference until the user relinks
+            # or explicitly creates a derived audio-less workspace.
+            audio_reference = self.audio_path or self.project_audio_reference
+            save_project(path,audio_path=audio_reference,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._dirty=False;self._status=f"{Path(path).name} を保存しました";return self._state_dict()
 
     def save_project_dialog(self) -> dict[str, Any]:
         """Save in place when possible; ask for a path only for new projects."""
@@ -126,6 +172,7 @@ class IOMixin:
             self._undo_stack.clear();self._redo_stack.clear()
             self.settings=prepared_settings
             self.project_path=str(Path(path).resolve())
+            self.project_audio_reference=str(audio_path) if audio_path else None
             self._dirty=False
             self._status=f"{Path(path).name} を読み込みました"
             if prepared_audio is not None and audio_path:
@@ -140,7 +187,21 @@ class IOMixin:
                 self._sync_notes_to_player()
                 self._status=f"{Path(path).name} と音声を読み込みました"
             else:
-                self.audio_path=None;self.spectrogram=None;self.duration=max(60.0,max((n.end for n in self.notes),default=0.0));self.midi_min=12;self.midi_max=120;self.pitch_step=1.0;self.player.clear_audio();self._apply_player_settings();self._sync_notes_to_player()
+                self.audio_path=None;self.spectrogram=None
+                note_end=max((n.end for n in self.notes),default=0.0)
+                saved_duration=settings.get("workspace_duration")
+                saved_midi_min=settings.get("workspace_midi_min")
+                saved_midi_max=settings.get("workspace_midi_max")
+                if saved_duration is None:
+                    self.duration=max(60.0,note_end)
+                else:
+                    self.duration=max(1.0,float(saved_duration),note_end)
+                if saved_midi_min is None or saved_midi_max is None:
+                    self.midi_min=12;self.midi_max=120
+                else:
+                    self.midi_min=max(0,min(127,int(saved_midi_min)))
+                    self.midi_max=max(self.midi_min+1,min(127,int(saved_midi_max)))
+                self.pitch_step=1.0;self.player.clear_audio();self._apply_player_settings();self._sync_notes_to_player()
                 if audio_path:
                     self._status=f"{Path(path).name} の音源が見つかりません。ファイル → プロジェクト音源を再指定… から選び直せます"
                 else:
