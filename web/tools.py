@@ -348,6 +348,21 @@ class ToolsMixin:
 
     def insert_harmonic_diagram(self, options: dict[str, Any]) -> dict[str, Any]:
         rows, start, duration = self._harmonic_diagram_rows(options)
+        invalid = [
+            row
+            for row in rows
+            if not (0.0 <= float(row["midi"]) <= 127.0)
+        ]
+        if invalid:
+            values = ", ".join(
+                f'{float(row["midi"]):.3f}'
+                for row in invalid[:4]
+            )
+            suffix = "…" if len(invalid) > 4 else ""
+            raise ValueError(
+                "MIDI範囲外の倍音は挿入できません "
+                f"(0–127): {values}{suffix}"
+            )
         with self._lock:
             self._push_undo()
             first = len(self.notes)
