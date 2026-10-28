@@ -791,59 +791,69 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
             }
 
     def get_spectrogram(self, max_columns: int = 1600, start: float | None = None, end: float | None = None) -> dict[str, Any]:
+        # Spectrogram objects are replaced atomically and their arrays are not
+        # mutated after publication. Snapshot the object and render settings
+        # under the Bridge lock, then release it before expensive NumPy work so
+        # viewport/edit requests are not serialized behind image generation.
         with self._lock:
             spec = self.spectrogram
             if spec is None:
                 return {"available": False}
-            data = np.asarray(spec.db, dtype=np.float32)
-            rows, cols = data.shape
-            window_start = 0.0
-            window_end = float(spec.duration)
-            if start is not None or end is not None:
-                window_start = _clamp(0.0 if start is None else start, 0.0, spec.duration)
-                window_end = _clamp(spec.duration if end is None else end, window_start, spec.duration)
-                left = max(0, min(cols - 1, int(np.searchsorted(spec.frame_times, window_start, side="left"))))
-                right = max(left + 1, min(cols, int(np.searchsorted(spec.frame_times, window_end, side="right"))))
-                data = data[:, left:right]
-                cols = data.shape[1]
-            max_columns = max(64, min(4096, int(max_columns)))
-            if cols > max_columns:
-                edges = np.linspace(0, cols, max_columns + 1, dtype=np.int32)
-                reduced = np.empty((rows, max_columns), dtype=np.float32)
-                for i in range(max_columns):
-                    a, b = int(edges[i]), int(edges[i + 1])
-                    if b <= a:
-                        b = min(cols, a + 1)
-                    reduced[:, i] = np.max(data[:, a:b], axis=1)
-                data = reduced
-                cols = max_columns
-
-            enhanced = enhance_spectrogram(
-                data,
-                contrast=float(self.settings["contrast"]) / 100.0,
-                gamma=float(self.settings["gamma"]) / 100.0,
-                per_bin=bool(self.settings["enhance"]),
-                display_mode=str(self.settings["displayMode"]),
-                harmonic_mode=str(self.settings["harmonics"]),
-            )
-            lo = float(np.min(enhanced)) if enhanced.size else 0.0
-            hi = float(np.max(enhanced)) if enhanced.size else 1.0
-            if hi <= lo + 1e-12:
-                u8 = np.zeros_like(enhanced, dtype=np.uint8)
-            else:
-                u8 = np.clip((enhanced - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
-            return {
-                "available": True,
-                "rows": int(u8.shape[0]),
-                "cols": int(u8.shape[1]),
-                "data": base64.b64encode(u8.tobytes(order="C")).decode("ascii"),
-                "duration": float(spec.duration),
-                "start": window_start,
-                "end": window_end,
-                "midiMin": int(spec.midi_min),
-                "midiMax": int(spec.midi_max),
-                "pitchStep": float(spec.pitch_step),
+            render_settings = {
+                "contrast": float(self.settings["contrast"]) / 100.0,
+                "gamma": float(self.settings["gamma"]) / 100.0,
+                "per_bin": bool(self.settings["enhance"]),
+                "display_mode": str(self.settings["displayMode"]),
+                "harmonic_mode": str(self.settings["harmonics"]),
             }
+
+        data = np.asarray(spec.db, dtype=np.float32)
+        rows, cols = data.shape
+        window_start = 0.0
+        window_end = float(spec.duration)
+        if start is not None or end is not None:
+            window_start = _clamp(0.0 if start is None else start, 0.0, spec.duration)
+            window_end = _clamp(spec.duration if end is None else end, window_start, spec.duration)
+            left = max(0, min(cols - 1, int(np.searchsorted(spec.frame_times, window_start, side="left"))))
+            right = max(left + 1, min(cols, int(np.searchsorted(spec.frame_times, window_end, side="right"))))
+            data = data[:, left:right]
+            cols = data.shape[1]
+        max_columns = max(64, min(4096, int(max_columns)))
+        if cols > max_columns:
+            edges = np.linspace(0, cols, max_columns + 1, dtype=np.int32)
+            reduced = np.empty((rows, max_columns), dtype=np.float32)
+            for i in range(max_columns):
+                a, b = int(edges[i]), int(edges[i + 1])
+                if b <= a:
+                    b = min(cols, a + 1)
+                reduced[:, i] = np.max(data[:, a:b], axis=1)
+            data = reduced
+            cols = max_columns
+
+        enhanced = enhance_spectrogram(data, **render_settings)
+        lo = float(np.min(enhanced)) if enhanced.size else 0.0
+        hi = float(np.max(enhanced)) if enhanced.size else 1.0
+        if hi <= lo + 1e-12:
+            u8 = np.zeros_like(enhanced, dtype=np.uint8)
+        else:
+            u8 = np.clip((enhanced - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+        encoded = base64.b64encode(u8.tobytes(order="C")).decode("ascii")
+
+        with self._lock:
+            if self.spectrogram is not spec:
+                return {"available": False, "stale": True}
+        return {
+            "available": True,
+            "rows": int(u8.shape[0]),
+            "cols": int(u8.shape[1]),
+            "data": encoded,
+            "duration": float(spec.duration),
+            "start": window_start,
+            "end": window_end,
+            "midiMin": int(spec.midi_min),
+            "midiMax": int(spec.midi_max),
+            "pitchStep": float(spec.pitch_step),
+        }
 
     # ------------------------------------------------------------------
     # Playback
