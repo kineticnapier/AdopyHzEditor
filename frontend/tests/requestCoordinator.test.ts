@@ -178,7 +178,7 @@ test("failed document transition does not apply state and queue recovers", async
 test("state actions, blank workspace and pending save use the same queue", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const dialogs = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
-  assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*action/);
+  assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*guardedAction/);
   assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
   assert.match(app, /enqueueStateTask\(\s*mutationQueue\.current,\s*\(\) => api\.save_project_dialog\(\)/);
   assert.match(dialogs, /await onApply\(value\)/);
@@ -366,4 +366,58 @@ test("playback follow shares manual view queue and error feedback", () => {
   assert.match(app, /void applyViewAction\(\(\) => api\.set_view\(\{ start: next \}\), "再生追従"\)/);
   assert.match(app, /stateTransitionPending\.current === 0/);
   assert.doesNotMatch(app, /void api\?\.set_view\(\{ start: next \}\)/);
+});
+
+test("document replacement waits for a started viewport write", async () => {
+  const viewQueue = new SerialTaskQueue();
+  const editQueue = new SerialTaskQueue();
+  const gate = new LatestRequestGate();
+  const events: string[] = [];
+  let started!: () => void;
+  let releaseView!: () => void;
+  const viewStarted = new Promise<void>((resolve) => { started = resolve; });
+  const oldRequest = gate.issue();
+  const viewWrite = enqueueRecoverableViewTask(
+    viewQueue,
+    async () => {
+      events.push("view-start");
+      started();
+      return new Promise<number>((resolve) => {
+        releaseView = () => { events.push("view-end"); resolve(1); };
+      });
+    },
+    () => gate.isCurrent(oldRequest),
+    () => { events.push("stale-view-applied"); },
+    async () => { events.push("stale-view-recovered"); },
+  );
+  await viewStarted;
+  // This is done synchronously at the beginning of performStateAction().
+  gate.invalidate();
+  const transition = enqueueStateTaskAfterSettings(
+    editQueue,
+    async () => { events.push("settings-finished"); },
+    async () => {
+      await viewQueue.enqueue(async () => undefined);
+      events.push("load-new");
+      return "new";
+    },
+    () => { events.push("apply-new"); },
+  );
+  await Promise.resolve();
+  assert.equal(events.includes("load-new"), false);
+  releaseView();
+  await Promise.all([viewWrite, transition]);
+  assert.deepEqual(events, [
+    "view-start", "settings-finished", "view-end", "load-new", "apply-new",
+  ]);
+});
+
+test("document transition invalidates viewport work and blocks new view changes", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /stateTransitionPending\.current \+= 1;\s*\/\/ Invalidate pending viewport writes[^\n]*\n\s*viewRequests\.current\.invalidate\(\)/);
+  assert.match(app, /const guardedAction = async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return action\(\);/);
+  assert.match(app, /async function updateView\(changes: Partial<ViewState>\) \{\s*if \(stateTransitionPending\.current > 0\)/);
+  assert.match(app, /async function fitView\(\) \{\s*if \(stateTransitionPending\.current > 0\)/);
+  assert.match(app, /if \(!api \|\| stateTransitionPending\.current > 0\) return;\s*const request = viewRequests\.current\.issue\(\)/);
+  assert.match(app, /if \(stateTransitionPending\.current > 0 \|\| !followPlayback/);
 });
