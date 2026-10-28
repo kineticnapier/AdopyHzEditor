@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import NotePresetPanel from "./NotePresetPanel";
 import type { AppState, BackendApi, EditorSettings, NoteDto, NoteMutationResult } from "./bridge";
+import type { TrackHoverInfo, TrackSelectionState } from "../editor/EditorCanvas";
+import { midiLabel, midiToHz } from "../editor/musicMath";
 import { commitNumericText } from "./numericInputModel";
 
 type Page="inspector"|"settings";
@@ -13,10 +14,14 @@ type Props={
   busy:boolean;
   analysisAvailable:boolean;
   actualAnalysisSource:string;
+  trackSelection:TrackSelectionState;
+  hoveredTrack:TrackHoverInfo|null;
   onPatch(changes:Partial<EditorSettings>):Promise<void>;
   onStateAction(action:()=>Promise<AppState>):Promise<void>;
   onMutation(result:NoteMutationResult,nextSelection?:number[]):void;
   onStatus(text:string):void;
+  onTrackSelectionChange(selection:TrackSelectionState):void;
+  onConvertTracks(mode:"fixed"|"curve"):Promise<void>;
 };
 
 type CurveShapeState={mode:string;p1:number;p2:number};
@@ -27,10 +32,8 @@ function parseCurveShape(value:string):CurveShapeState{
   return{mode:"custom",p1:Number.isFinite(a)?a:0,p2:Number.isFinite(b)?b:100};
 }
 function clampCurvePercent(value:number){return Math.max(-200,Math.min(300,value));}
-function midiToHz(midi:number){return 440*2**((midi-69)/12);}
-function midiLabel(midi:number){const names=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],rounded=Math.round(midi);return `${names[((rounded%12)+12)%12]}${Math.floor(rounded/12)-1}`;}
 
-export default function SettingsPanel({api,settings,notes,selected,audioName,busy,analysisAvailable,actualAnalysisSource,onPatch,onStateAction,onMutation,onStatus}:Props){
+export default function SettingsPanel({api,settings,notes,selected,audioName,busy,analysisAvailable,actualAnalysisSource,trackSelection,hoveredTrack,onPatch,onStateAction,onMutation,onStatus,onTrackSelectionChange,onConvertTracks}:Props){
   const[page,setPage]=useState<Page>("inspector");
   const one=selected.length===1?notes[selected[0]]:null;
   const curveShape=parseCurveShape(settings.curveShape);
@@ -40,16 +43,30 @@ export default function SettingsPanel({api,settings,notes,selected,audioName,bus
   const requested=settings.analysisSource==="vorbis_direct"?"Vorbis Direct":"CQT";
   const actual=!analysisAvailable?"未解析":actualAnalysisSource==="vorbis_direct"?"Vorbis Direct":"CQT";
   const fallback=analysisAvailable&&settings.analysisSource==="vorbis_direct"&&actualAnalysisSource!=="vorbis_direct";
+  useEffect(()=>{if(selected.length||trackSelection.ids.length)setPage("inspector")},[selected.length,trackSelection.ids.length]);
 
   return <aside className="settings inspector-panel">
     <h2>{page==="inspector"?"インスペクタ":"設定"}</h2>
     <nav className="inspector-tabs">
-      <button className={page==="inspector"?"active":""} onClick={()=>setPage("inspector")}>Inspector</button>
-      <button className={page==="settings"?"active":""} onClick={()=>setPage("settings")}>Settings</button>
+      <button className={page==="inspector"?"active":""} aria-pressed={page==="inspector"} onClick={()=>setPage("inspector")}>インスペクタ</button>
+      <button className={page==="settings"?"active":""} aria-pressed={page==="settings"} onClick={()=>setPage("settings")}>設定</button>
     </nav>
     <div className="settings-body">
       {page==="inspector"&&<>
-        {selected.length===0&&<div className="inspector-empty"><strong>選択なし</strong><span>ノートを選択するとプロパティを編集できます。</span></div>}
+        {selected.length===0&&trackSelection.ids.length===0&&<div className="inspector-empty"><strong>選択なし</strong><span>NoteまたはTrackを選択すると、ここに編集項目が表示されます。</span></div>}
+        {trackSelection.ids.length>0&&<section className="track-inspector" aria-label="選択したTrack">
+          <div className="inspector-summary"><strong>Frequency Track</strong><span>{trackSelection.ids.length}本選択</span></div>
+          <div className="property-readout"><span>Track ID</span><b>{trackSelection.ids.length===1?`#${trackSelection.ids[0]}`:`${trackSelection.ids.length} tracks`}</b></div>
+          {trackSelection.range&&<>
+            <div className="property-readout"><span>時間範囲</span><b>{trackSelection.range.startTime.toFixed(3)}–{trackSelection.range.endTime.toFixed(3)} s</b></div>
+            <div className="property-readout"><span>音高範囲</span><b>MIDI {trackSelection.range.minMidi.toFixed(1)}–{trackSelection.range.maxMidi.toFixed(1)}</b></div>
+            <label className="inline-check inspector-check"><input type="checkbox" checked={trackSelection.useRange} onChange={event=>onTrackSelectionChange({...trackSelection,useRange:event.target.checked})}/>選択矩形でNoteを切り取る</label>
+          </>}
+          {hoveredTrack&&trackSelection.ids.includes(hoveredTrack.id)&&<div className="track-detail"><span>{hoveredTrack.noteName}</span><b>{hoveredTrack.frequency.toFixed(2)} Hz</b><small>{hoveredTrack.duration.toFixed(3)} s · 強度 {(hoveredTrack.magnitude*100).toFixed(1)}%</small></div>}
+          <p className="inspector-help">固定音程なら固定Note、音高変化を残すならCurve Noteへ変換します。</p>
+          <div className="track-actions"><button className="primary-soft" disabled={busy} onClick={()=>void onConvertTracks("fixed")}>固定Noteを作成</button><button disabled={busy} onClick={()=>void onConvertTracks("curve")}>Curve Noteを作成</button></div>
+          <button className="wide quiet-button" disabled={busy} onClick={()=>onTrackSelectionChange({ids:[],range:null,useRange:false})}>Track選択を解除</button>
+        </section>}
         {selected.length>0&&<div className="inspector-summary"><strong>{one?(one.kind??"note")==="curve"?"Curve Note":"Note":`${selected.length} Notes`}</strong><span>{one?`${midiLabel(one.midi)} · ${midiToHz(one.midi).toFixed(2)} Hz`:`${selected.length}個選択中`}</span></div>}
         {one&&api&&<>
           <Row label="開始"><NumberInput value={one.start} min={0} max={36000} step={0.001} suffix="s" onChange={v=>mutate(api.set_note_properties(selected[0],{start:v}),selected)}/></Row>
