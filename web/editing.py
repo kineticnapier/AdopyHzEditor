@@ -192,7 +192,7 @@ class EditingMixin:
             min_start = min(n.start for n in source)
             max_end = max(n.end for n in source)
             dx = _clamp(float(dx), -min_start, max(0.0, self.duration - max_end))
-            if self.settings["snapEnabled"]:
+            if self.settings["snapEnabled"] and abs(dx) > 1e-12:
                 dx = self._snap_time(source[0].start + dx) - source[0].start
                 dx = _clamp(dx, -min_start, max(0.0, self.duration - max_end))
 
@@ -231,6 +231,11 @@ class EditingMixin:
             time_delta = _clamp(time_delta, -min_start, max(0.0, self.duration - max_end))
             if self.settings["snapEnabled"] and abs(time_delta) > 1e-12:
                 time_delta = self._snap_time(notes[0].start + time_delta) - notes[0].start
+                time_delta = _clamp(
+                    time_delta,
+                    -min_start,
+                    max(0.0, self.duration - max_end),
+                )
 
             pitches: list[float] = []
             for n in notes:
