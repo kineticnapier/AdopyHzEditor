@@ -1,0 +1,43 @@
+.note-presets {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+.note-presets h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+.preset-save-row, .preset-use-row {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.note-presets input, .note-presets select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 7px;
+  border: 1px solid #171a1e;
+  border-radius: 4px;
+  background: #3a4148;
+  color: #f2f4f7;
+}
+.note-presets input:focus-visible, .note-presets select:focus-visible {
+  outline: 2px solid var(--focus);
+}
+.preset-use-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.preset-use-row select {
+  grid-column: 1 / -1;
+}
+.preset-description {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
