@@ -84,6 +84,7 @@ export default function NotePresetPanel({ api, selected, playbackTime, onQueuedM
       const presetName = chosen;
       const result = await onQueuedPresetAction(() => api.delete_note_preset(presetName));
       if (!result) return;
+      listRequests.current.invalidate();
       setPresets(result.presets);
       setChosen(result.presets[0]?.name ?? "");
       onStatus(result.status);
