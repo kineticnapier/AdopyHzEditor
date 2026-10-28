@@ -74,7 +74,7 @@ export default function AppMenus(p:Props){
     if(active)setActive(next);
     focusTrigger(next);
   }
-  return <nav className="app-menus" aria-label="アプリケーションメニュー" ref={rootRef} onKeyDown={traverseMenus}>
+  return <nav className="app-menus" aria-label="アプリケーションメニュー" ref={rootRef} onKeyDown={traverseMenus} onBlur={event=>{if(active&&!event.currentTarget.contains(event.relatedTarget as Node|null))setActive(null)}}>
     <Menu id="file" label="ファイル" active={active} setActive={setActive}>
       <Action close={close} shortcut="Ctrl+O" onClick={p.onOpenAudio}>音声を開く…</Action>
       <Action close={close} shortcut="Ctrl+L" onClick={p.onLoadProject}>プロジェクトを開く…</Action>
