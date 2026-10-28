@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from core.note_model import Note
-from web.editing import EditingMixin, MIN_NOTE_DURATION
+from web.editing import MIN_NOTE_DURATION
 
 
 _MAX_TRACK_SELECTION = 10_000
@@ -242,7 +242,7 @@ def _curve_note(
 
 
 def find_frequency_tracks(
-    self: EditingMixin,
+    self: Any,
     start_time: float,
     end_time: float,
     minimum_midi: float,
@@ -278,7 +278,7 @@ def find_frequency_tracks(
 
 
 def create_notes_from_tracks(
-    self: EditingMixin,
+    self: Any,
     track_ids: list[int],
     mode: str = "fixed",
     start_time: float | None = None,
@@ -364,10 +364,35 @@ def create_notes_from_tracks(
         }
 
 
-def install_track_transcription() -> None:
-    """Install Phase C methods once onto the shared editing mixin."""
-    if getattr(EditingMixin, "_track_transcription_installed", False):
-        return
-    EditingMixin.find_frequency_tracks = find_frequency_tracks  # type: ignore[attr-defined]
-    EditingMixin.create_notes_from_tracks = create_notes_from_tracks  # type: ignore[attr-defined]
-    EditingMixin._track_transcription_installed = True  # type: ignore[attr-defined]
+class TrackTranscriptionMixin:
+    """Explicit Web bridge surface for Frequency Track selection/transcription."""
+
+    def find_frequency_tracks(
+        self,
+        start_time: float,
+        end_time: float,
+        minimum_midi: float,
+        maximum_midi: float,
+    ) -> dict[str, Any]:
+        return find_frequency_tracks(
+            self,
+            start_time,
+            end_time,
+            minimum_midi,
+            maximum_midi,
+        )
+
+    def create_notes_from_tracks(
+        self,
+        track_ids: list[int],
+        mode: str = "fixed",
+        start_time: float | None = None,
+        end_time: float | None = None,
+    ) -> dict[str, Any]:
+        return create_notes_from_tracks(
+            self,
+            track_ids,
+            mode,
+            start_time,
+            end_time,
+        )
