@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-27T09:28:44.455Z",
+  "title": "Design System: AdopyHzEditor",
+  "extensions": {
+    "colorMeta": {
+      "canvas-black": { "role": "neutral", "displayName": "Canvas Black", "canonical": "#080b0e", "tonalRamp": ["#050607", "#080b0e", "#11171c", "#26333d", "#475e6d", "#748b99", "#abb9c1", "#edf1f3"] },
+      "workspace-black": { "role": "neutral", "displayName": "Workspace Black", "canonical": "#090c0f", "tonalRamp": ["#050607", "#090c0f", "#12191e", "#283640", "#4a606f", "#778d9b", "#adbcc4", "#eef2f4"] },
+      "surface-base": { "role": "neutral", "displayName": "Base Charcoal", "canonical": "#171b20", "tonalRamp": ["#080a0c", "#111418", "#171b20", "#2f3842", "#56636f", "#82909c", "#b8c0c7", "#f0f2f4"] },
+      "surface-chrome": { "role": "neutral", "displayName": "Chrome Charcoal", "canonical": "#1d2228", "tonalRamp": ["#090b0d", "#15191d", "#1d2228", "#37414b", "#5f6c78", "#8d99a4", "#bec5cb", "#f2f3f5"] },
+      "surface-control": { "role": "neutral", "displayName": "Control Charcoal", "canonical": "#262c33", "tonalRamp": ["#0b0d0f", "#1a1e22", "#262c33", "#414a54", "#66727e", "#929da7", "#c2c9cf", "#f3f5f6"] },
+      "divider": { "role": "neutral", "displayName": "Divider Gray", "canonical": "#343b43", "tonalRamp": ["#0d0f11", "#24292e", "#343b43", "#525d68", "#74818d", "#9aa5ae", "#c5cbd0", "#f4f5f6"] },
+      "divider-strong": { "role": "neutral", "displayName": "Strong Divider Gray", "canonical": "#4a545e", "tonalRamp": ["#111417", "#31383f", "#4a545e", "#66737f", "#85919c", "#a6afb7", "#cdd2d6", "#f5f6f7"] },
+      "text-primary": { "role": "neutral", "displayName": "Primary Text", "canonical": "#e7ebef", "tonalRamp": ["#20262c", "#3f4851", "#64707a", "#89959f", "#aeb8c0", "#cbd2d8", "#e7ebef", "#f8f9fa"] },
+      "text-muted": { "role": "neutral", "displayName": "Muted Text", "canonical": "#9ca7b2", "tonalRamp": ["#171c21", "#333b43", "#515c66", "#717d88", "#9ca7b2", "#bac2c9", "#d7dce0", "#f5f6f7"] },
+      "action-blue": { "role": "primary", "displayName": "Action Blue", "canonical": "#3b9ddd", "tonalRamp": ["#071e2d", "#0d3b58", "#145a85", "#217cb2", "#3b9ddd", "#70b9e7", "#abd7f1", "#e7f5fc"] },
+      "action-blue-strong": { "role": "primary", "displayName": "Strong Action Blue", "canonical": "#5bb7ef", "tonalRamp": ["#082131", "#104362", "#1b6692", "#2b8ac0", "#5bb7ef", "#88cbf4", "#b9e1f8", "#ebf8fd"] },
+      "positive-green": { "role": "secondary", "displayName": "Positive Green", "canonical": "#55c98a", "tonalRamp": ["#09271a", "#124f35", "#1d7851", "#2ea26e", "#55c98a", "#83dba8", "#b7ebcc", "#eaf9f1"] },
+      "track-cyan": { "role": "secondary", "displayName": "Frequency Cyan", "canonical": "rgba(135, 240, 255, 0.92)", "tonalRamp": ["#08282d", "#0f5059", "#197986", "#28a2b2", "#56c8d5", "#87f0ff", "#baf7ff", "#eaffff"] },
+      "selection-yellow": { "role": "secondary", "displayName": "Selection Yellow", "canonical": "#ffe65a", "tonalRamp": ["#2b2504", "#574c08", "#84740d", "#b29d17", "#dfc82f", "#ffe65a", "#fff0a0", "#fffbe7"] },
+      "note-blue": { "role": "primary", "displayName": "Note Blue", "canonical": "#46afff", "tonalRamp": ["#061f33", "#0c3f67", "#12609b", "#1e82cf", "#46afff", "#7bc7ff", "#b5e0ff", "#ebf7ff"] },
+      "warning-gold": { "role": "tertiary", "displayName": "Warning Gold", "canonical": "#e4bc5b", "tonalRamp": ["#291f08", "#533f11", "#7d601c", "#a9822c", "#cfa545", "#e4bc5b", "#f2d894", "#fcf4df"] },
+      "danger-red": { "role": "tertiary", "displayName": "Danger Red", "canonical": "#ef7d7d", "tonalRamp": ["#300b0b", "#601717", "#902626", "#bc4141", "#df6060", "#ef7d7d", "#f7b0b0", "#fde9e9"] },
+      "focus-blue": { "role": "primary", "displayName": "Focus Blue", "canonical": "#78c7ff", "tonalRamp": ["#092238", "#12456f", "#1d69a5", "#348ed5", "#5cb1f3", "#78c7ff", "#b1ddff", "#ebf7ff"] },
+      "playhead-white": { "role": "neutral", "displayName": "Playback White", "canonical": "rgba(255, 255, 255, 0.92)", "tonalRamp": ["#262626", "#4d4d4d", "#737373", "#999999", "#bfbfbf", "#d9d9d9", "#eeeeee", "#ffffff"] },
+      "region-blue": { "role": "primary", "displayName": "Region Blue", "canonical": "rgba(70, 175, 255, 0.16)", "tonalRamp": ["#061f33", "#0c3f67", "#12609b", "#1e82cf", "#46afff", "#7bc7ff", "#b5e0ff", "#ebf7ff"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Compact Headline", "purpose": "Empty-state and Inspector-empty titles only." },
+      "title": { "displayName": "Panel Title", "purpose": "Panel headings and disclosure summaries." },
+      "body": { "displayName": "Editor Body", "purpose": "Controls, menus, dialog content, and helper copy." },
+      "label": { "displayName": "Dense Label", "purpose": "Tabs, property labels, and compact explanatory text." },
+      "data": { "displayName": "Instrument Data", "purpose": "Time, MIDI, Hz, percentages, IDs, and keyboard hints." }
+    },
+    "shadows": [
+      { "name": "menu-lift", "value": "0 12px 32px #0009", "purpose": "Desktop menu popovers only." },
+      { "name": "modal-lift", "value": "0 20px 60px #000a", "purpose": "Blocking dialog windows only." }
+    ],
+    "motion": [],
+    "breakpoints": [
+      { "name": "narrow-desktop", "value": "1180px" },
+      { "name": "compact-desktop", "value": "920px" },
+      { "name": "tool-stack", "value": "1100px" },
+      { "name": "dialog-compact", "value": "900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Default Editor Button",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Compact secondary action for toolbar, timeline, and Inspector use.",
+      "html": "<button class=\"ds-btn-default\">適用</button>",
+      "css": ".ds-btn-default{min-height:28px;padding:4px 8px;border:1px solid #343b43;border-radius:4px;background:#262c33;color:#e7ebef;font:12px 'Segoe UI Variable Text','Segoe UI','Yu Gothic UI',system-ui,sans-serif;cursor:pointer}.ds-btn-default:hover:not(:disabled){background:#303841;border-color:#4a545e}.ds-btn-default:focus-visible{outline:2px solid #78c7ff;outline-offset:2px}.ds-btn-default:active{background:#1d5c83;border-color:#397fa8}.ds-btn-default:disabled{cursor:default;opacity:.48}"
+    },
+    {
+      "name": "Primary Context Action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Selection-driven primary action in the Inspector or a modal footer.",
+      "html": "<button class=\"ds-btn-primary\">固定Noteを作成</button>",
+      "css": ".ds-btn-primary{min-height:28px;padding:4px 8px;border:1px solid #0d4f85;border-radius:4px;background:#1769aa;color:#fff;font:600 12px 'Segoe UI Variable Text','Segoe UI','Yu Gothic UI',system-ui,sans-serif;cursor:pointer}.ds-btn-primary:hover:not(:disabled){background:#217aba;border-color:#397fa8}.ds-btn-primary:focus-visible{outline:2px solid #78c7ff;outline-offset:2px}.ds-btn-primary:active{background:#12578d}.ds-btn-primary:disabled{cursor:default;opacity:.48}"
+    },
+    {
+      "name": "Play Transport",
+      "kind": "button",
+      "refersTo": "button-transport",
+      "description": "Distinct positive-green playback control in the compact toolbar.",
+      "html": "<button class=\"ds-play\" aria-pressed=\"false\" aria-label=\"再生\"><svg viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M4 2.5v11l9-5.5z\"/></svg></button>",
+      "css": ".ds-play{width:34px;min-height:28px;padding:4px;border:1px solid #388961;border-radius:4px;background:#246c49;color:#e7ebef;cursor:pointer}.ds-play svg{display:block;width:15px;height:15px;margin:auto;fill:currentColor}.ds-play:hover,.ds-play[aria-pressed='true']{background:#2d8258}.ds-play:focus-visible{outline:2px solid #78c7ff;outline-offset:2px}.ds-play:active{background:#1d5d3e}.ds-play:disabled{cursor:default;opacity:.48}"
+    },
+    {
+      "name": "Numeric Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Dense precision field used for time, MIDI, speed, and settings values.",
+      "html": "<label class=\"ds-field-label\">MIDI<input class=\"ds-field\" type=\"number\" value=\"69.00\"></label>",
+      "css": ".ds-field-label{display:grid;grid-template-columns:72px 88px;align-items:center;gap:8px;color:#c7ced5;font:12px 'Segoe UI Variable Text','Segoe UI','Yu Gothic UI',system-ui,sans-serif}.ds-field{width:100%;min-height:30px;padding:4px 7px;border:1px solid #171a1e;border-radius:4px;background:#3a4148;color:#f2f4f7;font:12px 'Segoe UI Variable Text','Segoe UI','Yu Gothic UI',system-ui,sans-serif}.ds-field:hover:not(:disabled){border-color:#4a545e}.ds-field:focus-visible{outline:2px solid #78c7ff;outline-offset:2px;border-color:#4aa8ff}.ds-field:disabled{opacity:.48}"
+    },
+    {
+      "name": "Inspector Tabs",
+      "kind": "nav",
+      "description": "Two-state rail navigation between contextual Inspector and folded Settings.",
+      "html": "<nav class=\"ds-tabs\" aria-label=\"サイドパネル\"><button class=\"ds-tab active\" aria-pressed=\"true\">インスペクタ</button><button class=\"ds-tab\" aria-pressed=\"false\">設定</button></nav>",
+      "css": ".ds-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;padding:4px;background:#2f343a;border-bottom:1px solid #171a1e}.ds-tab{min-height:28px;padding:5px 4px;border:0;border-radius:5px;background:transparent;color:#d6dbe1;font:11px 'Segoe UI Variable Text','Segoe UI','Yu Gothic UI',system-ui,sans-serif}.ds-tab:hover{background:#454d56}.ds-tab.active{background:#1769aa;color:#fff;font-weight:700}.ds-tab:focus-visible{outline:2px solid #78c7ff;outline-offset:2px}"
+    },
+    {
+      "name": "Canvas Readout",
+      "kind": "custom",
+      "description": "Persistent cursor and Track context directly below the Canvas.",
+      "html": "<div class=\"ds-readout\"><span>TIME <strong>12.384 s</strong></span><span>MIDI <strong>69.00</strong></span><span><strong>A4 · 440.00 Hz</strong></span></div>",
+      "css": ".ds-readout{height:24px;display:flex;align-items:center;gap:13px;padding:0 8px;border-top:1px solid #101419;background:#15191e;color:#aeb8c1;font:10px 'Cascadia Mono',Consolas,monospace;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}.ds-readout strong{color:#d9e1e8;font-weight:500}.ds-readout:focus-within{outline:2px solid #78c7ff;outline-offset:-2px}"
+    },
+    {
+      "name": "Compact Warning",
+      "kind": "custom",
+      "description": "Inline fallback or non-destructive warning with text, border, and tint.",
+      "html": "<div class=\"ds-warning\" role=\"status\">この音源では CQT にフォールバックしています。</div>",
+      "css": ".ds-warning{padding:7px 8px;border:1px solid #765f2e;border-radius:5px;background:#332d20;color:#e7d6ad;font:11px/1.4 'Segoe UI Variable Text','Segoe UI','Yu Gothic UI',system-ui,sans-serif}.ds-warning:hover{border-color:#9a7d3f}.ds-warning:focus-visible{outline:2px solid #78c7ff;outline-offset:2px}"
+    },
+    {
+      "name": "Inspector Empty State",
+      "kind": "custom",
+      "description": "Contextual guidance shown instead of irrelevant controls when nothing is selected.",
+      "html": "<div class=\"ds-empty\"><strong>選択なし</strong><span>NoteまたはTrackを選択すると、ここに編集項目が表示されます。</span></div>",
+      "css": ".ds-empty{min-height:120px;display:grid;place-content:center;gap:5px;text-align:center;color:#8f99a3;font-family:'Segoe UI Variable Text','Segoe UI','Yu Gothic UI',system-ui,sans-serif}.ds-empty strong{color:#dbe2e8;font-size:14px;font-weight:600}.ds-empty span{max-width:210px;font-size:11px;line-height:1.45}.ds-empty:focus-visible{outline:2px solid #78c7ff;outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Transcription Bench",
+    "overview": "AdopyHzEditor is a focused instrument bench: the audio evidence and hand-authored music data occupy the work surface, while the interface forms a quiet frame around them. Its restraint is functional rather than austere. Compact controls, stable geometry, and a near-black canvas keep repeated listening, reading, selecting, and editing comfortable during long desktop sessions.\n\nThe hierarchy is editor-first. The Canvas dominates; transport and navigation support it; the collapsible Inspector follows the current Note or Frequency Track selection; infrequent configuration stays folded under Settings. Color carries operational meaning, never decoration, and the interface avoids ornamental motion, large headings, or promotional styling.",
+    "keyCharacteristics": [
+      "Canvas-dominant desktop composition with compact, persistent chrome.",
+      "Restrained charcoal surfaces separated by borders and tonal steps.",
+      "Contextual editing driven by selection, with configuration folded away.",
+      "Blue for ordinary actions and Notes, cyan for Frequency Tracks, yellow for selection, white for playback position, and gold/red for warnings and errors.",
+      "Stable, dense controls and tabular data readouts built for precision."
+    ],
+    "rules": [
+      { "name": "The Semantic Canvas Rule", "body": "Blue is editable Note data, cyan is analysis-derived Track evidence, yellow is current selection, and white is current playback time. Never reuse those hues decoratively on the Canvas.", "section": "colors" },
+      { "name": "The Spectrum Is Evidence Rule", "body": "Spectrum color comes from the active analysis colormap and settings. Do not force it into a brand gradient, label its layers as melody/harmony/noise, or let chrome styling reduce its readability.", "section": "colors" },
+      { "name": "The Instrument Readout Rule", "body": "Values that change with playback, cursor movement, or selection use the data face and stable width; prose and control names stay in the system UI face.", "section": "typography" },
+      { "name": "The Canvas Wins Rule", "body": "New persistent UI must not take space from the Canvas when it can be contextual, collapsible, folded, or placed in an existing menu.", "section": "layout" },
+      { "name": "The Stable Geometry Rule", "body": "Playback, selection, loading, and hover updates must not resize bars, move controls, or reflow the workspace.", "section": "layout" },
+      { "name": "The Rendering Budget Rule", "body": "Keep Spectrum and Track work viewport-bound and generation-safe: reuse decoded/offscreen rasters and region caches, request only the visible time/pitch window at the current pixel dimensions, preserve stale-response gates and prefetch limits, and retain Track level-of-detail that favors coherent long/strong paths when zoomed out. Cursor readout reporting remains throttled, and the lightweight playback cursor remains on its separate overlay Canvas so playback does not redraw the analysis layer.", "section": "layout" },
+      { "name": "The Flat Workbench Rule", "body": "Persistent editor regions are divided by tone and seams, not shadows. A shadow means the element floats above the work and temporarily owns interaction.", "section": "elevation" },
+      { "name": "The One Radius Rule", "body": "Start at 4px for controls and deviate only for a documented structural reason: 3px for tiny keys, 5px for compact containers/tabs, and 8px for modal shells.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do preserve the editor-first order: Canvas, supporting playback/navigation, contextual Inspector, then folded Settings.",
+      "Do keep ordinary controls within the established 28–32px desktop density while preserving visible focus, labels, and the 24px minimum pointer-target floor.",
+      "Do use borders, tonal layers, stable dimensions, and semantic color to communicate state.",
+      "Do keep hover information in the Canvas readout and selection-driven actions in the Inspector.",
+      "Do preserve keyboard semantics, disabled/error/empty states, wheel mappings, generation guards, selection invariants, and viewport-bound rendering."
+    ],
+    "donts": [
+      "Don't add file Open/Save/Import/Export commands to the toolbar; they belong in the File menu.",
+      "Don't add dedicated ±1-second seek buttons, Note Preset UI, or a dedicated Quantize button.",
+      "Don't put Track actions back on top of the Canvas or expose every setting at once.",
+      "Don't build card-in-card layouts, decorative gradients, ornamental animation, oversized headings, or soft marketing-page spacing.",
+      "Don't use color alone for selection/status, invent musical meaning for analysis Tracks, or describe Vorbis Direct as AI transcription.",
+      "Don't let narrow-desktop compression hide core controls, cause horizontal overflow, or permanently reduce the Canvas more than the documented Inspector widths."
+    ]
+  }
+}

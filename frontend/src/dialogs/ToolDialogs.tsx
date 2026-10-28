@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { AppState, NoteMutationResult } from "./bridge";
 import type { BlankWorkspaceOptions, HarmonicDiagramOptions, HarmonicPreview, QuickHzOptions, QuickHzResult, ToolBackendApi } from "./toolsBridge";
+import { useDialogAccessibility } from "./useDialogAccessibility";
 type Common={api:ToolBackendApi;onClose():void;onStatus(text:string):void};
-function Modal({title,children,onClose,wide}:{title:string;children:ReactNode;onClose():void;wide?:boolean}){return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><section className={wide?"modal-window wide":"modal-window"}><header className="modal-title"><strong>{title}</strong><button onClick={onClose}>×</button></header>{children}</section></div>}
+function Modal({title,children,onClose,wide}:{title:string;children:ReactNode;onClose():void;wide?:boolean}){const{dialogRef,titleId}=useDialogAccessibility(onClose);return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><section ref={dialogRef} tabIndex={-1} className={wide?"modal-window wide":"modal-window"} role="dialog" aria-modal="true" aria-labelledby={titleId}><header className="modal-title"><strong id={titleId}>{title}</strong><button aria-label="閉じる" onClick={onClose}>×</button></header>{children}</section></div>}
 function Field({label,children}:{label:string;children:ReactNode}){return <label className="dialog-field"><span>{label}</span><div>{children}</div></label>}
 function Num({value,min,max,step=1,disabled,onChange}:{value:number;min:number;max:number;step?:number;disabled?:boolean;onChange(v:number):void}){return <input type="number" value={Number.isFinite(value)?value:0} min={min} max={max} step={step} disabled={disabled} onChange={e=>{const v=Number(e.target.value);if(Number.isFinite(v))onChange(v)}}/>}
 

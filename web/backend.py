@@ -24,8 +24,8 @@ from core.vorbis_spectrum_store import (
     analyze_vorbis_spectrum_store,
 )
 from web.editing import EditingMixin
-from web.io import IOMixin
-from web.notes import NoteMixin
+from web.io import DEFAULT_EDITOR_SETTINGS, IOMixin
+from web.notes import EditorSnapshot, NoteMixin
 from web.track_display import readable_frequency_track_region
 from web.track_transcription import TrackTranscriptionMixin
 
@@ -52,6 +52,63 @@ def _int_clamp(value: Any, lo: int, hi: int) -> int:
     return max(lo, min(hi, int(round(float(value)))))
 
 
+def _spectrogram_render_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contrast": float(settings["contrast"]) / 100.0,
+        "gamma": float(settings["gamma"]) / 100.0,
+        "per_bin": bool(settings["enhance"]),
+        "display_mode": str(settings["displayMode"]),
+        "harmonic_mode": str(settings["harmonics"]),
+    }
+
+
+def _spectrogram_render_key(settings: dict[str, Any]) -> tuple[object, ...]:
+    render = _spectrogram_render_settings(settings)
+    return (
+        render["contrast"],
+        render["gamma"],
+        render["per_bin"],
+        render["display_mode"],
+        render["harmonic_mode"],
+    )
+
+
+def _pool_absolute_time_columns(
+    data: np.ndarray,
+    left: int,
+    right: int,
+    max_columns: int,
+) -> tuple[np.ndarray, int, int]:
+    """Pool time columns on an absolute column grid, not viewport-local edges."""
+    total_columns = int(data.shape[1])
+    left = max(0, min(total_columns - 1, int(left)))
+    right = max(left + 1, min(total_columns, int(right)))
+    limit = max(1, int(max_columns))
+    visible = right - left
+    if visible <= limit:
+        return data[:, left:right], left, right
+
+    # Reserve two columns for possible left/right alignment expansion. This
+    # keeps the returned width bounded while the bucket phase remains anchored
+    # to absolute CQT column zero for equal zoom levels.
+    bucket_target = max(1, limit - 2)
+    stride = max(1, int(math.ceil(visible / bucket_target)))
+    aligned_left = (left // stride) * stride
+    aligned_right = min(
+        total_columns,
+        int(math.ceil(right / stride)) * stride,
+    )
+    starts = range(aligned_left, aligned_right, stride)
+    pooled = np.empty(
+        (data.shape[0], len(starts)),
+        dtype=data.dtype,
+    )
+    for index, a in enumerate(starts):
+        b = min(total_columns, a + stride)
+        pooled[:, index] = np.max(data[:, a:b], axis=1)
+    return pooled, aligned_left, aligned_right
+
+
 class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
     """Stateful Python backend for the React/TypeScript editor shell.
 
@@ -64,14 +121,20 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self._window = None
         self.player = WebAudioPlayer()
         self.spectrogram: Spectrogram | None = None
+        self._spectrogram_render_cache_spec: Spectrogram | None = None
+        self._spectrogram_render_cache_key: tuple[object, ...] | None = None
+        self._spectrogram_render_cache_u8: np.ndarray | None = None
         self.vorbis_spectrum_store: VorbisSpectrumStore | None = None
         self.frequency_track_store: FrequencyTrackStore | None = None
         self.analysis_stats: dict[str, Any] = {}
         self.audio_path: str | None = None
+        # The project may intentionally keep a reference to an unavailable
+        # audio file so saving does not destroy relink information.
+        self.project_audio_reference: str | None = None
         self.project_path: str | None = None
         self.notes: list[Note] = []
-        self._undo_stack: list[tuple[Note, ...]] = []
-        self._redo_stack: list[tuple[Note, ...]] = []
+        self._undo_stack: list[EditorSnapshot] = []
+        self._redo_stack: list[EditorSnapshot] = []
         self._clipboard: list[Note] = []
         self._busy = False
         self._source_generation = 0
@@ -87,38 +150,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self.midi_max = 120
         self.pitch_step = 1.0
 
-        self.settings: dict[str, Any] = {
-            "volume": 85,
-            "speed": 1.0,
-            "notePreview": True,
-            "previewVolume": 20,
-            "previewOctave": 0,
-            "previewSound": "sine",
-            "exportOctave": 0,
-            "exportSemitone": 0,
-            "gridEnabled": False,
-            "metronomeEnabled": False,
-            "bpm": 175.0,
-            "offsetMs": 0.0,
-            "metronomeVolume": 35,
-            "snapEnabled": False,
-            "snapDiv": 1,
-            "contrast": 115,
-            "gamma": 75,
-            "enhance": True,
-            "displayMode": "wavetone",
-            "harmonics": "off",
-            "colormap": "wavetone",
-            "analysisProfile": "Normal",
-            "cqtResolution": "profile default",
-            "analysisSource": "cqt",
-            "spectrumThreshold": 2.0,
-            "spectrumOpacity": 70,
-            "spectrumLayerMode": "both",
-            "curveShape": "ease",
-            "curveInterpolation": "bezier_pitch",
-            "targetAngle": 165.0,
-        }
+        self.settings: dict[str, Any] = dict(DEFAULT_EDITOR_SETTINGS)
         self.view: dict[str, Any] = {
             "mode": "spec",
             "start": 0.0,
@@ -438,6 +470,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
     # ------------------------------------------------------------------
     def _set_audio_data(self, path: str, decoded) -> None:
         self.audio_path = str(path)
+        self.project_audio_reference = str(path)
         self.spectrogram = None
         self.vorbis_spectrum_store = None
         self.frequency_track_store = None
@@ -455,21 +488,92 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         path = str(paths[0])
         with self._lock:
             previous_audio = self.audio_path
+            previous_status = self._status
             was_dirty = self._dirty
-        self._busy = True
-        self._status = f"Loading {Path(path).name}..."
+            settings_snapshot = dict(self.settings)
+        request = self._reserve_source_request()
+        with self._lock:
+            self._busy = True
+            self._status = f"Loading {Path(path).name}..."
         try:
-            decoded = decode_audio_file(path)
+            requested = str(settings_snapshot.get("analysisSource", "cqt"))
+            result_kind = "cqt"
+            fallback_reason: str | None = None
+            if requested == "vorbis_direct":
+                selection = select_analysis_backend(path, "vorbis_direct")
+                if selection.selected == "vorbis_direct":
+                    # Direct analysis is intentionally explicit. Decoding is
+                    # still prepared before commit so a failed file open cannot
+                    # replace the currently active source.
+                    decoded, spec = self._prepare_audio_path(
+                        path,
+                        analyze=False,
+                        settings=settings_snapshot,
+                    )
+                    result_kind = "direct_pending"
+                else:
+                    fallback_reason = selection.fallback_reason
+                    decoded, spec = self._prepare_audio_path(
+                        path,
+                        analyze=True,
+                        settings=settings_snapshot,
+                    )
+                    result_kind = "fallback"
+            else:
+                decoded, spec = self._prepare_audio_path(
+                    path,
+                    analyze=True,
+                    settings=settings_snapshot,
+                )
+
             with self._lock:
-                self._set_audio_data(path, decoded)
-            analysis_result = self._analyze_current_audio()
-            with self._lock:
-                if analysis_result == "cqt":
+                if request != self._source_generation:
+                    return self._state_dict()
+                if not self._commit_prepared_audio(
+                    path,
+                    decoded,
+                    spec,
+                    source_generation=request,
+                ):
+                    return self._state_dict()
+                if result_kind == "direct_pending":
+                    self.analysis_stats = {
+                        "requestedSource": "vorbis_direct",
+                        "selectedSource": "vorbis_direct",
+                    }
+                    self._status = (
+                        "Vorbis Direct を選択中です。解析を実行すると"
+                        "採譜用スペクトルを作成します"
+                    )
+                elif result_kind == "fallback":
+                    self.analysis_stats = {
+                        "requestedSource": "vorbis_direct",
+                        "selectedSource": "cqt",
+                        "fallbackReason": fallback_reason,
+                    }
+                    self._status = "Vorbis Direct はこの音源で使えないため、CQTで解析しました"
+                else:
+                    self.analysis_stats = {
+                        "requestedSource": requested,
+                        "selectedSource": "cqt",
+                    }
                     self._status = f"Loaded {Path(path).name}"
+                self._apply_player_settings()
+                self._sync_notes_to_player()
                 self._dirty = was_dirty or previous_audio != self.audio_path
-            return self.get_state()
+                return self._state_dict()
+        except Exception:
+            # Preparation is deliberately side-effect free. Restore only the
+            # transient status for the still-current request and leave all
+            # document/audio/history state untouched.
+            with self._lock:
+                if request == self._source_generation:
+                    self._status = previous_status
+            raise
         finally:
-            self._busy = False
+            with self._lock:
+                if request == self._source_generation:
+                    self._busy = False
 
     def _analysis_options(self, settings: dict[str, Any] | None = None) -> dict[str, Any]:
         source = settings if settings is not None else self.settings
@@ -750,59 +854,82 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
             }
 
     def get_spectrogram(self, max_columns: int = 1600, start: float | None = None, end: float | None = None) -> dict[str, Any]:
+        # Enhancement/threshold statistics must be stable for one source and
+        # setting set. Build one full-song uint8 render and only slice/pool that
+        # immutable result for viewport requests (#129). The heavy work remains
+        # outside the shared Bridge lock (#141).
         with self._lock:
             spec = self.spectrogram
             if spec is None:
                 return {"available": False}
-            data = np.asarray(spec.db, dtype=np.float32)
-            rows, cols = data.shape
-            window_start = 0.0
-            window_end = float(spec.duration)
-            if start is not None or end is not None:
-                window_start = _clamp(0.0 if start is None else start, 0.0, spec.duration)
-                window_end = _clamp(spec.duration if end is None else end, window_start, spec.duration)
-                left = max(0, min(cols - 1, int(np.searchsorted(spec.frame_times, window_start, side="left"))))
-                right = max(left + 1, min(cols, int(np.searchsorted(spec.frame_times, window_end, side="right"))))
-                data = data[:, left:right]
-                cols = data.shape[1]
-            max_columns = max(64, min(4096, int(max_columns)))
-            if cols > max_columns:
-                edges = np.linspace(0, cols, max_columns + 1, dtype=np.int32)
-                reduced = np.empty((rows, max_columns), dtype=np.float32)
-                for i in range(max_columns):
-                    a, b = int(edges[i]), int(edges[i + 1])
-                    if b <= a:
-                        b = min(cols, a + 1)
-                    reduced[:, i] = np.max(data[:, a:b], axis=1)
-                data = reduced
-                cols = max_columns
-
-            enhanced = enhance_spectrogram(
-                data,
-                contrast=float(self.settings["contrast"]) / 100.0,
-                gamma=float(self.settings["gamma"]) / 100.0,
-                per_bin=bool(self.settings["enhance"]),
-                display_mode=str(self.settings["displayMode"]),
-                harmonic_mode=str(self.settings["harmonics"]),
-            )
-            lo = float(np.min(enhanced)) if enhanced.size else 0.0
-            hi = float(np.max(enhanced)) if enhanced.size else 1.0
-            if hi <= lo + 1e-12:
-                u8 = np.zeros_like(enhanced, dtype=np.uint8)
+            render_settings = _spectrogram_render_settings(self.settings)
+            render_key = _spectrogram_render_key(self.settings)
+            if (
+                self._spectrogram_render_cache_spec is spec
+                and self._spectrogram_render_cache_key == render_key
+                and self._spectrogram_render_cache_u8 is not None
+            ):
+                full_u8 = self._spectrogram_render_cache_u8
             else:
-                u8 = np.clip((enhanced - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
-            return {
-                "available": True,
-                "rows": int(u8.shape[0]),
-                "cols": int(u8.shape[1]),
-                "data": base64.b64encode(u8.tobytes(order="C")).decode("ascii"),
-                "duration": float(spec.duration),
-                "start": window_start,
-                "end": window_end,
-                "midiMin": int(spec.midi_min),
-                "midiMax": int(spec.midi_max),
-                "pitchStep": float(spec.pitch_step),
-            }
+                full_u8 = None
+
+        if full_u8 is None:
+            enhanced = enhance_spectrogram(
+                np.asarray(spec.db, dtype=np.float32),
+                **render_settings,
+            )
+            full_u8 = np.rint(
+                np.clip(enhanced, 0.0, 1.0) * 255.0
+            ).astype(np.uint8)
+            full_u8.setflags(write=False)
+            with self._lock:
+                if (
+                    self.spectrogram is not spec
+                    or _spectrogram_render_key(self.settings) != render_key
+                ):
+                    return {"available": False, "stale": True}
+                self._spectrogram_render_cache_spec = spec
+                self._spectrogram_render_cache_key = render_key
+                self._spectrogram_render_cache_u8 = full_u8
+
+        total_cols = int(full_u8.shape[1])
+        window_start = 0.0
+        window_end = float(spec.duration)
+        left = 0
+        right = total_cols
+        if start is not None or end is not None:
+            window_start = _clamp(0.0 if start is None else start, 0.0, spec.duration)
+            window_end = _clamp(spec.duration if end is None else end, window_start, spec.duration)
+            left = max(0, min(total_cols - 1, int(np.searchsorted(spec.frame_times, window_start, side="left"))))
+            right = max(left + 1, min(total_cols, int(np.searchsorted(spec.frame_times, window_end, side="right"))))
+
+        max_columns = max(64, min(4096, int(max_columns)))
+        u8, _aligned_left, _aligned_right = _pool_absolute_time_columns(
+            full_u8,
+            left,
+            right,
+            max_columns,
+        )
+        encoded = base64.b64encode(u8.tobytes(order="C")).decode("ascii")
+
+        with self._lock:
+            if (
+                self.spectrogram is not spec
+                or _spectrogram_render_key(self.settings) != render_key
+            ):
+                return {"available": False, "stale": True}
+        return {
+            "available": True,
+            "rows": int(u8.shape[0]),
+            "cols": int(u8.shape[1]),
+            "data": encoded,
+            "duration": float(spec.duration),
+            "start": window_start,
+            "end": window_end,
+            "midiMin": int(spec.midi_min),
+            "midiMax": int(spec.midi_max),
+            "pitchStep": float(spec.pitch_step),
+        }
 
     # ------------------------------------------------------------------
     # Playback
