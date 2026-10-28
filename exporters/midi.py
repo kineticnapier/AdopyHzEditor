@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import tempfile
 from mido import MidiFile, MidiTrack, Message, MetaMessage, bpm2tempo
 from core.note_model import Note
 
@@ -61,4 +63,24 @@ def export_midi(notes: list[Note], path: str | Path, *, bpm: float = 120.0, tick
             track.append(Message("note_off", note=key, velocity=0, time=delta))
 
     track.append(MetaMessage("end_of_track", time=0))
-    mid.save(str(path))
+
+    target = Path(path)
+    temp_path: Path | None = None
+    try:
+        fd, temp_name = tempfile.mkstemp(
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=target.suffix or ".mid",
+        )
+        os.close(fd)
+        temp_path = Path(temp_name)
+        mid.save(str(temp_path))
+        with temp_path.open("rb") as staged:
+            os.fsync(staged.fileno())
+        os.replace(temp_path, target)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
