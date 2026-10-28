@@ -1,3 +1,9 @@
+/* The inspector now has three tabs; keep them on one row.
+   Scoped here to avoid conflicts with the narrow-workspace CSS PR. */
+.settings nav.inspector-tabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .note-presets {
   display: grid;
   align-content: start;

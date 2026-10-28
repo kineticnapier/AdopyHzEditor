@@ -26,3 +26,11 @@ test("preset panel is reachable and uses the same mutation queue as the editor",
   assert.match(presets, /await onQueuedMutation\(/);
   assert.match(presets, /await onQueuedPresetAction\(/);
 });
+
+test("preset tab uses a single-row three-column inspector navigation", () => {
+  const settings = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/settings/presets.css", import.meta.url), "utf8");
+  assert.match(settings, /className="inspector-tabs"/);
+  assert.match(settings, /onClick=\{\(\) => setPage\("presets"\)\}/);
+  assert.match(css, /\.settings nav\.inspector-tabs\s*\{\s*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+});
