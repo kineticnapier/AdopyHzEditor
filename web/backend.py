@@ -338,10 +338,17 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
             self.midi_min = int(spec.midi_min)
             self.midi_max = int(spec.midi_max)
             self.pitch_step = float(spec.pitch_step)
-            self.player.set_virtual_duration(self.duration)
         elif direct_pending:
             self.midi_min, self.midi_max = 0, 127
             self.pitch_step = 1.0
+        # Project loading and audio replacement must preserve notes beyond the
+        # decoded/analysed audio duration, without retaining an old document's
+        # unrelated duration.
+        self.duration = max(
+            self.duration,
+            max((float(note.end) for note in self.notes), default=0.0),
+        )
+        self.player.set_virtual_duration(self.duration)
         if analysis_stats is not None:
             self.analysis_stats = dict(analysis_stats)
         return True
