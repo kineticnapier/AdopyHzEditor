@@ -103,6 +103,65 @@ class IssueCorrectnessBoundaryTests(unittest.TestCase):
         self.assertLessEqual(note.end, bridge.duration)
         self.assertAlmostEqual(note.end, 10.0)
 
+    def test_bulk_snap_group_move_is_reclamped_at_chart_end(self):
+        bridge = self.bridge(duration=1.0)
+        bridge.settings.update(snapEnabled=True, bpm=60.0, snapDiv=1, offsetMs=0.0)
+        bridge.notes = [Note(0.25, 0.50, 60)]
+        result = bridge.bulk_edit_notes([0], {"timeDelta": 0.50})
+        note = Note.from_dict(result["notes"][0])
+        self.assertAlmostEqual(note.start, 0.75)
+        self.assertAlmostEqual(note.end, 1.0)
+
+    def test_vertical_move_does_not_snap_off_grid_note_in_time(self):
+        bridge = self.bridge(duration=2.0)
+        bridge.settings.update(snapEnabled=True, bpm=120.0, snapDiv=1, offsetMs=0.0)
+        bridge.notes = [Note(0.30, 0.50, 60)]
+        result = bridge.move_notes([0], 0.0, 1.0)
+        note = Note.from_dict(result["notes"][0])
+        self.assertAlmostEqual(note.start, 0.30)
+        self.assertAlmostEqual(note.end, 0.50)
+        self.assertEqual(note.midi, 61.0)
+
+    def test_vertical_duplicate_does_not_snap_off_grid_note_in_time(self):
+        bridge = self.bridge(duration=2.0)
+        bridge.settings.update(snapEnabled=True, bpm=120.0, snapDiv=1, offsetMs=0.0)
+        bridge.notes = [Note(0.30, 0.50, 60)]
+        result = bridge.duplicate_notes_shifted([0], 0.0, 1.0)
+        note = Note.from_dict(result["notes"][result["indices"][0]])
+        self.assertAlmostEqual(note.start, 0.30)
+        self.assertAlmostEqual(note.end, 0.50)
+        self.assertEqual(note.midi, 61.0)
+
+    def test_noop_move_preserves_history_redo_dirty_and_player_sync(self):
+        bridge = self.bridge(duration=1.0)
+        bridge.settings["snapEnabled"] = False
+        bridge.notes = [Note(0.0, 0.25, 60)]
+        marker = bridge._snapshot()
+        bridge._redo_stack.append(marker)
+        bridge._dirty = False
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            result = bridge.move_notes([0], -1.0, 0.0)
+        self.assertFalse(result["changed"])
+        self.assertFalse(bridge._dirty)
+        self.assertEqual(bridge._undo_stack, [])
+        self.assertEqual(bridge._redo_stack, [marker])
+        sync.assert_not_called()
+
+    def test_noop_quantize_preserves_history_redo_dirty_and_player_sync(self):
+        bridge = self.bridge(duration=1.0)
+        bridge.settings.update(bpm=120.0, snapDiv=1, offsetMs=0.0)
+        bridge.notes = [Note(0.0, 0.5, 60)]
+        marker = bridge._snapshot()
+        bridge._redo_stack.append(marker)
+        bridge._dirty = False
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            result = bridge.quantize_notes([0])
+        self.assertFalse(result["changed"])
+        self.assertFalse(bridge._dirty)
+        self.assertEqual(bridge._undo_stack, [])
+        self.assertEqual(bridge._redo_stack, [marker])
+        sync.assert_not_called()
+
     def test_note_only_fit_opens_around_late_notes(self):
         bridge = WebUIBridge()
         bridge.duration = 1.0

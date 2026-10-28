@@ -184,18 +184,27 @@ class NoteMixin:
                 dy = _clamp(dy, -min(pitch_values), 127.0 - max(pitch_values))
 
             # Snap the group using its first note so relative spacing is preserved.
-            if self.settings["snapEnabled"] and original:
+            if self.settings["snapEnabled"] and original and abs(float(dx)) > 1e-12:
                 snapped_first = self._snap_time(original[0].start + dx)
                 dx = snapped_first - original[0].start
                 dx = _clamp(dx, -min_start, max(0.0, self.duration - max_end))
 
+            updated = [n.shifted(dx=float(dx), dy=float(dy)).normalized() for n in original]
+            if updated == original:
+                self._status = "ノートの位置は変更されませんでした"
+                return {
+                    "notes": self._note_dicts(),
+                    "changed": False,
+                    "status": self._status,
+                }
+
             self._push_undo()
-            for i, n in zip(valid, original):
-                self.notes[i] = n.shifted(dx=float(dx), dy=float(dy)).normalized()
+            for i, note in zip(valid, updated):
+                self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(valid)}個のノートを移動しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
 
     def resize_notes(self, indices: list[int], edge: str, delta_seconds: float) -> dict[str, Any]:
         """Resize selected notes from the left or right edge.
@@ -298,7 +307,7 @@ class NoteMixin:
             def q(t: float) -> float:
                 return _clamp(offset + round((float(t) - offset) / step) * step, 0.0, self.duration)
 
-            self._push_undo()
+            updated: list[Note] = []
             for i in valid:
                 n = self.notes[i].normalized()
                 a = q(n.start)
@@ -307,11 +316,23 @@ class NoteMixin:
                     b = min(self.duration, a + step)
                 if b <= a:
                     a = max(0.0, b - max(0.001, step))
-                self.notes[i] = self._with_times(n, a, b)
+                updated.append(self._with_times(n, a, b))
+            original = [self.notes[i].normalized() for i in valid]
+            if updated == original:
+                self._status = "ノートは既にグリッドに揃っています"
+                return {
+                    "notes": self._note_dicts(),
+                    "changed": False,
+                    "status": self._status,
+                }
+
+            self._push_undo()
+            for i, note in zip(valid, updated):
+                self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(valid)}個のノートをクオンタイズしました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
 
     def apply_interpolation(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
