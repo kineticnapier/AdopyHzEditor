@@ -147,6 +147,7 @@ class FrequencyTrackStoreTests(unittest.TestCase):
         blocks = [self._block(index * 0.02, 1024, {54: 1.0}) for index in range(30)]
         tracks = build_frequency_track_store(self._store(blocks))
         bridge = Bridge()
+        bridge.audio_path = "test.ogg"
         bridge.frequency_track_store = tracks
         original = bridge.frequency_track_store
         bridge.update_settings({"spectrumThreshold": 10.0})

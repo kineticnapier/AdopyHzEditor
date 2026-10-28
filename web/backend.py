@@ -200,10 +200,14 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         """
         source = settings if settings is not None else self.settings
         requested = str(source.get("analysisSource", "cqt"))
-        decoded = decode_audio_file(path)
         if requested == "vorbis_direct":
             selection = select_analysis_backend(path, "vorbis_direct")
             if selection.selected == "vorbis_direct":
+                decoded, _spec = self._prepare_audio_path(
+                    path,
+                    analyze=False,
+                    settings=source,
+                )
                 return (
                     decoded,
                     None,
@@ -214,7 +218,10 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                     },
                     "direct_pending",
                 )
-            spec = analyze_cqt(path, **self._analysis_options(source))
+            decoded, spec = self._prepare_audio_path(
+                path,
+                settings=source,
+            )
             return (
                 decoded,
                 spec,
@@ -226,7 +233,10 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
                 "fallback",
             )
 
-        spec = analyze_cqt(path, **self._analysis_options(source))
+        decoded, spec = self._prepare_audio_path(
+            path,
+            settings=source,
+        )
         return (
             decoded,
             spec,
