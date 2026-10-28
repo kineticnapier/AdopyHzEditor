@@ -1119,11 +1119,23 @@ export default function App() {
   }
   function exportMidi(selectedOnly = false) {
     if (!api) return;
+    const generation = documentGeneration.current;
+    // Capture the selection at invocation time, not when earlier edits finish.
+    const selectedAtRequest = [...selected];
     const action =
       selectedOnly && toolsApi
-        ? () => toolsApi.export_selected_midi_dialog(selected)
+        ? () => toolsApi.export_selected_midi_dialog(selectedAtRequest)
         : () => api.export_midi_dialog();
-    void runMidiExport(action, setStatus);
+    // Exports read the current backend document. Keep them in the same order
+    // as edits and document replacements, and drop stale queued exports.
+    void enqueueAppliedTask(
+      mutationQueue.current,
+      () => runMidiExport(action, (message) => {
+        if (generation === documentGeneration.current) setStatus(message);
+      }),
+      () => undefined,
+      () => generation === documentGeneration.current,
+    );
   }
 
   const stateAction = (fn: () => Promise<AppState>) => void runStateAction(fn),
