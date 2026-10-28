@@ -48,7 +48,6 @@ import {
   AsyncActionGuard,
   enqueueAppliedTask,
   enqueueRecoverableViewTask,
-  enqueueStateTask,
   enqueueStateTaskAfterSettings,
   LatestRequestGate,
   SerialTaskQueue,
@@ -778,14 +777,19 @@ export default function App() {
       const pending = pendingDestructive;
       if (!api || !pending) return;
       stateTransitionPending.current += 1;
+      viewRequests.current.invalidate();
       setSavingPending(true);
       setBusy(true);
       let state: AppState | undefined;
       try {
-        await flushPendingSettings();
-        state = await enqueueStateTask(
+        // Reserve the edit queue before waiting for settings and viewport writes.
+        state = await enqueueStateTaskAfterSettings(
           mutationQueue.current,
-          () => api.save_project_dialog(),
+          flushPendingSettings,
+          async () => {
+            await viewQueue.current.enqueue(async () => undefined);
+            return api.save_project_dialog();
+          },
           applyState,
         );
       } catch (e) {
