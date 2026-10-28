@@ -102,8 +102,13 @@ export async function enqueueRecoverableViewTask<T>(
   recover: (error: unknown) => Promise<void>,
 ): Promise<void> {
   try {
-    const value = await queue.enqueue(call);
-    if (isCurrent()) apply(value);
+    // Drop superseded requests before they reach the backend. In particular,
+    // playback-follow updates may arrive faster than viewport API responses.
+    const result = await queue.enqueue(async () => {
+      if (!isCurrent()) return { executed: false as const };
+      return { executed: true as const, value: await call() };
+    });
+    if (result.executed && isCurrent()) apply(result.value);
   } catch (error) {
     if (isCurrent()) await recover(error);
   }
