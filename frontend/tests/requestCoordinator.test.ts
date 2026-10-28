@@ -76,3 +76,57 @@ test("inspector and canvas mutations apply in the same queue order", async () =>
   await Promise.all([inspector, canvas]);
   assert.deepEqual(applied, [["inspector"], ["inspector", "canvas"]]);
 });
+
+test("queued old-document mutations never call the backend", async () => {
+  const queue = new SerialTaskQueue();
+  let release!: () => void;
+  let documentGeneration = 0;
+  let calls = 0;
+  const applied: number[] = [];
+  const blocker = queue.enqueue(
+    () => new Promise<void>((resolve) => { release = resolve; }),
+  );
+  await Promise.resolve();
+  const stale = enqueueAppliedTask(
+    queue,
+    async () => { calls += 1; return 42; },
+    (value) => { applied.push(value); },
+    () => documentGeneration === 0,
+  );
+  documentGeneration += 1;
+  release();
+  await blocker;
+  assert.equal(await stale, undefined);
+  assert.equal(calls, 0);
+  assert.deepEqual(applied, []);
+});
+
+test("in-flight old-document responses never update the new document", async () => {
+  const queue = new SerialTaskQueue();
+  let release!: (value: number) => void;
+  let documentGeneration = 0;
+  const applied: number[] = [];
+  const inFlight = enqueueAppliedTask(
+    queue,
+    () => new Promise<number>((resolve) => { release = resolve; }),
+    (value) => { applied.push(value); },
+    () => documentGeneration === 0,
+  );
+  await Promise.resolve();
+  documentGeneration += 1;
+  release(5);
+  assert.equal(await inFlight, 5);
+  assert.deepEqual(applied, []);
+});
+
+test("current-document mutations still execute and apply", async () => {
+  const applied: number[] = [];
+  const result = await enqueueAppliedTask(
+    new SerialTaskQueue(),
+    async () => 7,
+    (value) => { applied.push(value); },
+    () => true,
+  );
+  assert.equal(result, 7);
+  assert.deepEqual(applied, [7]);
+});
