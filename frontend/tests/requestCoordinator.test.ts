@@ -459,3 +459,87 @@ test("pending save reserves edit queue before waiting for viewport writes", asyn
     "save", "save-applied", "later-edit",
   ]);
 });
+
+test("playback requests and clipboard copy share document mutation ordering", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /function applyState\(state: AppState\) \{\s*documentGeneration\.current \+= 1;[\s\S]*?playbackRequests\.current\.invalidate\(\)/);
+  assert.match(app, /get_playback_state\(\)[\s\S]*?generation === documentGeneration\.current/);
+  assert.match(app, /async function queuedPlaybackAction\([\s\S]*?enqueueAppliedTask\(\s*mutationQueue\.current/);
+  assert.match(app, /async function copySelected\(\)[\s\S]*?enqueueAppliedTask\(\s*mutationQueue\.current/);
+  assert.match(app, /async function seekTo\(t: number\)[\s\S]*?queuedPlaybackAction\(\(\) => api\.seek_to\(t\)\)/);
+  assert.match(app, /async function togglePlayback\(\)[\s\S]*?queuedPlaybackAction\(\(\) => api\.toggle_playback\(\)\)/);
+  assert.match(app, /async function stopPlayback\(\)[\s\S]*?queuedPlaybackAction\(\(\) => api\.stop_playback\(\)\)/);
+  assert.match(app, /async function seekRelative\(s: number\)[\s\S]*?queuedPlaybackAction\(\(\) => api\.seek_relative\(s\)\)/);
+});
+
+test("in-flight playback finishes before a queued document replacement", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let generation = 0;
+  let release!: () => void;
+  const playing = enqueueAppliedTask(
+    queue,
+    () => new Promise<number>((resolve) => {
+      events.push("playback-start");
+      release = () => { events.push("playback-finish"); resolve(3); };
+    }),
+    () => { events.push("playback-applied"); },
+    () => generation === 0,
+  );
+  await Promise.resolve();
+  const switching = enqueueStateTask(
+    queue,
+    async () => { events.push("load-new"); return "new"; },
+    () => { generation += 1; events.push("new-applied"); },
+  );
+  assert.deepEqual(events, ["playback-start"]);
+  release();
+  await Promise.all([playing, switching]);
+  assert.deepEqual(events, [
+    "playback-start", "playback-finish", "playback-applied",
+    "load-new", "new-applied",
+  ]);
+});
+
+test("playback and clipboard operations queued after a document switch are discarded", async () => {
+  const queue = new SerialTaskQueue();
+  let generation = 0;
+  const calls: string[] = [];
+  const switching = enqueueStateTask(
+    queue,
+    async () => { calls.push("load-new"); return "new"; },
+    () => { generation += 1; calls.push("new-applied"); },
+  );
+  const oldPlayback = enqueueAppliedTask(
+    queue,
+    async () => { calls.push("old-seek"); return 2; },
+    () => { calls.push("old-playback-applied"); },
+    () => generation === 0,
+  );
+  const oldCopy = enqueueAppliedTask(
+    queue,
+    async () => { calls.push("old-copy"); return "copied"; },
+    () => { calls.push("old-copy-applied"); },
+    () => generation === 0,
+  );
+  await Promise.all([switching, oldPlayback, oldCopy]);
+  assert.deepEqual(calls, ["load-new", "new-applied"]);
+});
+
+test("document generation invalidates a delayed playback poll", async () => {
+  const gate = new LatestRequestGate();
+  let generation = 0;
+  const oldGeneration = generation;
+  const request = gate.issue();
+  let applyCount = 0;
+  let resolvePoll!: () => void;
+  const poll = new Promise<void>((resolve) => { resolvePoll = resolve; })
+    .then(() => {
+      if (oldGeneration === generation && gate.isCurrent(request)) applyCount += 1;
+    });
+  generation += 1;
+  gate.invalidate();
+  resolvePoll();
+  await poll;
+  assert.equal(applyCount, 0);
+});
