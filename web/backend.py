@@ -24,8 +24,8 @@ from core.vorbis_spectrum_store import (
     analyze_vorbis_spectrum_store,
 )
 from web.editing import EditingMixin
-from web.io import IOMixin
-from web.notes import NoteMixin
+from web.io import DEFAULT_EDITOR_SETTINGS, IOMixin
+from web.notes import EditorSnapshot, NoteMixin
 
 
 AUDIO_FILE_TYPES = (
@@ -66,10 +66,13 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self.frequency_track_store: FrequencyTrackStore | None = None
         self.analysis_stats: dict[str, Any] = {}
         self.audio_path: str | None = None
+        # The project may intentionally keep a reference to an unavailable
+        # audio file so saving does not destroy relink information.
+        self.project_audio_reference: str | None = None
         self.project_path: str | None = None
         self.notes: list[Note] = []
-        self._undo_stack: list[tuple[Note, ...]] = []
-        self._redo_stack: list[tuple[Note, ...]] = []
+        self._undo_stack: list[EditorSnapshot] = []
+        self._redo_stack: list[EditorSnapshot] = []
         self._clipboard: list[Note] = []
         self._busy = False
         self._source_generation = 0
@@ -85,38 +88,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         self.midi_max = 120
         self.pitch_step = 1.0
 
-        self.settings: dict[str, Any] = {
-            "volume": 85,
-            "speed": 1.0,
-            "notePreview": True,
-            "previewVolume": 20,
-            "previewOctave": 0,
-            "previewSound": "sine",
-            "exportOctave": 0,
-            "exportSemitone": 0,
-            "gridEnabled": False,
-            "metronomeEnabled": False,
-            "bpm": 175.0,
-            "offsetMs": 0.0,
-            "metronomeVolume": 35,
-            "snapEnabled": False,
-            "snapDiv": 1,
-            "contrast": 115,
-            "gamma": 75,
-            "enhance": True,
-            "displayMode": "wavetone",
-            "harmonics": "off",
-            "colormap": "wavetone",
-            "analysisProfile": "Normal",
-            "cqtResolution": "profile default",
-            "analysisSource": "cqt",
-            "spectrumThreshold": 2.0,
-            "spectrumOpacity": 70,
-            "spectrumLayerMode": "both",
-            "curveShape": "ease",
-            "curveInterpolation": "bezier_pitch",
-            "targetAngle": 165.0,
-        }
+        self.settings: dict[str, Any] = dict(DEFAULT_EDITOR_SETTINGS)
         self.view: dict[str, Any] = {
             "mode": "spec",
             "start": 0.0,
@@ -436,6 +408,7 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
     # ------------------------------------------------------------------
     def _set_audio_data(self, path: str, decoded) -> None:
         self.audio_path = str(path)
+        self.project_audio_reference = str(path)
         self.spectrogram = None
         self.vorbis_spectrum_store = None
         self.frequency_track_store = None
@@ -453,21 +426,92 @@ class Bridge(EditingMixin, NoteMixin, IOMixin):
         path = str(paths[0])
         with self._lock:
             previous_audio = self.audio_path
+            previous_status = self._status
             was_dirty = self._dirty
-        self._busy = True
-        self._status = f"Loading {Path(path).name}..."
+            settings_snapshot = dict(self.settings)
+        request = self._reserve_source_request()
+        with self._lock:
+            self._busy = True
+            self._status = f"Loading {Path(path).name}..."
         try:
-            decoded = decode_audio_file(path)
+            requested = str(settings_snapshot.get("analysisSource", "cqt"))
+            result_kind = "cqt"
+            fallback_reason: str | None = None
+            if requested == "vorbis_direct":
+                selection = select_analysis_backend(path, "vorbis_direct")
+                if selection.selected == "vorbis_direct":
+                    # Direct analysis is intentionally explicit. Decoding is
+                    # still prepared before commit so a failed file open cannot
+                    # replace the currently active source.
+                    decoded, spec = self._prepare_audio_path(
+                        path,
+                        analyze=False,
+                        settings=settings_snapshot,
+                    )
+                    result_kind = "direct_pending"
+                else:
+                    fallback_reason = selection.fallback_reason
+                    decoded, spec = self._prepare_audio_path(
+                        path,
+                        analyze=True,
+                        settings=settings_snapshot,
+                    )
+                    result_kind = "fallback"
+            else:
+                decoded, spec = self._prepare_audio_path(
+                    path,
+                    analyze=True,
+                    settings=settings_snapshot,
+                )
+
             with self._lock:
-                self._set_audio_data(path, decoded)
-            analysis_result = self._analyze_current_audio()
-            with self._lock:
-                if analysis_result == "cqt":
+                if request != self._source_generation:
+                    return self._state_dict()
+                if not self._commit_prepared_audio(
+                    path,
+                    decoded,
+                    spec,
+                    source_generation=request,
+                ):
+                    return self._state_dict()
+                if result_kind == "direct_pending":
+                    self.analysis_stats = {
+                        "requestedSource": "vorbis_direct",
+                        "selectedSource": "vorbis_direct",
+                    }
+                    self._status = (
+                        "Vorbis Direct を選択中です。解析を実行すると"
+                        "採譜用スペクトルを作成します"
+                    )
+                elif result_kind == "fallback":
+                    self.analysis_stats = {
+                        "requestedSource": "vorbis_direct",
+                        "selectedSource": "cqt",
+                        "fallbackReason": fallback_reason,
+                    }
+                    self._status = "Vorbis Direct はこの音源で使えないため、CQTで解析しました"
+                else:
+                    self.analysis_stats = {
+                        "requestedSource": requested,
+                        "selectedSource": "cqt",
+                    }
                     self._status = f"Loaded {Path(path).name}"
+                self._apply_player_settings()
+                self._sync_notes_to_player()
                 self._dirty = was_dirty or previous_audio != self.audio_path
-            return self.get_state()
+                return self._state_dict()
+        except Exception:
+            # Preparation is deliberately side-effect free. Restore only the
+            # transient status for the still-current request and leave all
+            # document/audio/history state untouched.
+            with self._lock:
+                if request == self._source_generation:
+                    self._status = previous_status
+            raise
         finally:
-            self._busy = False
+            with self._lock:
+                if request == self._source_generation:
+                    self._busy = False
 
     def _analysis_options(self, settings: dict[str, Any] | None = None) -> dict[str, Any]:
         source = settings if settings is not None else self.settings

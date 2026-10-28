@@ -31,8 +31,8 @@ class IssuePerformanceRegressionTests(unittest.TestCase):
         bridge.notes = [Note(i, i + 0.5, 60 + i % 12) for i in range(1000)]
         bridge._push_undo()
         snapshot = bridge._undo_stack[-1]
-        self.assertIsInstance(snapshot, tuple)
-        self.assertIs(snapshot[500], bridge.notes[500])
+        self.assertIsInstance(snapshot.notes, tuple)
+        self.assertIs(snapshot.notes[500], bridge.notes[500])
 
     def test_spectrogram_request_slices_to_view_before_downsampling(self):
         bridge = CoreBridge()

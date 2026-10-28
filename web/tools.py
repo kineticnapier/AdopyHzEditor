@@ -61,6 +61,7 @@ class ToolsMixin:
             # its audio reference has deliberately been removed.
             self.project_path = None
             self.audio_path = None
+            self.project_audio_reference = None
             self.spectrogram = None
             self.duration = duration
             self.midi_min = midi_min
@@ -93,6 +94,7 @@ class ToolsMixin:
             # project path would let a normal save overwrite it without audio.
             self.project_path = None
             self.audio_path = None
+            self.project_audio_reference = None
             self.spectrogram = None
             self.player.clear_audio()
             self._fit_blank_bounds_to_notes()

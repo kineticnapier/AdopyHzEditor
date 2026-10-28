@@ -57,10 +57,10 @@ class UnsavedDataProtectionTests(unittest.TestCase):
             duration=32 / 44100,
         )
 
+        spec = SimpleNamespace(duration=decoded.duration, midi_min=12, midi_max=120, pitch_step=1.0)
         with (
             mock.patch.object(bridge, "_file_dialog", return_value=["replacement.wav"]),
-            mock.patch.object(web_backend, "decode_audio_file", return_value=decoded),
-            mock.patch.object(bridge, "_analyze_current_audio"),
+            mock.patch.object(bridge, "_prepare_audio_path", return_value=(decoded, spec)),
         ):
             result = bridge.open_audio()
 
@@ -77,10 +77,10 @@ class UnsavedDataProtectionTests(unittest.TestCase):
             duration=32 / 44100,
         )
 
+        spec = SimpleNamespace(duration=decoded.duration, midi_min=12, midi_max=120, pitch_step=1.0)
         with (
             mock.patch.object(bridge, "_file_dialog", return_value=["replacement.wav"]),
-            mock.patch.object(web_backend, "decode_audio_file", return_value=decoded),
-            mock.patch.object(bridge, "_analyze_current_audio"),
+            mock.patch.object(bridge, "_prepare_audio_path", return_value=(decoded, spec)),
         ):
             result = bridge.open_audio()
 
