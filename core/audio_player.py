@@ -327,7 +327,12 @@ class AudioPlayer:
             freq = midi_to_hz(float(midi) + octave_shift * 12)
             sample_index = source_positions[out_s:out_e]
             # 絶対サンプル時刻から生成するのでブロック境界で位相が飛びにくい
-            phase_offset = float(getattr(segment, "phase", 2.0 * np.pi * freq * ns / sr))
+            stored_phase = getattr(segment, "phase", None)
+            phase_offset = (
+                float(stored_phase) * (2.0 ** octave_shift)
+                if stored_phase is not None
+                else 2.0 * np.pi * freq * ns / sr
+            )
             phase = phase_offset + 2.0 * np.pi * freq * (sample_index - ns) / sr
             local = sample_index - ns
             local_sec = local / float(sr)

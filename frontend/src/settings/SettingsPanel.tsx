@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AppState, BackendApi, EditorSettings, NoteDto, NoteMutationResult } from "./bridge";
 import type { TrackHoverInfo, TrackSelectionState } from "../editor/EditorCanvas";
 import { midiLabel, midiToHz } from "../editor/musicMath";
@@ -68,7 +68,7 @@ export default function SettingsPanel({api,settings,notes,selected,audioName,bus
           <button className="wide quiet-button" disabled={busy} onClick={()=>onTrackSelectionChange({ids:[],range:null,useRange:false})}>Track選択を解除</button>
         </section>}
         {selected.length>0&&<div className="inspector-summary"><strong>{one?(one.kind??"note")==="curve"?"Curve Note":"Note":`${selected.length} Notes`}</strong><span>{one?`${midiLabel(one.midi)} · ${midiToHz(one.midi).toFixed(2)} Hz`:`${selected.length}個選択中`}</span></div>}
-        {one&&api&&<>
+        {one&&api&&<Fragment key={`note-${selected[0]}`}>
           <Row label="開始"><NumberInput value={one.start} min={0} max={36000} step={0.001} suffix="s" onChange={v=>mutate(api.set_note_properties(selected[0],{start:v}),selected)}/></Row>
           <Row label="終了"><NumberInput value={one.end} min={0} max={36000} step={0.001} suffix="s" onChange={v=>mutate(api.set_note_properties(selected[0],{end:v}),selected)}/></Row>
           <Row label="長さ"><NumberInput value={Math.max(0,one.end-one.start)} min={0.001} max={36000} step={0.001} suffix="s" onChange={v=>mutate(api.set_note_properties(selected[0],{duration:v}),selected)}/></Row>
@@ -86,7 +86,7 @@ export default function SettingsPanel({api,settings,notes,selected,audioName,bus
             <Row label="目標角度"><NumberInput value={settings.targetAngle} min={.001} max={359.999} step={.001} suffix="°" onChange={v=>void onPatch({targetAngle:v})}/></Row>
             <div className="button-row"><button onClick={()=>void api.apply_target_angle(selected).then(x=>onMutation(x,selected))}>角度を適用</button><button onClick={()=>void api.clear_target_angle(selected).then(x=>onMutation(x,selected))}>角度を解除</button></div>
           </Fold>}
-        </>}
+        </Fragment>}
         {selected.length>1&&api&&<BulkEditor api={api} selected={selected} onMutation={onMutation} onStatus={onStatus}/>}
       </>}
 
@@ -161,8 +161,9 @@ function Row({label,children}:{label:string;children:ReactNode}){return <label c
 function Range({value,min=0,max=100,disabled=false,onChange}:{value:number;min?:number;max?:number;disabled?:boolean;onChange(v:number):void}){return <div className="range-wrap"><input type="range" min={min} max={max} value={value} disabled={disabled} onChange={e=>onChange(+e.target.value)}/><output>{value}</output></div>}
 function NumberInput({value,min,max,step,suffix,disabled=false,onChange}:{value:number;min:number;max:number;step:number;suffix?:string;disabled?:boolean;onChange(v:number):void}){
   const fallback=Number.isFinite(value)?value:0,[text,setText]=useState(String(fallback)),[editing,setEditing]=useState(false);
+  const cancelled=useRef(false);
   useEffect(()=>{if(!editing)setText(String(fallback))},[editing,fallback]);
-  function commit(){const next=commitNumericText(text,fallback,min,max);setEditing(false);setText(String(next));if(next!==fallback)onChange(next)}
-  return <div className="number-wrap"><input type="number" value={text} min={min} max={max} step={step} disabled={disabled} onFocus={()=>setEditing(true)} onChange={e=>setText(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();else if(e.key==="Escape"){setText(String(fallback));e.currentTarget.blur()}}}/>{suffix&&<span>{suffix}</span>}</div>
+  function commit(){if(cancelled.current){cancelled.current=false;setEditing(false);setText(String(fallback));return}const next=commitNumericText(text,fallback,min,max);setEditing(false);setText(String(next));if(next!==fallback)onChange(next)}
+  return <div className="number-wrap"><input type="number" value={text} min={min} max={max} step={step} disabled={disabled} onFocus={()=>{cancelled.current=false;setEditing(true)}} onChange={e=>setText(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();else if(e.key==="Escape"){cancelled.current=true;e.preventDefault();e.currentTarget.blur()}}}/>{suffix&&<span>{suffix}</span>}</div>
 }
 function Select({value,options,disabled=false,onChange}:{value:string;options:Array<[string,string]>;disabled?:boolean;onChange(v:string):void}){return <select value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}>{options.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}

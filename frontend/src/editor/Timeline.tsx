@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { PlaybackState, ViewState } from "./bridge";
 
 type Props={
@@ -14,9 +15,16 @@ export default function Timeline({view,playback,followPlayback,onFollowPlayback,
   const pitchTop=Math.min(128,view.pitchBottom+view.visibleNotes);
   return <div className="timeline">
     <input className="timeline-slider" aria-label="表示開始位置" type="range" min={0} max={Math.max(.001,max)} step={Math.max(.001,max/1000)} value={Math.min(view.start,max)} onChange={e=>onView({start:+e.target.value})}/>
-    <label className="timeline-field" htmlFor="timeline-window-seconds"><span>表示幅</span><input id="timeline-window-seconds" aria-label="時間の表示幅" type="number" min={.2} max={Math.max(.2,playback.duration)} step={.1} value={view.windowSeconds} onChange={e=>onView({windowSeconds:+e.target.value})}/><small>s</small></label>
-    <label className="timeline-field pitch-field"><span>音高</span><input aria-label="下端音高" type="number" min={0} max={127} step={1} value={view.pitchBottom} onChange={e=>onView({pitchBottom:+e.target.value})}/><small>–</small><input aria-label="上端音高" type="number" min={Math.min(128,view.pitchBottom+6)} max={128} step={1} value={pitchTop} onChange={e=>onView({visibleNotes:Math.max(6,Math.min(128,+e.target.value-view.pitchBottom))})}/></label>
+    <label className="timeline-field" htmlFor="timeline-window-seconds"><span>表示幅</span><CommitNumber id="timeline-window-seconds" label="時間の表示幅" value={view.windowSeconds} min={.2} max={Math.max(.2,playback.duration)} step={.1} onCommit={value=>onView({windowSeconds:value})}/><small>s</small></label>
+    <label className="timeline-field pitch-field"><span>音高</span><CommitNumber label="下端音高" value={view.pitchBottom} min={0} max={127} step={1} onCommit={value=>onView({pitchBottom:value})}/><small>–</small><CommitNumber label="上端音高" value={pitchTop} min={Math.min(128,view.pitchBottom+6)} max={128} step={1} onCommit={value=>onView({visibleNotes:Math.max(6,Math.min(128,value-view.pitchBottom))})}/></label>
     <button onClick={onFit} title="音源全体を表示">全体</button>
     <label className="timeline-follow" title="再生位置を表示範囲内に追従"><input type="checkbox" checked={followPlayback} onChange={e=>onFollowPlayback(e.target.checked)}/>再生追従</label>
   </div>;
+}
+
+function CommitNumber({id,label,value,min,max,step,onCommit}:{id?:string;label:string;value:number;min:number;max:number;step:number;onCommit(value:number):void}){
+  const[text,setText]=useState(String(value));
+  useEffect(()=>setText(String(value)),[value]);
+  function commit(){const parsed=Number(text);const next=Number.isFinite(parsed)?Math.max(min,Math.min(max,parsed)):value;setText(String(next));if(next!==value)onCommit(next)}
+  return <input id={id} aria-label={label} type="number" min={min} max={max} step={step} value={text} onChange={event=>setText(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==="Enter")event.currentTarget.blur();else if(event.key==="Escape"){setText(String(value));event.currentTarget.blur()}}}/>;
 }

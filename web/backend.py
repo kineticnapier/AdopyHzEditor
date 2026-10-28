@@ -142,6 +142,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self._analysis_inflight = 0
         self._status = "Ready"
         self._dirty = False
+        self._saved_checkpoint: tuple[Any, ...] | None = None
         self._allow_window_close = False
         self._window_close_pending = False
 
@@ -161,6 +162,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
 
         self.player.set_virtual_duration(self.duration)
         self._apply_player_settings()
+        self._saved_checkpoint = self._document_checkpoint()
 
     def attach_window(self, window) -> None:
         self._window = window
@@ -527,6 +529,10 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                 self.view["pitchBottom"] = _int_clamp(changes["pitchBottom"], 0, 127)
             if "visibleNotes" in changes:
                 self.view["visibleNotes"] = _int_clamp(changes["visibleNotes"], 6, 128)
+            self.view["pitchBottom"] = min(
+                int(self.view["pitchBottom"]),
+                max(0, 128 - int(self.view["visibleNotes"])),
+            )
             return dict(self.view)
 
     def fit_view(self) -> dict[str, Any]:
@@ -538,6 +544,10 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                 end = max(n.end for n in self.notes)
                 self.view["start"] = max(0.0, start - 0.25)
                 self.view["windowSeconds"] = max(0.2, min(self.duration, end - self.view["start"] + 0.5))
+                self.view["start"] = min(
+                    self.view["start"],
+                    max(0.0, self.duration - self.view["windowSeconds"]),
+                )
                 self.view["pitchBottom"] = max(0, int(math.floor(lo)) - 2)
                 self.view["visibleNotes"] = max(6, min(128, int(math.ceil(hi - self.view["pitchBottom"])) + 3))
             else:
@@ -945,7 +955,14 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                 "peakDb": peak_db,
             }
 
-    def get_spectrogram(self, max_columns: int = 1600, start: float | None = None, end: float | None = None) -> dict[str, Any]:
+    def get_spectrogram(
+        self,
+        max_columns: int = 1600,
+        start: float | None = None,
+        end: float | None = None,
+        min_midi: float | None = None,
+        max_midi: float | None = None,
+    ) -> dict[str, Any]:
         # Enhancement/threshold statistics must be stable for one source and
         # setting set. Build one full-song uint8 render and only slice/pool that
         # immutable result for viewport requests (#129). The heavy work remains
@@ -995,9 +1012,20 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
             left = max(0, min(total_cols - 1, int(np.searchsorted(spec.frame_times, window_start, side="left"))))
             right = max(left + 1, min(total_cols, int(np.searchsorted(spec.frame_times, window_end, side="right"))))
 
+        row_start = 0
+        row_end = int(full_u8.shape[0])
+        if min_midi is not None or max_midi is not None:
+            requested_min = float(spec.midi_min if min_midi is None else min_midi)
+            requested_max = float(spec.midi_max if max_midi is None else max_midi)
+            if requested_max < requested_min:
+                requested_min, requested_max = requested_max, requested_min
+            step = max(1e-9, float(spec.pitch_step))
+            row_start = max(0, min(row_end - 1, int(math.floor((requested_min - spec.midi_min) / step))))
+            row_end = max(row_start + 1, min(row_end, int(math.ceil((requested_max - spec.midi_min) / step)) + 1))
+
         max_columns = max(64, min(4096, int(max_columns)))
         u8, _aligned_left, _aligned_right = _pool_absolute_time_columns(
-            full_u8,
+            full_u8[row_start:row_end, :],
             left,
             right,
             max_columns,
@@ -1018,8 +1046,8 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
             "duration": float(spec.duration),
             "start": window_start,
             "end": window_end,
-            "midiMin": int(spec.midi_min),
-            "midiMax": int(spec.midi_max),
+            "midiMin": float(spec.midi_min) + row_start * float(spec.pitch_step),
+            "midiMax": float(spec.midi_min) + (row_end - 1) * float(spec.pitch_step),
             "pitchStep": float(spec.pitch_step),
         }
 

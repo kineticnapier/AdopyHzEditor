@@ -192,7 +192,7 @@ class EditingMixin:
             min_start = min(n.start for n in source)
             max_end = max(n.end for n in source)
             dx = _clamp(float(dx), -min_start, max(0.0, self.duration - max_end))
-            if self.settings["snapEnabled"]:
+            if self.settings["snapEnabled"] and abs(float(dx)) > 1e-12:
                 dx = self._snap_time(source[0].start + dx) - source[0].start
                 dx = _clamp(dx, -min_start, max(0.0, self.duration - max_end))
 

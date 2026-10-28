@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 from mido import MidiFile, MidiTrack, Message, MetaMessage, bpm2tempo
 from core.note_model import Note
@@ -61,4 +63,24 @@ def export_midi(notes: list[Note], path: str | Path, *, bpm: float = 120.0, tick
             track.append(Message("note_off", note=key, velocity=0, time=delta))
 
     track.append(MetaMessage("end_of_track", time=0))
-    mid.save(str(path))
+
+    # mido opens a filename directly, which would truncate an existing export
+    # before all bytes have been written.  Complete the file beside the target
+    # first so os.replace is an atomic commit on the same filesystem.
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        mid.save(str(temporary))
+        with temporary.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass

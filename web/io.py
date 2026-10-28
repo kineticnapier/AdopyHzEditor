@@ -127,7 +127,7 @@ class IOMixin:
             # Keep an unresolved project audio reference until the user relinks
             # or explicitly creates a derived audio-less workspace.
             audio_reference = self.audio_path or self.project_audio_reference
-            save_project(path,audio_path=audio_reference,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._dirty=False;self._status=f"{Path(path).name} を保存しました";return self._state_dict()
+            save_project(path,audio_path=audio_reference,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._saved_checkpoint=self._document_checkpoint();self._dirty=False;self._status=f"{Path(path).name} を保存しました";return self._state_dict()
 
     def save_project_dialog(self) -> dict[str, Any]:
         """Save in place when possible; ask for a path only for new projects."""
@@ -218,6 +218,7 @@ class IOMixin:
                     self._status=f"{Path(path).name} の音源が見つかりません。ファイル → プロジェクト音源を再指定… から選び直せます"
                 else:
                     self._status=f"{Path(path).name} のノートを読み込みました"
+            self._saved_checkpoint=self._document_checkpoint();self._dirty=False
         return self.get_state()
 
     def relink_project_audio_dialog(self) -> dict[str, Any]:

@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import type { BackendApi, NoteDto, ViewState } from "./bridge";
 
-function isInteractiveTarget(target: EventTarget | null) {
+function isTextEditingTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null;
-  return Boolean(element?.closest("input,select,textarea,button,a,[contenteditable='true'],[role='dialog']"));
+  return Boolean(element?.closest("input,select,textarea,[contenteditable='true']"));
 }
 
 type Args = {
@@ -20,7 +20,7 @@ type Args = {
   copy(): void; cut(): void; paste(): void; applyTargetAngle(): void;
   move(indices: number[], dx: number, dy: number): void;
   stop(): void; play(): void; deleteSelected(): void; mode(value: ViewState["mode"]): void;
-  seek(delta: number): void; updateView(changes: Partial<ViewState>): void;
+  seek(delta: number): void; seekTo(time: number): void; updateView(changes: Partial<ViewState>): void;
 };
 
 export default function useEditorShortcuts(a: Args) {
@@ -28,18 +28,19 @@ export default function useEditorShortcuts(a: Args) {
     const api = a.api;
     if (!api) return;
     const handler = (event: KeyboardEvent) => {
-      if (a.disabled || isInteractiveTarget(event.target)) return;
+      if (a.disabled) return;
       const key = event.key.toLowerCase();
       const ctrl = event.ctrlKey || event.metaKey;
       const handled = (action: () => void) => { event.preventDefault(); action(); };
 
       if (event.key === "F1") return handled(a.openHelp);
-      if (ctrl && key === "o") return handled(a.openAudio);
       if (ctrl && event.shiftKey && key === "s") return handled(a.saveProjectAs);
       if (ctrl && key === "s") return handled(a.saveProject);
+      if (isTextEditingTarget(event.target)) return;
+      if (ctrl && key === "o") return handled(a.openAudio);
       if (ctrl && key === "l") return handled(a.loadProject);
       if (ctrl && key === "i") return handled(a.importMidi);
-      if (ctrl && key === "m") return handled(() => void api.export_midi_dialog().then(x => a.setStatus(x.status)));
+      if (ctrl && key === "m") return handled(() => void api.export_midi_dialog().then(x => a.setStatus(x.status)).catch(e => a.setStatus(`MIDI出力に失敗しました: ${String(e)}`)));
       if (ctrl && key === "e") return handled(a.openAdoExport);
       if (ctrl && key === "z" && !event.shiftKey) return handled(a.undo);
       if ((ctrl && key === "y") || (ctrl && event.shiftKey && key === "z")) return handled(a.redo);
@@ -56,16 +57,18 @@ export default function useEditorShortcuts(a: Args) {
       if (ctrl && event.shiftKey && key === "arrowdown") return handled(() => a.move(a.selected, 0, -1));
       if (ctrl && key === " ") return handled(a.stop);
       if (key === " ") return handled(a.play);
-      if (key === "delete" || key === "backspace") return handled(a.deleteSelected);
+      if ((key === "delete" || key === "backspace") && !event.repeat) return handled(a.deleteSelected);
       if (key === "escape") return handled(() => a.select([]));
       // Tab and Shift+Tab intentionally retain native focus navigation.
-      if (key === "1") return a.mode("spec");
-      if (key === "2") return a.mode("notes");
-      if (key === "3") return a.mode("both");
+      if (key === "home" && !ctrl && !event.altKey) return handled(() => a.seekTo(0));
+      const plain = !ctrl && !event.altKey;
+      if (plain && key === "1") return handled(() => a.mode("spec"));
+      if (plain && key === "2") return handled(() => a.mode("notes"));
+      if (plain && key === "3") return handled(() => a.mode("both"));
       if (key === "arrowleft") return handled(() => a.seek(event.shiftKey ? -5 : -1));
       if (key === "arrowright") return handled(() => a.seek(event.shiftKey ? 5 : 1));
-      if (key === "w" || (ctrl && key === "arrowup")) return handled(() => a.updateView({ pitchBottom: a.view.pitchBottom + 12 }));
-      if (key === "s" || (ctrl && key === "arrowdown")) return handled(() => a.updateView({ pitchBottom: a.view.pitchBottom - 12 }));
+      if ((plain && key === "w") || (ctrl && key === "arrowup")) return handled(() => a.updateView({ pitchBottom: a.view.pitchBottom + 12 }));
+      if ((plain && key === "s") || (ctrl && key === "arrowdown")) return handled(() => a.updateView({ pitchBottom: a.view.pitchBottom - 12 }));
       if (key === "arrowup") return handled(() => a.updateView({ pitchBottom: a.view.pitchBottom + 1 }));
       if (key === "arrowdown") return handled(() => a.updateView({ pitchBottom: a.view.pitchBottom - 1 }));
     };
