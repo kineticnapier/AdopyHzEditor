@@ -13,4 +13,7 @@ This branch is the single working branch for accumulating verified fixes to open
 
 ## Implemented issues
 
-- #184: Isolate plain shortcuts from Ctrl/Meta/Alt and preserve assigned combinations; dispatcher regression tests added.\n- #175: Wire Home to absolute seek(0) using the existing App callback; dispatcher regression tests added.\n\nValidation: source changes and tests committed; CI and Windows/pywebview GUI results must be checked before claiming full verification.
+- #184: Isolate plain shortcuts from Ctrl/Meta/Alt and preserve assigned combinations; dispatcher regression tests added.
+- #175: Wire Home to absolute seek(0) using the existing App callback; dispatcher regression tests added.
+
+Validation: source changes and tests committed; CI and Windows/pywebview GUI results must be checked before claiming full verification.
