@@ -77,12 +77,18 @@ export function enqueueStateTask<T>(
 }
 
 /** Finish pending settings writes before replacing or saving a document. */
-export async function enqueueStateTaskAfterSettings<T>(
+export function enqueueStateTaskAfterSettings<T>(
   queue: SerialTaskQueue,
   settleSettings: () => Promise<void>,
   call: () => Promise<T>,
   apply: (state: T) => void,
 ): Promise<T> {
-  await settleSettings();
-  return enqueueStateTask(queue, call, apply);
+  // Reserve the queue slot immediately. Waiting for settings outside the
+  // queue lets edits requested after a document switch overtake that switch.
+  return queue.enqueue(async () => {
+    await settleSettings();
+    const state = await call();
+    apply(state);
+    return state;
+  });
 }
