@@ -180,7 +180,7 @@ test("state actions, blank workspace and pending save use the same queue", () =>
   const dialogs = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
   assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*guardedAction/);
   assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
-  assert.match(app, /enqueueStateTask\(\s*mutationQueue\.current,\s*\(\) => api\.save_project_dialog\(\)/);
+  assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return api\.save_project_dialog\(\)/);
   assert.match(dialogs, /await onApply\(value\)/);
 });
 
@@ -420,4 +420,42 @@ test("document transition invalidates viewport work and blocks new view changes"
   assert.match(app, /async function fitView\(\) \{\s*if \(stateTransitionPending\.current > 0\)/);
   assert.match(app, /if \(!api \|\| stateTransitionPending\.current > 0\) return;\s*const request = viewRequests\.current\.issue\(\)/);
   assert.match(app, /if \(stateTransitionPending\.current > 0 \|\| !followPlayback/);
+});
+
+test("pending save reserves edit queue before waiting for viewport writes", async () => {
+  const edits = new SerialTaskQueue();
+  const views = new SerialTaskQueue();
+  const events: string[] = [];
+  let releaseView!: () => void;
+  let viewStarted!: () => void;
+  const started = new Promise<void>((resolve) => { viewStarted = resolve; });
+  const inFlightView = views.enqueue(async () => {
+    events.push("view-start");
+    viewStarted();
+    await new Promise<void>((resolve) => { releaseView = resolve; });
+    events.push("view-end");
+  });
+  await started;
+  const save = enqueueStateTaskAfterSettings(
+    edits,
+    async () => { events.push("settings-finished"); },
+    async () => {
+      await views.enqueue(async () => undefined);
+      events.push("save");
+      return "saved";
+    },
+    () => { events.push("save-applied"); },
+  );
+  const laterEdit = edits.enqueue(async () => {
+    events.push("later-edit");
+  });
+  await Promise.resolve();
+  assert.equal(events.includes("save"), false);
+  assert.equal(events.includes("later-edit"), false);
+  releaseView();
+  await Promise.all([inFlightView, save, laterEdit]);
+  assert.deepEqual(events, [
+    "view-start", "settings-finished", "view-end",
+    "save", "save-applied", "later-edit",
+  ]);
 });
