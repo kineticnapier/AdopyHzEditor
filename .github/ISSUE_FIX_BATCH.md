@@ -15,5 +15,7 @@ This branch is the single working branch for accumulating verified fixes to open
 
 - #184: Isolate plain shortcuts from Ctrl/Meta/Alt and preserve assigned combinations; dispatcher regression tests added.
 - #175: Wire Home to absolute seek(0) using the existing App callback; dispatcher regression tests added.
+- #138: Respect horizontal wheel direction while retaining vertical navigation and modifier behavior; five regression tests added.
+- #222: Preserve note-extended document duration through CQT/Direct reanalysis and project/audio source commit; six regression tests added.
 
-Validation: source changes and tests committed; CI and Windows/pywebview GUI results must be checked before claiming full verification.
+Validation (code commit `424afdf6`): Web UI check passed (230 Python tests, 11 skipped; 36 frontend tests passed; frontend build passed). Windows package check was still running and physical Windows/pywebview GUI and real-audio checks remain unverified. Issues remain open; PR remains Draft.
