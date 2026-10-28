@@ -266,6 +266,8 @@ export default function App() {
 
   function applyState(state: AppState) {
     documentGeneration.current += 1;
+    // Ignore playback replies issued for the previous document.
+    playbackRequests.current.invalidate();
     const identity = `${state.audio.path ?? ""}\0${state.analysis.source ?? "cqt"}\0${state.analysis.available}`;
     if (identity !== analysisIdentity.current) {
       analysisIdentity.current = identity;
@@ -362,11 +364,13 @@ export default function App() {
     let active = true;
     const id = window.setInterval(
       () => {
+        const generation = documentGeneration.current;
         const request = playbackRequests.current.issue();
         void api
           .get_playback_state()
           .then((x) => {
-            if (active && playbackRequests.current.isCurrent(request))
+            if (active && generation === documentGeneration.current &&
+                playbackRequests.current.isCurrent(request))
               setPlayback(x);
           })
           .catch(() => {});
@@ -950,12 +954,19 @@ export default function App() {
       );
   }
   async function copySelected() {
-    if (api)
+    if (api) {
+      const generation = documentGeneration.current;
       await runWithErrorFeedback(
-        () => mutationQueue.current.enqueue(() => api.copy_notes(selected)),
-        (result) => setStatus(result.status),
+        () => enqueueAppliedTask(
+          mutationQueue.current,
+          () => api.copy_notes(selected),
+          (result) => setStatus(result.status),
+          () => generation === documentGeneration.current,
+        ),
+        () => undefined,
         (message) => setStatus(`コピーに失敗しました: ${message}`),
       );
+    }
   }
   async function cutSelected() {
     if (api)
@@ -981,33 +992,37 @@ export default function App() {
         (r) => r.changed !== false,
       );
   }
+  // Playback commands mutate backend state and must not overtake document loads.
+  async function queuedPlaybackAction(call: () => Promise<PlaybackState>) {
+    const generation = documentGeneration.current;
+    await runWithErrorFeedback(
+      () => enqueueAppliedTask(
+        mutationQueue.current,
+        async () => {
+          const request = playbackRequests.current.issue();
+          return { request, next: await call() };
+        },
+        ({ request, next }) => {
+          if (playbackRequests.current.isCurrent(request)) setPlayback(next);
+        },
+        () => generation === documentGeneration.current,
+      ),
+      () => undefined,
+      (message) => setStatus(`再生操作に失敗しました: ${message}`),
+    );
+  }
   async function seekTo(t: number) {
-    if (api) {
-      const request = playbackRequests.current.issue();
-      const next = await api.seek_to(t);
-      if (playbackRequests.current.isCurrent(request)) setPlayback(next);
-    } else setPlayback((p) => ({ ...p, time: t }));
+    if (api) await queuedPlaybackAction(() => api.seek_to(t));
+    else setPlayback((p) => ({ ...p, time: t }));
   }
   async function togglePlayback() {
-    if (api) {
-      const request = playbackRequests.current.issue();
-      const next = await api.toggle_playback();
-      if (playbackRequests.current.isCurrent(request)) setPlayback(next);
-    }
+    if (api) await queuedPlaybackAction(() => api.toggle_playback());
   }
   async function stopPlayback() {
-    if (api) {
-      const request = playbackRequests.current.issue();
-      const next = await api.stop_playback();
-      if (playbackRequests.current.isCurrent(request)) setPlayback(next);
-    }
+    if (api) await queuedPlaybackAction(() => api.stop_playback());
   }
   async function seekRelative(s: number) {
-    if (api) {
-      const request = playbackRequests.current.issue();
-      const next = await api.seek_relative(s);
-      if (playbackRequests.current.isCurrent(request)) setPlayback(next);
-    }
+    if (api) await queuedPlaybackAction(() => api.seek_relative(s));
   }
   async function mode(v: ViewState["mode"]) {
     await updateView({ mode: v });
