@@ -218,5 +218,56 @@ class BackendConsistencyRound2Tests(unittest.TestCase):
         self.assertEqual(len(bridge.notes), 1)
         self.assertAlmostEqual(bridge.seek_to(12.5)["time"], 10.0, places=3)
 
+    def test_project_audio_commit_keeps_tail_notes_with_cqt(self):
+        bridge = Bridge()
+        bridge.notes = [Note(12.0, 13.0, 60.0).normalized()]
+        decoded = SimpleNamespace(duration=10.0)
+        def set_audio(_path, data):
+            bridge.duration = data.duration
+        with (
+            mock.patch.object(bridge, "_set_audio_data", side_effect=set_audio),
+            mock.patch.object(bridge.player, "set_virtual_duration") as virtual,
+        ):
+            committed = bridge._commit_prepared_audio(
+                "mock.wav", decoded, self._mock_cqt_spectrogram(),
+            )
+        self.assertTrue(committed)
+        self.assertEqual(bridge.duration, 13.0)
+        virtual.assert_called_once_with(13.0)
+
+    def test_project_audio_commit_keeps_tail_notes_in_direct_pending(self):
+        bridge = Bridge()
+        bridge.notes = [Note(12.0, 13.0, 60.0).normalized()]
+        decoded = SimpleNamespace(duration=10.0)
+        def set_audio(_path, data):
+            bridge.duration = data.duration
+        with (
+            mock.patch.object(bridge, "_set_audio_data", side_effect=set_audio),
+            mock.patch.object(bridge.player, "set_virtual_duration") as virtual,
+        ):
+            committed = bridge._commit_prepared_audio(
+                "mock.ogg", decoded, None, direct_pending=True,
+            )
+        self.assertTrue(committed)
+        self.assertEqual(bridge.duration, 13.0)
+        virtual.assert_called_once_with(13.0)
+
+    def test_new_audio_without_tail_notes_does_not_keep_old_duration(self):
+        bridge = Bridge()
+        bridge.duration = 100.0
+        decoded = SimpleNamespace(duration=10.0)
+        def set_audio(_path, data):
+            bridge.duration = data.duration
+        with (
+            mock.patch.object(bridge, "_set_audio_data", side_effect=set_audio),
+            mock.patch.object(bridge.player, "set_virtual_duration") as virtual,
+        ):
+            committed = bridge._commit_prepared_audio(
+                "mock.wav", decoded, self._mock_cqt_spectrogram(),
+            )
+        self.assertTrue(committed)
+        self.assertEqual(bridge.duration, 10.0)
+        virtual.assert_called_once_with(10.0)
+
 if __name__ == "__main__":
     unittest.main()
