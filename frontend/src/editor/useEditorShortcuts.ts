@@ -16,6 +16,7 @@ export default function useEditorShortcuts(a: Args) {
   useEffect(() => {
     if (!a.api) return;
     const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (a.disabled) return;
       const key=event.key.toLowerCase(),ctrl=event.ctrlKey||event.metaKey;
       if(event.repeat&&(key==="delete"||key==="backspace"))return;

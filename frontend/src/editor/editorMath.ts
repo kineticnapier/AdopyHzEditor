@@ -94,6 +94,48 @@ export function noteCandidatesAt(index: NoteTimeIndex, time: number) {
   return index.order.slice(left, right);
 }
 
+export function notesInTimeRange(index:NoteTimeIndex,start:number,end:number){
+  const right=upperBound(index.starts,end),left=lowerBound(index.maxEnds,start);
+  return index.order.slice(left,right);
+}
+
+export type ScreenSegment = { ax: number; ay: number; bx: number; by: number };
+export type SegmentSpatialIndex = {
+  cellSize: number;
+  buckets: Map<string, number[]>;
+};
+
+export function buildSegmentSpatialIndex(
+  segments: ScreenSegment[],
+  cellSize = 24,
+  padding = 8,
+): SegmentSpatialIndex {
+  const size = Math.max(1, cellSize), buckets = new Map<string, number[]>();
+  segments.forEach((segment, index) => {
+    const left = Math.floor((Math.min(segment.ax, segment.bx) - padding) / size);
+    const right = Math.floor((Math.max(segment.ax, segment.bx) + padding) / size);
+    const top = Math.floor((Math.min(segment.ay, segment.by) - padding) / size);
+    const bottom = Math.floor((Math.max(segment.ay, segment.by) + padding) / size);
+    for (let x = left; x <= right; x += 1) for (let y = top; y <= bottom; y += 1) {
+      const key = `${x}:${y}`, bucket = buckets.get(key);
+      if (bucket) bucket.push(index); else buckets.set(key, [index]);
+    }
+  });
+  return { cellSize: size, buckets };
+}
+
+export function nearbySegmentIndices(index: SegmentSpatialIndex, x: number, y: number) {
+  return index.buckets.get(`${Math.floor(x / index.cellSize)}:${Math.floor(y / index.cellSize)}`) ?? [];
+}
+
+export function adjacentNoteIndex(order: number[], current: number | null, direction: -1 | 1) {
+  if (!order.length) return null;
+  if (current === null) return direction > 0 ? order[0] : order[order.length - 1];
+  const position = order.indexOf(current);
+  if (position < 0) return direction > 0 ? order[0] : order[order.length - 1];
+  return order[Math.max(0, Math.min(order.length - 1, position + direction))];
+}
+
 export function boundedGridRange(start: number, windowSeconds: number, beat: number, offset: number, maxLines = 2000) {
   const first = Math.floor((start - offset) / beat), last = Math.ceil((start + windowSeconds - offset) / beat);
   const total = Math.max(0, last - first + 1), stride = Math.max(1, Math.ceil(total / Math.max(1, maxLines)));
