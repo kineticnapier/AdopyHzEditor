@@ -326,3 +326,44 @@ test("wheel and fit view share the recoverable request path", () => {
   assert.match(app, /viewQueue\.current\.enqueue\(\(\) => api\.get_state\(\)\)/);
   assert.match(app, /generation === documentGeneration\.current/);
 });
+
+test("queued superseded follow request never writes the backend", async () => {
+  const queue = new SerialTaskQueue();
+  const gate = new LatestRequestGate();
+  const calls: number[] = [];
+  const applied: number[] = [];
+  let release!: () => void;
+  const blocker = queue.enqueue(() => new Promise<void>((resolve) => {
+    release = resolve;
+  }));
+  await Promise.resolve();
+
+  const old = gate.issue();
+  const pending = enqueueRecoverableViewTask(
+    queue,
+    async () => { calls.push(1); return 1; },
+    () => gate.isCurrent(old),
+    (value) => { applied.push(value); },
+    async () => { throw new Error("obsolete follow must not recover"); },
+  );
+  const newest = gate.issue();
+  const latest = enqueueRecoverableViewTask(
+    queue,
+    async () => { calls.push(2); return 2; },
+    () => gate.isCurrent(newest),
+    (value) => { applied.push(value); },
+    async () => { throw new Error("latest follow must not fail"); },
+  );
+
+  release();
+  await Promise.all([blocker, pending, latest]);
+  assert.deepEqual(calls, [2]);
+  assert.deepEqual(applied, [2]);
+});
+
+test("playback follow shares manual view queue and error feedback", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /void applyViewAction\(\(\) => api\.set_view\(\{ start: next \}\), "再生追従"\)/);
+  assert.match(app, /stateTransitionPending\.current === 0/);
+  assert.doesNotMatch(app, /void api\?\.set_view\(\{ start: next \}\)/);
+});
