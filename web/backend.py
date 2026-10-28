@@ -919,7 +919,23 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                 return {"available": False}
 
             t = _clamp(seconds, 0.0, float(spec.duration))
-            cursor_midi = _clamp(midi, float(spec.midi_min), float(spec.midi_max))
+            cursor_midi = float(midi)
+            if not math.isfinite(cursor_midi):
+                return {"available": False}
+            cursor_nearest = int(math.floor(cursor_midi + 0.5))
+            cursor_fields = {
+                "cursorMidi": cursor_midi,
+                "cursorHz": midi_to_hz(cursor_midi),
+                "cursorName": note_name(cursor_nearest),
+                "cursorCents": (cursor_midi - cursor_nearest) * 100.0,
+            }
+            if not float(spec.midi_min) <= cursor_midi <= float(spec.midi_max):
+                return {
+                    "available": True,
+                    "peakAvailable": False,
+                    "time": t,
+                    **cursor_fields,
+                }
             idx = int(np.searchsorted(spec.frame_times, t, side="left"))
             idx = max(0, min(idx, spec.db.shape[1] - 1))
 
@@ -939,15 +955,11 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
             peak_db = float(values[local_index])
             nearest = int(math.floor(peak_midi + 0.5))
             cents = (peak_midi - nearest) * 100.0
-            cursor_nearest = int(math.floor(cursor_midi + 0.5))
-
             return {
                 "available": True,
+                "peakAvailable": True,
                 "time": t,
-                "cursorMidi": cursor_midi,
-                "cursorHz": midi_to_hz(cursor_midi),
-                "cursorName": note_name(cursor_nearest),
-                "cursorCents": (cursor_midi - cursor_nearest) * 100.0,
+                **cursor_fields,
                 "peakMidi": peak_midi,
                 "peakHz": midi_to_hz(peak_midi),
                 "peakName": note_name(nearest),
