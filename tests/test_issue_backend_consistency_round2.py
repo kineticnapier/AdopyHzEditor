@@ -7,8 +7,11 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+import numpy as np
+
 import web.backend as web_backend
 import web.io as web_io
+from core.audio_analysis import Spectrogram
 from core.note_model import Note
 from core.project_io import save_project
 from web.io import DEFAULT_EDITOR_SETTINGS
@@ -133,6 +136,138 @@ class BackendConsistencyRound2Tests(unittest.TestCase):
             self.assertEqual(defaults["midiMax"], 84)
             self.assertEqual(len(restored.notes), 1)
 
+
+    def _mock_cqt_spectrogram(self, duration=10.0):
+        return Spectrogram(
+            audio_path="mock.wav",
+            db=np.zeros((2, 2), dtype=np.float32),
+            duration=duration,
+            midi_min=60,
+            midi_max=61,
+            frame_times=np.array([0.0, duration]),
+            sr=44100,
+        )
+
+    def test_reanalysis_cqt_preserves_tail_notes_and_seek_range(self):
+        bridge = Bridge()
+        bridge.audio_path = "mock.wav"
+        bridge.notes = [Note(12.0, 13.0, 60.0).normalized()]
+        bridge.duration = 13.0
+        bridge.player.set_virtual_duration(13.0)
+
+        with mock.patch.object(
+            web_backend, "analyze_cqt",
+            return_value=self._mock_cqt_spectrogram(),
+        ):
+            result = bridge._analyze_current_audio(explicit=True)
+
+        self.assertEqual(result, "cqt")
+        self.assertEqual(bridge.duration, 13.0)
+        self.assertEqual(len(bridge.notes), 1)
+        self.assertAlmostEqual(bridge.seek_to(12.5)["time"], 12.5, places=3)
+
+    def test_reanalysis_direct_preserves_tail_notes_and_seek_range(self):
+        bridge = Bridge()
+        bridge.audio_path = "mock.ogg"
+        bridge.settings["analysisSource"] = "vorbis_direct"
+        bridge.notes = [Note(12.0, 13.0, 60.0).normalized()]
+        bridge.duration = 13.0
+        bridge.player.set_virtual_duration(13.0)
+        store = SimpleNamespace(
+            duration=10.0,
+            stats=SimpleNamespace(to_dict=lambda: {
+                "storedBins": 1, "blocksProcessed": 1, "analysisSeconds": 0.0,
+            }),
+        )
+        tracks = SimpleNamespace(
+            stats=SimpleNamespace(to_dict=lambda: {"totalTrackCount": 0}),
+        )
+
+        with (
+            mock.patch.object(
+                web_backend, "select_analysis_backend",
+                return_value=SimpleNamespace(selected="vorbis_direct"),
+            ),
+            mock.patch.object(
+                web_backend, "analyze_vorbis_spectrum_store", return_value=store,
+            ),
+            mock.patch.object(
+                web_backend, "build_frequency_track_store", return_value=tracks,
+            ),
+        ):
+            result = bridge._analyze_current_audio(explicit=True)
+
+        self.assertEqual(result, "vorbis_direct")
+        self.assertEqual(bridge.duration, 13.0)
+        self.assertAlmostEqual(bridge.seek_to(12.5)["time"], 12.5, places=3)
+
+    def test_reanalysis_without_tail_notes_uses_audio_duration(self):
+        bridge = Bridge()
+        bridge.audio_path = "mock.wav"
+        bridge.notes = [Note(1.0, 2.0, 60.0).normalized()]
+        bridge.duration = 13.0
+        bridge.player.set_virtual_duration(13.0)
+
+        with mock.patch.object(
+            web_backend, "analyze_cqt",
+            return_value=self._mock_cqt_spectrogram(),
+        ):
+            bridge._analyze_current_audio(explicit=True)
+
+        self.assertEqual(bridge.duration, 10.0)
+        self.assertEqual(len(bridge.notes), 1)
+        self.assertAlmostEqual(bridge.seek_to(12.5)["time"], 10.0, places=3)
+
+    def test_project_audio_commit_keeps_tail_notes_with_cqt(self):
+        bridge = Bridge()
+        bridge.notes = [Note(12.0, 13.0, 60.0).normalized()]
+        decoded = SimpleNamespace(duration=10.0)
+        def set_audio(_path, data):
+            bridge.duration = data.duration
+        with (
+            mock.patch.object(bridge, "_set_audio_data", side_effect=set_audio),
+            mock.patch.object(bridge.player, "set_virtual_duration") as virtual,
+        ):
+            committed = bridge._commit_prepared_audio(
+                "mock.wav", decoded, self._mock_cqt_spectrogram(),
+            )
+        self.assertTrue(committed)
+        self.assertEqual(bridge.duration, 13.0)
+        virtual.assert_called_once_with(13.0)
+
+    def test_project_audio_commit_keeps_tail_notes_in_direct_pending(self):
+        bridge = Bridge()
+        bridge.notes = [Note(12.0, 13.0, 60.0).normalized()]
+        decoded = SimpleNamespace(duration=10.0)
+        def set_audio(_path, data):
+            bridge.duration = data.duration
+        with (
+            mock.patch.object(bridge, "_set_audio_data", side_effect=set_audio),
+            mock.patch.object(bridge.player, "set_virtual_duration") as virtual,
+        ):
+            committed = bridge._commit_prepared_audio(
+                "mock.ogg", decoded, None, direct_pending=True,
+            )
+        self.assertTrue(committed)
+        self.assertEqual(bridge.duration, 13.0)
+        virtual.assert_called_once_with(13.0)
+
+    def test_new_audio_without_tail_notes_does_not_keep_old_duration(self):
+        bridge = Bridge()
+        bridge.duration = 100.0
+        decoded = SimpleNamespace(duration=10.0)
+        def set_audio(_path, data):
+            bridge.duration = data.duration
+        with (
+            mock.patch.object(bridge, "_set_audio_data", side_effect=set_audio),
+            mock.patch.object(bridge.player, "set_virtual_duration") as virtual,
+        ):
+            committed = bridge._commit_prepared_audio(
+                "mock.wav", decoded, self._mock_cqt_spectrogram(),
+            )
+        self.assertTrue(committed)
+        self.assertEqual(bridge.duration, 10.0)
+        virtual.assert_called_once_with(10.0)
 
 if __name__ == "__main__":
     unittest.main()

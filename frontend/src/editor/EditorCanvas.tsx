@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, type NoteTimeIndex } from "./editorMath";
+import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
+import { wheelViewChange } from "./wheelNavigation";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -393,23 +394,18 @@ export default function EditorCanvas(props: Props) {
     setDrag(null);
   }
   async function onContextMenu(event:ReactMouseEvent<HTMLCanvasElement>){
-    event.preventDefault();const p=eventPosition(event),hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.spectrum?.pitchStep??1);if(hit===null)return;
-    await props.onDelete(props.selected.includes(hit)&&props.selected.length>1?props.selected:[hit]);
+    event.preventDefault();const p=eventPosition(event),hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.spectrum?.pitchStep??1);
+    const indices=contextMenuDeleteIndices(hit);
+    if(indices.length)await props.onDelete(indices);
   }
   function onWheel(event:ReactWheelEvent<HTMLCanvasElement>){
-    event.preventDefault();const primary=Math.abs(event.deltaX)>Math.abs(event.deltaY)?event.deltaX:event.deltaY,sign=primary<0?1:-1;
-    if(event.shiftKey){
-      const maxBottom=Math.max(0,128-props.view.visibleNotes);
-      void props.onView({pitchBottom:Math.max(0,Math.min(maxBottom,props.view.pitchBottom+sign*3))});
-    }
-    else if(event.altKey){
-      const rect=event.currentTarget.getBoundingClientRect(),anchor=coords.midi(event.clientY-rect.top),ratio=(anchor-props.view.pitchBottom)/Math.max(1,props.view.visibleNotes);
-      const visibleNotes=Math.max(6,Math.min(128,props.view.visibleNotes-sign*4));
-      const pitchBottom=Math.max(0,Math.min(anchor-ratio*visibleNotes,128-visibleNotes));
-      void props.onView({visibleNotes,pitchBottom});
-    }
-    else if(event.ctrlKey){const rect=event.currentTarget.getBoundingClientRect(),ratio=Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),anchor=props.view.start+ratio*props.view.windowSeconds,next=props.view.windowSeconds*(sign>0?.85:1.18);void props.onView({windowSeconds:next,start:anchor-ratio*next})}
-    else {const amount=Math.abs(event.deltaX)>Math.abs(event.deltaY)?event.deltaX:event.deltaY;void props.onView({start:props.view.start+amount/100*props.view.windowSeconds*.08})}
+    event.preventDefault();
+    const rect=event.currentTarget.getBoundingClientRect();
+    const changes = wheelViewChange(event, props.view,{
+      timeRatio:Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),
+      pitchRatio:Math.max(0,Math.min(1,(rect.bottom-event.clientY)/Math.max(1,rect.height))),
+    });
+    if (changes) void props.onView(changes);
   }
   return <div className="canvas-wrap" ref={containerRef}>
     <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。操作方法はF1で確認できます。" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/>
