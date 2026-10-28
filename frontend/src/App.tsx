@@ -47,6 +47,7 @@ import {
 import {
   AsyncActionGuard,
   enqueueAppliedTask,
+  enqueueStateTask,
   LatestRequestGate,
   SerialTaskQueue,
   runWithErrorFeedback,
@@ -665,19 +666,20 @@ export default function App() {
       if (viewRequests.current.isCurrent(request)) setView(normalized);
     }
   }
-  async function runStateAction(
+  async function performStateAction(
     action: () => Promise<AppState>,
     clearSelection = false,
-  ) {
-    if (!api) return;
+  ): Promise<AppState> {
+    if (!api) throw new Error("バックエンドに接続されていません");
     setBusy(true);
     spectrumRequests.current.invalidate();
     spectrumRequest.current += 1;
     trackRequest.current += 1;
     try {
-      const state = await action();
-      applyState(state);
-      if (clearSelection) setSelected([]);
+      const state = await enqueueStateTask(mutationQueue.current, action, (next) => {
+        applyState(next);
+        if (clearSelection) setSelected([]);
+      });
       if (state.analysis.available && state.analysis.source !== "vorbis_direct")
         await refreshSpectrum(api, state.view);
       else setSpectrum(null);
@@ -685,10 +687,19 @@ export default function App() {
         setDirectSpectrum(null);
         setFrequencyTracks(null);
       }
-    } catch (e) {
-      setStatus(String(e));
+      return state;
     } finally {
       setBusy(false);
+    }
+  }
+  async function runStateAction(
+    action: () => Promise<AppState>,
+    clearSelection = false,
+  ): Promise<void> {
+    try {
+      await performStateAction(action, clearSelection);
+    } catch (e) {
+      setStatus(String(e));
     }
   }
   function requestDestructive(
@@ -719,8 +730,11 @@ export default function App() {
       let state: AppState | undefined;
       try {
         await flushPendingSettings();
-        state = await api.save_project_dialog();
-        applyState(state);
+        state = await enqueueStateTask(
+          mutationQueue.current,
+          () => api.save_project_dialog(),
+          applyState,
+        );
       } catch (e) {
         setStatus(String(e));
       } finally {
@@ -1287,11 +1301,8 @@ export default function App() {
           api={toolsApi}
           onClose={() => setToolDialog(null)}
           onStatus={setStatus}
-          onState={(state) => {
-            applyState(state);
-            setSpectrum(null);
-            setDirectSpectrum(null);
-            setFrequencyTracks(null);
+          onApply={async (options) => {
+            await performStateAction(() => toolsApi.apply_blank_workspace(options));
           }}
         />
       )}{" "}

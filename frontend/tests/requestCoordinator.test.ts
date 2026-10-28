@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
-import { AsyncActionGuard, enqueueAppliedTask, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
+import { AsyncActionGuard, enqueueAppliedTask, enqueueStateTask, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
 
 test("a late stale response cannot become current", () => {
   const gate = new LatestRequestGate();
@@ -129,4 +130,56 @@ test("current-document mutations still execute and apply", async () => {
   );
   assert.equal(result, 7);
   assert.deepEqual(applied, [7]);
+});
+
+test("document transition waits for prior edits and rejects old queued edits", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let generation = 0;
+  let release!: () => void;
+  const first = enqueueAppliedTask(
+    queue,
+    () => new Promise<void>((resolve) => { events.push("edit-start"); release = resolve; }),
+    () => { events.push("edit-applied"); },
+    () => generation === 0,
+  );
+  await Promise.resolve();
+  const switching = enqueueStateTask(
+    queue,
+    async () => { events.push("load-B"); return "B"; },
+    () => { generation += 1; events.push("B-applied"); },
+  );
+  const stale = enqueueAppliedTask(
+    queue,
+    async () => { events.push("stale-backend-call"); return 42; },
+    () => { events.push("stale-applied"); },
+    () => generation === 0,
+  );
+  release();
+  assert.equal(await switching, "B");
+  assert.equal(await stale, undefined);
+  await first;
+  assert.deepEqual(events, ["edit-start", "edit-applied", "load-B", "B-applied"]);
+});
+
+test("failed document transition does not apply state and queue recovers", async () => {
+  const queue = new SerialTaskQueue();
+  let applied = false;
+  await assert.rejects(
+    enqueueStateTask(queue, async (): Promise<number> => { throw new Error("load failed"); }, () => { applied = true; }),
+    /load failed/,
+  );
+  assert.equal(applied, false);
+  const next = await enqueueStateTask(queue, async () => 5, () => { applied = true; });
+  assert.equal(next, 5);
+  assert.equal(applied, true);
+});
+
+test("state actions, blank workspace and pending save use the same queue", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const dialogs = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
+  assert.match(app, /enqueueStateTask\(mutationQueue\.current, action/);
+  assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
+  assert.match(app, /enqueueStateTask\(\s*mutationQueue\.current,\s*\(\) => api\.save_project_dialog\(\)/);
+  assert.match(dialogs, /await onApply\(value\)/);
 });

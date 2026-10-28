@@ -62,3 +62,16 @@ export class AsyncActionGuard{
     try{await action();return true}finally{this.running=false}
   }
 }
+
+/** Serialize a document-wide action and its state application with note edits. */
+export function enqueueStateTask<T>(
+  queue: SerialTaskQueue,
+  call: () => Promise<T>,
+  apply: (state: T) => void,
+): Promise<T> {
+  return queue.enqueue(async () => {
+    const state = await call();
+    apply(state);
+    return state;
+  });
+}
