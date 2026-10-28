@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { commitNumericEdit } from "../settings/numericInputModel";
 import type { PlaybackState, ViewState } from "./bridge";
 
 type Props={
@@ -23,8 +24,40 @@ export default function Timeline({view,playback,followPlayback,onFollowPlayback,
 }
 
 function CommitNumber({id,label,value,min,max,step,onCommit}:{id?:string;label:string;value:number;min:number;max:number;step:number;onCommit(value:number):void}){
-  const[text,setText]=useState(String(value));
-  useEffect(()=>setText(String(value)),[value]);
-  function commit(){const parsed=Number(text);const next=Number.isFinite(parsed)?Math.max(min,Math.min(max,parsed)):value;setText(String(next));if(next!==value)onCommit(next)}
-  return <input id={id} aria-label={label} type="number" min={min} max={max} step={step} value={text} onChange={event=>setText(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==="Enter")event.currentTarget.blur();else if(event.key==="Escape"){setText(String(value));event.currentTarget.blur()}}}/>;
+  const [text, setText] = useState(String(value));
+  const cancelledRef = useRef(false);
+  useEffect(() => setText(String(value)), [value]);
+
+  function commit() {
+    // Escape calls blur synchronously; state updates have not reached text yet.
+    const next = commitNumericEdit(text, value, min, max, cancelledRef.current);
+    cancelledRef.current = false;
+    setText(String(next));
+    if (next !== value) onCommit(next);
+  }
+
+  return (
+    <input
+      id={id}
+      aria-label={label}
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={text}
+      onFocus={() => { cancelledRef.current = false; }}
+      onChange={(event) => setText(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          cancelledRef.current = true;
+          setText(String(value));
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
 }
