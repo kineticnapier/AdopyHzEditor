@@ -47,6 +47,7 @@ import {
 import {
   AsyncActionGuard,
   enqueueAppliedTask,
+  enqueueRecoverableViewTask,
   enqueueStateTask,
   enqueueStateTaskAfterSettings,
   LatestRequestGate,
@@ -648,6 +649,34 @@ export default function App() {
     });
     return settingsFlush.current;
   }
+  async function applyViewAction(
+    action: () => Promise<ViewState>,
+    label: string,
+  ) {
+    if (!api) return;
+    const request = viewRequests.current.issue();
+    const generation = documentGeneration.current;
+    const isCurrent = () =>
+      viewRequests.current.isCurrent(request) &&
+      generation === documentGeneration.current;
+    await enqueueRecoverableViewTask(
+      viewQueue.current,
+      action,
+      isCurrent,
+      setView,
+      async (error) => {
+        setStatus(`${label}に失敗しました: ${String(error)}`);
+        try {
+          // Read the backend's actual view, not the optimistic local value.
+          const state = await viewQueue.current.enqueue(() => api.get_state());
+          if (isCurrent()) setView(state.view);
+        } catch (recoveryError) {
+          if (isCurrent())
+            setStatus(`表示範囲の再取得に失敗しました: ${String(recoveryError)}`);
+        }
+      },
+    );
+  }
   async function updateView(changes: Partial<ViewState>) {
     if (Object.keys(changes).some((key) => key !== "mode"))
       setFollowPlayback(false);
@@ -656,21 +685,11 @@ export default function App() {
       setHoveredTrack(null);
     }
     setView((v) => ({ ...v, ...changes }));
-    if (api) {
-      const request = viewRequests.current.issue();
-      const normalized = await viewQueue.current.enqueue(() =>
-        api.set_view(changes),
-      );
-      if (viewRequests.current.isCurrent(request)) setView(normalized);
-    }
+    if (api) await applyViewAction(() => api.set_view(changes), "表示範囲の変更");
   }
   async function fitView() {
     setFollowPlayback(false);
-    if (api) {
-      const request = viewRequests.current.issue();
-      const normalized = await viewQueue.current.enqueue(() => api.fit_view());
-      if (viewRequests.current.isCurrent(request)) setView(normalized);
-    }
+    if (api) await applyViewAction(() => api.fit_view(), "全体表示");
   }
   async function performStateAction(
     action: () => Promise<AppState>,
