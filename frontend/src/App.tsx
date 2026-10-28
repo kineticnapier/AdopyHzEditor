@@ -791,6 +791,18 @@ export default function App() {
   ) {
     return queuedMutation(call, selection);
   }
+  async function queuePresetAction<T>(call: () => Promise<T>): Promise<T | undefined> {
+    const generation = documentGeneration.current;
+    return runWithErrorFeedback(
+      () => mutationQueue.current.enqueue(async () => {
+        if (generation !== documentGeneration.current)
+          throw new Error("操作対象の譜面が変更されました");
+        return call();
+      }),
+      () => undefined,
+      (message) => setStatus(`プリセット操作に失敗しました: ${message}`),
+    );
+  }
   async function addNote(
     start: number,
     end: number,
@@ -1238,6 +1250,7 @@ export default function App() {
             settings={settings}
             notes={notes}
             selected={selected}
+            playbackTime={playback.time}
             audioName={audioName}
             busy={busy}
             analysisAvailable={analysisAvailable}
@@ -1247,6 +1260,7 @@ export default function App() {
             onPatch={patch}
             onStateAction={runStateAction}
             onQueuedMutation={queueExternalMutation}
+            onQueuedPresetAction={queuePresetAction}
             onStatus={setStatus}
             onTrackSelectionChange={setTrackSelection}
             onConvertTracks={convertSelectedTracks}
