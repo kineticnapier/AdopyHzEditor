@@ -9,7 +9,7 @@ export type WheelInput = Pick<
 export function wheelViewChange(
   event: WheelInput,
   view: ViewState,
-  anchor: {timeRatio:number;pitchRatio:number}={timeRatio:0,pitchRatio:0},
+  anchor?: {timeRatio:number;pitchRatio:number},
 ): Partial<ViewState> | null {
   const { deltaX, deltaY } = event;
   if (deltaX === 0 && deltaY === 0) return null;
@@ -28,12 +28,16 @@ export function wheelViewChange(
   }
   if (event.altKey) {
     const visibleNotes = Math.max(6, Math.min(128, view.visibleNotes - sign * 4));
+    if(!anchor){
+      return {visibleNotes,pitchBottom:Math.max(0,Math.min(view.pitchBottom,128-visibleNotes))};
+    }
     const midi = view.pitchBottom - .5 + anchor.pitchRatio * view.visibleNotes;
     const pitchBottom = Math.max(0, Math.min(midi + .5 - anchor.pitchRatio * visibleNotes, 128 - visibleNotes));
     return { visibleNotes, pitchBottom };
   }
   if (event.ctrlKey) {
     const windowSeconds=view.windowSeconds*(sign>0?.85:1.18);
+    if(!anchor)return {windowSeconds};
     const time=view.start+anchor.timeRatio*view.windowSeconds;
     return {windowSeconds,start:time-anchor.timeRatio*windowSeconds};
   }
