@@ -582,7 +582,10 @@ export default function App() {
     );
     if (next !== null) {
       setView((v) => ({ ...v, start: next }));
-      void api?.set_view({ start: next });
+      // Follow updates must share the manual viewport queue and failure recovery.
+      // Otherwise an in-flight follow write can overtake a user's pan/zoom.
+      if (api && stateTransitionPending.current === 0)
+        void applyViewAction(() => api.set_view({ start: next }), "再生追従");
     }
   }, [
     api,
