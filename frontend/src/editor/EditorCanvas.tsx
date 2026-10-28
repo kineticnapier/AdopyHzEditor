@@ -3,6 +3,7 @@ import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, Note
 import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
+import { wheelViewChange } from "./wheelNavigation";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -391,18 +392,9 @@ export default function EditorCanvas(props: Props) {
     await props.onDelete(props.selected.includes(hit)&&props.selected.length>1?props.selected:[hit]);
   }
   function onWheel(event:ReactWheelEvent<HTMLCanvasElement>){
-    event.preventDefault();const sign=event.deltaY<0?1:-1;
-    if(event.shiftKey){
-      const maxBottom=Math.max(0,128-props.view.visibleNotes);
-      void props.onView({pitchBottom:Math.max(0,Math.min(maxBottom,props.view.pitchBottom+sign*3))});
-    }
-    else if(event.altKey){
-      const visibleNotes=Math.max(6,Math.min(128,props.view.visibleNotes-sign*4));
-      const pitchBottom=Math.max(0,Math.min(props.view.pitchBottom,128-visibleNotes));
-      void props.onView({visibleNotes,pitchBottom});
-    }
-    else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
-    else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
+    event.preventDefault();
+    const changes = wheelViewChange(event, props.view);
+    if (changes) void props.onView(changes);
   }
   return <div className="canvas-wrap" ref={containerRef}>
     <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。操作方法はF1で確認できます。" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/>
