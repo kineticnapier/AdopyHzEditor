@@ -47,6 +47,8 @@ import {
 import {
   AsyncActionGuard,
   enqueueAppliedTask,
+  enqueueRecoverableViewTask,
+  enqueueStateTaskAfterSettings,
   LatestRequestGate,
   SerialTaskQueue,
   runWithErrorFeedback,
@@ -198,6 +200,7 @@ export default function App() {
   const settingsRequests = useRef(new LatestRequestGate());
   const pendingSettings = useRef<Partial<EditorSettings>>({});
   const settingsFlush = useRef<Promise<void> | null>(null);
+  const stateTransitionPending = useRef(0);
   const mutationQueue = useRef(new SerialTaskQueue());
   const viewQueue = useRef(new SerialTaskQueue());
   const viewRequests = useRef(new LatestRequestGate());
@@ -263,6 +266,8 @@ export default function App() {
 
   function applyState(state: AppState) {
     documentGeneration.current += 1;
+    // Ignore playback replies issued for the previous document.
+    playbackRequests.current.invalidate();
     const identity = `${state.audio.path ?? ""}\0${state.analysis.source ?? "cqt"}\0${state.analysis.available}`;
     if (identity !== analysisIdentity.current) {
       analysisIdentity.current = identity;
@@ -359,11 +364,13 @@ export default function App() {
     let active = true;
     const id = window.setInterval(
       () => {
+        const generation = documentGeneration.current;
         const request = playbackRequests.current.issue();
         void api
           .get_playback_state()
           .then((x) => {
-            if (active && playbackRequests.current.isCurrent(request))
+            if (active && generation === documentGeneration.current &&
+                playbackRequests.current.isCurrent(request))
               setPlayback(x);
           })
           .catch(() => {});
@@ -569,7 +576,7 @@ export default function App() {
     playback.duration,
   ]);
   useEffect(() => {
-    if (!followPlayback || !playback.playing || view.windowSeconds <= 0) return;
+    if (stateTransitionPending.current > 0 || !followPlayback || !playback.playing || view.windowSeconds <= 0) return;
     const next = followViewportStart(
       view.start,
       view.windowSeconds,
@@ -578,7 +585,10 @@ export default function App() {
     );
     if (next !== null) {
       setView((v) => ({ ...v, start: next }));
-      void api?.set_view({ start: next });
+      // Follow updates must share the manual viewport queue and failure recovery.
+      // Otherwise an in-flight follow write can overtake a user's pan/zoom.
+      if (api && stateTransitionPending.current === 0)
+        void applyViewAction(() => api.set_view({ start: next }), "再生追従");
     }
   }, [
     api,
@@ -591,6 +601,10 @@ export default function App() {
   ]);
 
   async function patch(changes: Partial<EditorSettings>) {
+    if (stateTransitionPending.current > 0) {
+      setStatus("プロジェクト処理中は設定を変更できません");
+      return;
+    }
     const sourceChanged =
       changes.analysisSource !== undefined &&
       changes.analysisSource !== settings.analysisSource;
@@ -641,7 +655,39 @@ export default function App() {
     });
     return settingsFlush.current;
   }
+  async function applyViewAction(
+    action: () => Promise<ViewState>,
+    label: string,
+  ) {
+    if (!api || stateTransitionPending.current > 0) return;
+    const request = viewRequests.current.issue();
+    const generation = documentGeneration.current;
+    const isCurrent = () =>
+      viewRequests.current.isCurrent(request) &&
+      generation === documentGeneration.current;
+    await enqueueRecoverableViewTask(
+      viewQueue.current,
+      action,
+      isCurrent,
+      setView,
+      async (error) => {
+        setStatus(`${label}に失敗しました: ${String(error)}`);
+        try {
+          // Read the backend's actual view, not the optimistic local value.
+          const state = await viewQueue.current.enqueue(() => api.get_state());
+          if (isCurrent()) setView(state.view);
+        } catch (recoveryError) {
+          if (isCurrent())
+            setStatus(`表示範囲の再取得に失敗しました: ${String(recoveryError)}`);
+        }
+      },
+    );
+  }
   async function updateView(changes: Partial<ViewState>) {
+    if (stateTransitionPending.current > 0) {
+      setStatus("プロジェクト処理中は表示範囲を変更できません");
+      return;
+    }
     if (Object.keys(changes).some((key) => key !== "mode"))
       setFollowPlayback(false);
     if (changes.mode === "notes") {
@@ -649,35 +695,45 @@ export default function App() {
       setHoveredTrack(null);
     }
     setView((v) => ({ ...v, ...changes }));
-    if (api) {
-      const request = viewRequests.current.issue();
-      const normalized = await viewQueue.current.enqueue(() =>
-        api.set_view(changes),
-      );
-      if (viewRequests.current.isCurrent(request)) setView(normalized);
-    }
+    if (api) await applyViewAction(() => api.set_view(changes), "表示範囲の変更");
   }
   async function fitView() {
-    setFollowPlayback(false);
-    if (api) {
-      const request = viewRequests.current.issue();
-      const normalized = await viewQueue.current.enqueue(() => api.fit_view());
-      if (viewRequests.current.isCurrent(request)) setView(normalized);
+    if (stateTransitionPending.current > 0) {
+      setStatus("プロジェクト処理中は表示範囲を変更できません");
+      return;
     }
+    setFollowPlayback(false);
+    if (api) await applyViewAction(() => api.fit_view(), "全体表示");
   }
-  async function runStateAction(
+  async function performStateAction(
     action: () => Promise<AppState>,
     clearSelection = false,
-  ) {
-    if (!api) return;
+  ): Promise<AppState> {
+    if (!api) throw new Error("バックエンドに接続されていません");
+    stateTransitionPending.current += 1;
+    // Invalidate pending viewport writes before reserving the document queue.
+    viewRequests.current.invalidate();
     setBusy(true);
     spectrumRequests.current.invalidate();
     spectrumRequest.current += 1;
     trackRequest.current += 1;
     try {
-      const state = await action();
-      applyState(state);
-      if (clearSelection) setSelected([]);
+      // Keep the backend action and applyState inside the edit queue.
+      // Edits queued after a document switch are rejected by generation.
+      // A prior viewport write must finish before a new document is loaded.
+      const guardedAction = async () => {
+        await viewQueue.current.enqueue(async () => undefined);
+        return action();
+      };
+      const state = await enqueueStateTaskAfterSettings(
+        mutationQueue.current,
+        flushPendingSettings,
+        guardedAction,
+        (next) => {
+          applyState(next);
+          if (clearSelection) setSelected([]);
+        },
+      );
       if (state.analysis.available && state.analysis.source !== "vorbis_direct")
         await refreshSpectrum(api, state.view);
       else setSpectrum(null);
@@ -685,10 +741,20 @@ export default function App() {
         setDirectSpectrum(null);
         setFrequencyTracks(null);
       }
+      return state;
+    } finally {
+      stateTransitionPending.current -= 1;
+      setBusy(stateTransitionPending.current > 0);
+    }
+  }
+  async function runStateAction(
+    action: () => Promise<AppState>,
+    clearSelection = false,
+  ): Promise<void> {
+    try {
+      await performStateAction(action, clearSelection);
     } catch (e) {
       setStatus(String(e));
-    } finally {
-      setBusy(false);
     }
   }
   function requestDestructive(
@@ -714,17 +780,27 @@ export default function App() {
     await pendingSaveGuard.current.run(async () => {
       const pending = pendingDestructive;
       if (!api || !pending) return;
+      stateTransitionPending.current += 1;
+      viewRequests.current.invalidate();
       setSavingPending(true);
       setBusy(true);
       let state: AppState | undefined;
       try {
-        await flushPendingSettings();
-        state = await api.save_project_dialog();
-        applyState(state);
+        // Reserve the edit queue before waiting for settings and viewport writes.
+        state = await enqueueStateTaskAfterSettings(
+          mutationQueue.current,
+          flushPendingSettings,
+          async () => {
+            await viewQueue.current.enqueue(async () => undefined);
+            return api.save_project_dialog();
+          },
+          applyState,
+        );
       } catch (e) {
         setStatus(String(e));
       } finally {
-        setBusy(false);
+        stateTransitionPending.current -= 1;
+        setBusy(stateTransitionPending.current > 0);
         setSavingPending(false);
       }
       if (!state) return;
@@ -747,11 +823,14 @@ export default function App() {
     const pending = pendingDestructive;
     if (!pending) return;
     setPendingDestructive(null);
-    await flushPendingSettings();
+    stateTransitionPending.current += 1;
     try {
+      await flushPendingSettings();
       await pending.run();
     } catch (e) {
       setStatus(String(e));
+    } finally {
+      stateTransitionPending.current -= 1;
     }
   }
   function applyMutation(
@@ -777,10 +856,12 @@ export default function App() {
   ) {
     const generation = documentGeneration.current;
     return runWithErrorFeedback(
-      () => enqueueAppliedTask(mutationQueue.current, call, (result) => {
-        if (generation === documentGeneration.current)
-          applyMutation(result, selection(result), markDirty(result));
-      }),
+      () => enqueueAppliedTask(
+        mutationQueue.current,
+        call,
+        (result) => applyMutation(result, selection(result), markDirty(result)),
+        () => generation === documentGeneration.current,
+      ),
       () => undefined,
       (message) => setStatus(`ノート編集に失敗しました: ${message}`),
     );
@@ -873,12 +954,19 @@ export default function App() {
       );
   }
   async function copySelected() {
-    if (api)
+    if (api) {
+      const generation = documentGeneration.current;
       await runWithErrorFeedback(
-        () => mutationQueue.current.enqueue(() => api.copy_notes(selected)),
-        (result) => setStatus(result.status),
+        () => enqueueAppliedTask(
+          mutationQueue.current,
+          () => api.copy_notes(selected),
+          (result) => setStatus(result.status),
+          () => generation === documentGeneration.current,
+        ),
+        () => undefined,
         (message) => setStatus(`コピーに失敗しました: ${message}`),
       );
+    }
   }
   async function cutSelected() {
     if (api)
@@ -904,33 +992,37 @@ export default function App() {
         (r) => r.changed !== false,
       );
   }
+  // Playback commands mutate backend state and must not overtake document loads.
+  async function queuedPlaybackAction(call: () => Promise<PlaybackState>) {
+    const generation = documentGeneration.current;
+    await runWithErrorFeedback(
+      () => enqueueAppliedTask(
+        mutationQueue.current,
+        async () => {
+          const request = playbackRequests.current.issue();
+          return { request, next: await call() };
+        },
+        ({ request, next }) => {
+          if (playbackRequests.current.isCurrent(request)) setPlayback(next);
+        },
+        () => generation === documentGeneration.current,
+      ),
+      () => undefined,
+      (message) => setStatus(`再生操作に失敗しました: ${message}`),
+    );
+  }
   async function seekTo(t: number) {
-    if (api) {
-      const request = playbackRequests.current.issue();
-      const next = await api.seek_to(t);
-      if (playbackRequests.current.isCurrent(request)) setPlayback(next);
-    } else setPlayback((p) => ({ ...p, time: t }));
+    if (api) await queuedPlaybackAction(() => api.seek_to(t));
+    else setPlayback((p) => ({ ...p, time: t }));
   }
   async function togglePlayback() {
-    if (api) {
-      const request = playbackRequests.current.issue();
-      const next = await api.toggle_playback();
-      if (playbackRequests.current.isCurrent(request)) setPlayback(next);
-    }
+    if (api) await queuedPlaybackAction(() => api.toggle_playback());
   }
   async function stopPlayback() {
-    if (api) {
-      const request = playbackRequests.current.issue();
-      const next = await api.stop_playback();
-      if (playbackRequests.current.isCurrent(request)) setPlayback(next);
-    }
+    if (api) await queuedPlaybackAction(() => api.stop_playback());
   }
   async function seekRelative(s: number) {
-    if (api) {
-      const request = playbackRequests.current.issue();
-      const next = await api.seek_relative(s);
-      if (playbackRequests.current.isCurrent(request)) setPlayback(next);
-    }
+    if (api) await queuedPlaybackAction(() => api.seek_relative(s));
   }
   async function mode(v: ViewState["mode"]) {
     await updateView({ mode: v });
@@ -1015,11 +1107,23 @@ export default function App() {
   }
   function exportMidi(selectedOnly = false) {
     if (!api) return;
+    const generation = documentGeneration.current;
+    // Capture the selection at invocation time, not when earlier edits finish.
+    const selectedAtRequest = [...selected];
     const action =
       selectedOnly && toolsApi
-        ? () => toolsApi.export_selected_midi_dialog(selected)
+        ? () => toolsApi.export_selected_midi_dialog(selectedAtRequest)
         : () => api.export_midi_dialog();
-    void runMidiExport(action, setStatus);
+    // Exports read the current backend document. Keep them in the same order
+    // as edits and document replacements, and drop stale queued exports.
+    void enqueueAppliedTask(
+      mutationQueue.current,
+      () => runMidiExport(action, (message) => {
+        if (generation === documentGeneration.current) setStatus(message);
+      }),
+      () => undefined,
+      () => generation === documentGeneration.current,
+    );
   }
 
   const stateAction = (fn: () => Promise<AppState>) => void runStateAction(fn),
@@ -1285,11 +1389,8 @@ export default function App() {
           api={toolsApi}
           onClose={() => setToolDialog(null)}
           onStatus={setStatus}
-          onState={(state) => {
-            applyState(state);
-            setSpectrum(null);
-            setDirectSpectrum(null);
-            setFrequencyTracks(null);
+          onApply={async (options) => {
+            await performStateAction(() => toolsApi.apply_blank_workspace(options));
           }}
         />
       )}{" "}

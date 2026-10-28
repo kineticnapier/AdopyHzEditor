@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
-import { AsyncActionGuard, enqueueAppliedTask, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
+import { AsyncActionGuard, enqueueAppliedTask, enqueueRecoverableViewTask, enqueueStateTask, enqueueStateTaskAfterSettings, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
+import { runMidiExport } from "../src/editor/midiExport.ts";
 
 test("a late stale response cannot become current", () => {
   const gate = new LatestRequestGate();
@@ -75,4 +77,539 @@ test("inspector and canvas mutations apply in the same queue order", async () =>
   releaseInspector({ notes: ["inspector"] });
   await Promise.all([inspector, canvas]);
   assert.deepEqual(applied, [["inspector"], ["inspector", "canvas"]]);
+});
+
+test("queued old-document mutations never call the backend", async () => {
+  const queue = new SerialTaskQueue();
+  let release!: () => void;
+  let documentGeneration = 0;
+  let calls = 0;
+  const applied: number[] = [];
+  const blocker = queue.enqueue(
+    () => new Promise<void>((resolve) => { release = resolve; }),
+  );
+  await Promise.resolve();
+  const stale = enqueueAppliedTask(
+    queue,
+    async () => { calls += 1; return 42; },
+    (value) => { applied.push(value); },
+    () => documentGeneration === 0,
+  );
+  documentGeneration += 1;
+  release();
+  await blocker;
+  assert.equal(await stale, undefined);
+  assert.equal(calls, 0);
+  assert.deepEqual(applied, []);
+});
+
+test("in-flight old-document responses never update the new document", async () => {
+  const queue = new SerialTaskQueue();
+  let release!: (value: number) => void;
+  let documentGeneration = 0;
+  const applied: number[] = [];
+  const inFlight = enqueueAppliedTask(
+    queue,
+    () => new Promise<number>((resolve) => { release = resolve; }),
+    (value) => { applied.push(value); },
+    () => documentGeneration === 0,
+  );
+  await Promise.resolve();
+  documentGeneration += 1;
+  release(5);
+  assert.equal(await inFlight, 5);
+  assert.deepEqual(applied, []);
+});
+
+test("current-document mutations still execute and apply", async () => {
+  const applied: number[] = [];
+  const result = await enqueueAppliedTask(
+    new SerialTaskQueue(),
+    async () => 7,
+    (value) => { applied.push(value); },
+    () => true,
+  );
+  assert.equal(result, 7);
+  assert.deepEqual(applied, [7]);
+});
+
+test("document transition waits for prior edits and rejects old queued edits", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let generation = 0;
+  let release!: () => void;
+  const first = enqueueAppliedTask(
+    queue,
+    () => new Promise<void>((resolve) => { events.push("edit-start"); release = resolve; }),
+    () => { events.push("edit-applied"); },
+    () => generation === 0,
+  );
+  await Promise.resolve();
+  const switching = enqueueStateTask(
+    queue,
+    async () => { events.push("load-B"); return "B"; },
+    () => { generation += 1; events.push("B-applied"); },
+  );
+  const stale = enqueueAppliedTask(
+    queue,
+    async () => { events.push("stale-backend-call"); return 42; },
+    () => { events.push("stale-applied"); },
+    () => generation === 0,
+  );
+  release();
+  assert.equal(await switching, "B");
+  assert.equal(await stale, undefined);
+  await first;
+  assert.deepEqual(events, ["edit-start", "edit-applied", "load-B", "B-applied"]);
+});
+
+test("failed document transition does not apply state and queue recovers", async () => {
+  const queue = new SerialTaskQueue();
+  let applied = false;
+  await assert.rejects(
+    enqueueStateTask(queue, async (): Promise<number> => { throw new Error("load failed"); }, () => { applied = true; }),
+    /load failed/,
+  );
+  assert.equal(applied, false);
+  const next = await enqueueStateTask(queue, async () => 5, () => { applied = true; });
+  assert.equal(next, 5);
+  assert.equal(applied, true);
+});
+
+test("state actions, blank workspace and pending save use the same queue", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const dialogs = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
+  assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*guardedAction/);
+  assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
+  assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return api\.save_project_dialog\(\)/);
+  assert.match(dialogs, /await onApply\(value\)/);
+});
+
+test("pending settings finish before document state is requested or applied", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let releaseSettings!: () => void;
+  const transition = enqueueStateTaskAfterSettings(
+    queue,
+    () => new Promise<void>((resolve) => {
+      events.push("settings-start");
+      releaseSettings = () => { events.push("settings-finished"); resolve(); };
+    }),
+    async () => { events.push("load-document"); return "new document"; },
+    () => { events.push("apply-document"); },
+  );
+  await Promise.resolve(); // The reserved queue slot starts in a microtask.
+  assert.deepEqual(events, ["settings-start"]);
+  releaseSettings();
+  assert.equal(await transition, "new document");
+  assert.deepEqual(events, ["settings-start", "settings-finished", "load-document", "apply-document"]);
+});
+
+test("document transitions reject concurrent settings edits", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /if \(stateTransitionPending\.current > 0\) \{/);
+  assert.match(app, /stateTransitionPending\.current \+= 1;/);
+  assert.match(app, /stateTransitionPending\.current -= 1;/);
+  assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,/);
+});
+
+test("document switch keeps its queue position while settings are pending", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let generation = 0;
+  let releaseFirst!: () => void;
+  let releaseSettings!: () => void;
+  let settingsStarted!: () => void;
+  const started = new Promise<void>((resolve) => { settingsStarted = resolve; });
+
+  const first = enqueueAppliedTask(
+    queue,
+    () => new Promise<number>((resolve) => {
+      events.push("edit-start");
+      releaseFirst = () => resolve(1);
+    }),
+    () => { events.push("edit-applied"); },
+    () => generation === 0,
+  );
+  await Promise.resolve();
+
+  const transition = enqueueStateTaskAfterSettings(
+    queue,
+    () => {
+      events.push("settings-start");
+      settingsStarted();
+      return new Promise<void>((resolve) => { releaseSettings = resolve; });
+    },
+    async () => { events.push("load-B"); return "B"; },
+    () => { generation += 1; events.push("B-applied"); },
+  );
+  const stale = enqueueAppliedTask(
+    queue,
+    async () => { events.push("late-backend-call"); return 2; },
+    () => { events.push("late-applied"); },
+    () => generation === 0,
+  );
+
+  releaseFirst();
+  await started;
+  assert.deepEqual(events, ["edit-start", "edit-applied", "settings-start"]);
+  releaseSettings();
+  assert.deepEqual(await Promise.all([first, transition, stale]), [1, "B", undefined]);
+  assert.deepEqual(events, ["edit-start", "edit-applied", "settings-start", "load-B", "B-applied"]);
+});
+
+test("settings failure releases the reserved document-switch queue slot", async () => {
+  const queue = new SerialTaskQueue();
+  let called = false;
+  await assert.rejects(
+    enqueueStateTaskAfterSettings(
+      queue,
+      async () => { throw new Error("settings rejected"); },
+      async () => { called = true; return "B"; },
+      () => { called = true; },
+    ),
+    /settings rejected/,
+  );
+  assert.equal(called, false);
+  assert.equal(await queue.enqueue(async () => 7), 7);
+});
+
+test("current view failure invokes recovery and the view queue remains usable", async () => {
+  const queue = new SerialTaskQueue();
+  const recovered: string[] = [];
+  await enqueueRecoverableViewTask(
+    queue,
+    async (): Promise<number> => { throw new Error("set_view failed"); },
+    () => true,
+    () => { throw new Error("failed request must not apply"); },
+    async (error) => {
+      recovered.push(String(error));
+      recovered.push(String(await queue.enqueue(async () => 7)));
+    },
+  );
+  assert.match(recovered[0], /set_view failed/);
+  assert.deepEqual(recovered.slice(1), ["7"]);
+});
+
+test("stale view failure cannot recover over a newer request", async () => {
+  const recovered: string[] = [];
+  await enqueueRecoverableViewTask(
+    new SerialTaskQueue(),
+    async (): Promise<number> => { throw new Error("old request"); },
+    () => false,
+    () => { throw new Error("stale response must not apply"); },
+    async () => { recovered.push("stale recovery"); },
+  );
+  assert.deepEqual(recovered, []);
+});
+
+test("view request applies only the current successful response", async () => {
+  const queue = new SerialTaskQueue();
+  const applied: number[] = [];
+  await enqueueRecoverableViewTask(
+    queue, async () => 12, () => true,
+    (value) => { applied.push(value); },
+    async () => { throw new Error("unexpected recovery"); },
+  );
+  await enqueueRecoverableViewTask(
+    queue, async () => 13, () => false,
+    (value) => { applied.push(value); },
+    async () => { throw new Error("unexpected recovery"); },
+  );
+  assert.deepEqual(applied, [12]);
+});
+
+test("wheel and fit view share the recoverable request path", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /await enqueueRecoverableViewTask\(\s*viewQueue\.current,/);
+  assert.match(app, /applyViewAction\(\(\) => api\.set_view\(changes\), "表示範囲の変更"\)/);
+  assert.match(app, /applyViewAction\(\(\) => api\.fit_view\(\), "全体表示"\)/);
+  assert.match(app, /viewQueue\.current\.enqueue\(\(\) => api\.get_state\(\)\)/);
+  assert.match(app, /generation === documentGeneration\.current/);
+});
+
+test("queued superseded follow request never writes the backend", async () => {
+  const queue = new SerialTaskQueue();
+  const gate = new LatestRequestGate();
+  const calls: number[] = [];
+  const applied: number[] = [];
+  let release!: () => void;
+  const blocker = queue.enqueue(() => new Promise<void>((resolve) => {
+    release = resolve;
+  }));
+  await Promise.resolve();
+
+  const old = gate.issue();
+  const pending = enqueueRecoverableViewTask(
+    queue,
+    async () => { calls.push(1); return 1; },
+    () => gate.isCurrent(old),
+    (value) => { applied.push(value); },
+    async () => { throw new Error("obsolete follow must not recover"); },
+  );
+  const newest = gate.issue();
+  const latest = enqueueRecoverableViewTask(
+    queue,
+    async () => { calls.push(2); return 2; },
+    () => gate.isCurrent(newest),
+    (value) => { applied.push(value); },
+    async () => { throw new Error("latest follow must not fail"); },
+  );
+
+  release();
+  await Promise.all([blocker, pending, latest]);
+  assert.deepEqual(calls, [2]);
+  assert.deepEqual(applied, [2]);
+});
+
+test("playback follow shares manual view queue and error feedback", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /void applyViewAction\(\(\) => api\.set_view\(\{ start: next \}\), "再生追従"\)/);
+  assert.match(app, /stateTransitionPending\.current === 0/);
+  assert.doesNotMatch(app, /void api\?\.set_view\(\{ start: next \}\)/);
+});
+
+test("document replacement waits for a started viewport write", async () => {
+  const viewQueue = new SerialTaskQueue();
+  const editQueue = new SerialTaskQueue();
+  const gate = new LatestRequestGate();
+  const events: string[] = [];
+  let started!: () => void;
+  let releaseView!: () => void;
+  const viewStarted = new Promise<void>((resolve) => { started = resolve; });
+  const oldRequest = gate.issue();
+  const viewWrite = enqueueRecoverableViewTask(
+    viewQueue,
+    async () => {
+      events.push("view-start");
+      started();
+      return new Promise<number>((resolve) => {
+        releaseView = () => { events.push("view-end"); resolve(1); };
+      });
+    },
+    () => gate.isCurrent(oldRequest),
+    () => { events.push("stale-view-applied"); },
+    async () => { events.push("stale-view-recovered"); },
+  );
+  await viewStarted;
+  // This is done synchronously at the beginning of performStateAction().
+  gate.invalidate();
+  const transition = enqueueStateTaskAfterSettings(
+    editQueue,
+    async () => { events.push("settings-finished"); },
+    async () => {
+      await viewQueue.enqueue(async () => undefined);
+      events.push("load-new");
+      return "new";
+    },
+    () => { events.push("apply-new"); },
+  );
+  await Promise.resolve();
+  assert.equal(events.includes("load-new"), false);
+  releaseView();
+  await Promise.all([viewWrite, transition]);
+  assert.deepEqual(events, [
+    "view-start", "settings-finished", "view-end", "load-new", "apply-new",
+  ]);
+});
+
+test("document transition invalidates viewport work and blocks new view changes", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /stateTransitionPending\.current \+= 1;\s*\/\/ Invalidate pending viewport writes[^\n]*\n\s*viewRequests\.current\.invalidate\(\)/);
+  assert.match(app, /const guardedAction = async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return action\(\);/);
+  assert.match(app, /async function updateView\(changes: Partial<ViewState>\) \{\s*if \(stateTransitionPending\.current > 0\)/);
+  assert.match(app, /async function fitView\(\) \{\s*if \(stateTransitionPending\.current > 0\)/);
+  assert.match(app, /if \(!api \|\| stateTransitionPending\.current > 0\) return;\s*const request = viewRequests\.current\.issue\(\)/);
+  assert.match(app, /if \(stateTransitionPending\.current > 0 \|\| !followPlayback/);
+});
+
+test("pending save reserves edit queue before waiting for viewport writes", async () => {
+  const edits = new SerialTaskQueue();
+  const views = new SerialTaskQueue();
+  const events: string[] = [];
+  let releaseView!: () => void;
+  let viewStarted!: () => void;
+  const started = new Promise<void>((resolve) => { viewStarted = resolve; });
+  const inFlightView = views.enqueue(async () => {
+    events.push("view-start");
+    viewStarted();
+    await new Promise<void>((resolve) => { releaseView = resolve; });
+    events.push("view-end");
+  });
+  await started;
+  const save = enqueueStateTaskAfterSettings(
+    edits,
+    async () => { events.push("settings-finished"); },
+    async () => {
+      await views.enqueue(async () => undefined);
+      events.push("save");
+      return "saved";
+    },
+    () => { events.push("save-applied"); },
+  );
+  const laterEdit = edits.enqueue(async () => {
+    events.push("later-edit");
+  });
+  await Promise.resolve();
+  assert.equal(events.includes("save"), false);
+  assert.equal(events.includes("later-edit"), false);
+  releaseView();
+  await Promise.all([inFlightView, save, laterEdit]);
+  assert.deepEqual(events, [
+    "view-start", "settings-finished", "view-end",
+    "save", "save-applied", "later-edit",
+  ]);
+});
+
+test("playback requests and clipboard copy share document mutation ordering", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /function applyState\(state: AppState\) \{\s*documentGeneration\.current \+= 1;[\s\S]*?playbackRequests\.current\.invalidate\(\)/);
+  assert.match(app, /get_playback_state\(\)[\s\S]*?generation === documentGeneration\.current/);
+  assert.match(app, /async function queuedPlaybackAction\([\s\S]*?enqueueAppliedTask\(\s*mutationQueue\.current/);
+  assert.match(app, /async function copySelected\(\)[\s\S]*?enqueueAppliedTask\(\s*mutationQueue\.current/);
+  assert.match(app, /async function seekTo\(t: number\)[\s\S]*?queuedPlaybackAction\(\(\) => api\.seek_to\(t\)\)/);
+  assert.match(app, /async function togglePlayback\(\)[\s\S]*?queuedPlaybackAction\(\(\) => api\.toggle_playback\(\)\)/);
+  assert.match(app, /async function stopPlayback\(\)[\s\S]*?queuedPlaybackAction\(\(\) => api\.stop_playback\(\)\)/);
+  assert.match(app, /async function seekRelative\(s: number\)[\s\S]*?queuedPlaybackAction\(\(\) => api\.seek_relative\(s\)\)/);
+});
+
+test("in-flight playback finishes before a queued document replacement", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let generation = 0;
+  let release!: () => void;
+  const playing = enqueueAppliedTask(
+    queue,
+    () => new Promise<number>((resolve) => {
+      events.push("playback-start");
+      release = () => { events.push("playback-finish"); resolve(3); };
+    }),
+    () => { events.push("playback-applied"); },
+    () => generation === 0,
+  );
+  await Promise.resolve();
+  const switching = enqueueStateTask(
+    queue,
+    async () => { events.push("load-new"); return "new"; },
+    () => { generation += 1; events.push("new-applied"); },
+  );
+  assert.deepEqual(events, ["playback-start"]);
+  release();
+  await Promise.all([playing, switching]);
+  assert.deepEqual(events, [
+    "playback-start", "playback-finish", "playback-applied",
+    "load-new", "new-applied",
+  ]);
+});
+
+test("playback and clipboard operations queued after a document switch are discarded", async () => {
+  const queue = new SerialTaskQueue();
+  let generation = 0;
+  const calls: string[] = [];
+  const switching = enqueueStateTask(
+    queue,
+    async () => { calls.push("load-new"); return "new"; },
+    () => { generation += 1; calls.push("new-applied"); },
+  );
+  const oldPlayback = enqueueAppliedTask(
+    queue,
+    async () => { calls.push("old-seek"); return 2; },
+    () => { calls.push("old-playback-applied"); },
+    () => generation === 0,
+  );
+  const oldCopy = enqueueAppliedTask(
+    queue,
+    async () => { calls.push("old-copy"); return "copied"; },
+    () => { calls.push("old-copy-applied"); },
+    () => generation === 0,
+  );
+  await Promise.all([switching, oldPlayback, oldCopy]);
+  assert.deepEqual(calls, ["load-new", "new-applied"]);
+});
+
+test("document generation invalidates a delayed playback poll", async () => {
+  const gate = new LatestRequestGate();
+  let generation = 0;
+  const oldGeneration = generation;
+  const request = gate.issue();
+  let applyCount = 0;
+  let resolvePoll!: () => void;
+  const poll = new Promise<void>((resolve) => { resolvePoll = resolve; })
+    .then(() => {
+      if (oldGeneration === generation && gate.isCurrent(request)) applyCount += 1;
+    });
+  generation += 1;
+  gate.invalidate();
+  resolvePoll();
+  await poll;
+  assert.equal(applyCount, 0);
+});
+
+test("MIDI export waits for earlier edits and precedes document replacement", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let generation = 0;
+  let releaseEdit!: () => void;
+  const edit = queue.enqueue(async () => {
+    events.push("edit-start");
+    await new Promise<void>((resolve) => { releaseEdit = resolve; });
+    events.push("edit-end");
+  });
+  await Promise.resolve();
+
+  const exported = enqueueAppliedTask(
+    queue,
+    () => runMidiExport(
+      async () => { events.push("export"); return { status: "saved" }; },
+      () => { events.push("export-status"); },
+    ),
+    () => undefined,
+    () => generation === 0,
+  );
+  const load = enqueueStateTask(
+    queue,
+    async () => { events.push("load-B"); return "B"; },
+    () => { generation += 1; events.push("B-applied"); },
+  );
+  assert.deepEqual(events, ["edit-start"]);
+  releaseEdit();
+  await Promise.all([edit, exported, load]);
+  assert.deepEqual(events, [
+    "edit-start", "edit-end", "export", "export-status", "load-B", "B-applied",
+  ]);
+});
+
+test("MIDI export queued after document replacement never opens an export dialog", async () => {
+  const queue = new SerialTaskQueue();
+  let generation = 0;
+  let exportCalls = 0;
+  const load = enqueueStateTask(
+    queue,
+    async () => "B",
+    () => { generation += 1; },
+  );
+  const exported = enqueueAppliedTask(
+    queue,
+    () => runMidiExport(
+      async () => { exportCalls += 1; return { status: "unexpected" }; },
+      () => { throw new Error("stale export must not report success"); },
+    ),
+    () => undefined,
+    () => generation === 0,
+  );
+  await Promise.all([load, exported]);
+  assert.equal(exportCalls, 0);
+});
+
+test("App routes both MIDI export modes through the document queue", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const exportBlock = app.match(/  function exportMidi\(selectedOnly = false\) \{[\s\S]*?\n  \}/)?.[0];
+  assert.ok(exportBlock, "exportMidi() must exist");
+  assert.match(exportBlock, /const generation = documentGeneration\.current/);
+  assert.match(exportBlock, /const selectedAtRequest = \[\.\.\.selected\]/);
+  assert.match(exportBlock, /export_selected_midi_dialog\(selectedAtRequest\)/);
+  assert.match(exportBlock, /api\.export_midi_dialog\(\)/);
+  assert.match(exportBlock, /enqueueAppliedTask\(\s*mutationQueue\.current/);
+  assert.match(exportBlock, /runMidiExport\(action,/);
+  assert.match(exportBlock, /generation === documentGeneration\.current/);
 });

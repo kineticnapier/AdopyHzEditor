@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { AppState, NoteMutationResult } from "./bridge";
+import type { NoteMutationResult } from "./bridge";
 import type {
   BlankWorkspaceOptions,
   HarmonicDiagramOptions,
@@ -108,11 +108,12 @@ export function BlankWorkspaceDialog({
   api,
   onClose,
   onStatus,
-  onState,
-}: Common & { onState(state: AppState): void }) {
+  onApply,
+}: Common & { onApply(options: BlankWorkspaceOptions): Promise<void> }) {
   const [value, setValue] = useState<BlankWorkspaceOptions | null>(null),
     [loadError, setLoadError] = useState(""),
-    [attempt, setAttempt] = useState(0);
+    [attempt, setAttempt] = useState(0),
+    [applying, setApplying] = useState(false);
   useEffect(() => {
     let alive = true;
     setLoadError("");
@@ -125,18 +126,20 @@ export function BlankWorkspaceDialog({
     };
   }, [api, attempt]);
   async function apply() {
-    if (!value) return;
+    if (!value || applying) return;
+    setApplying(true);
     try {
-      const state = await api.apply_blank_workspace(value);
-      onState(state);
+      await onApply(value);
       onStatus("空のワークスペースに切り替えました");
       onClose();
     } catch (e) {
       onStatus(String(e));
+    } finally {
+      setApplying(false);
     }
   }
   return (
-    <Modal title="空のワークスペース" onClose={onClose}>
+    <Modal title="空のワークスペース" onClose={() => { if (!applying) onClose(); }}>
       {loadError ? (
         <LoadFailure
           error={loadError}
@@ -187,11 +190,11 @@ export function BlankWorkspaceDialog({
           </div>
           <div className="dialog-footer">
             <span />
-            <button onClick={onClose}>キャンセル</button>
+            <button disabled={applying} onClick={onClose}>キャンセル</button>
             <button
               className="primary"
               onClick={() => void apply()}
-              disabled={!value}
+              disabled={!value || applying}
             >
               適用
             </button>

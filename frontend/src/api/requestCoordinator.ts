@@ -32,10 +32,14 @@ export function enqueueAppliedTask<T>(
   queue: SerialTaskQueue,
   call: () => Promise<T>,
   apply: (result: T) => void,
-): Promise<T> {
+  isCurrent: () => boolean = () => true,
+): Promise<T | undefined> {
   return queue.enqueue(async () => {
+    // A queued task must not mutate a document that replaced its origin.
+    if (!isCurrent()) return undefined;
     const result = await call();
-    apply(result);
+    // An in-flight response can also outlive a document switch.
+    if (isCurrent()) apply(result);
     return result;
   });
 }
@@ -56,5 +60,56 @@ export class AsyncActionGuard{
     if(this.running)return false;
     this.running=true;
     try{await action();return true}finally{this.running=false}
+  }
+}
+
+/** Serialize a document-wide action and its state application with note edits. */
+export function enqueueStateTask<T>(
+  queue: SerialTaskQueue,
+  call: () => Promise<T>,
+  apply: (state: T) => void,
+): Promise<T> {
+  return queue.enqueue(async () => {
+    const state = await call();
+    apply(state);
+    return state;
+  });
+}
+
+/** Finish pending settings writes before replacing or saving a document. */
+export function enqueueStateTaskAfterSettings<T>(
+  queue: SerialTaskQueue,
+  settleSettings: () => Promise<void>,
+  call: () => Promise<T>,
+  apply: (state: T) => void,
+): Promise<T> {
+  // Reserve the queue slot immediately. Waiting for settings outside the
+  // queue lets edits requested after a document switch overtake that switch.
+  return queue.enqueue(async () => {
+    await settleSettings();
+    const state = await call();
+    apply(state);
+    return state;
+  });
+}
+
+/** Apply only the newest view response; report and recover current failures. */
+export async function enqueueRecoverableViewTask<T>(
+  queue: SerialTaskQueue,
+  call: () => Promise<T>,
+  isCurrent: () => boolean,
+  apply: (value: T) => void,
+  recover: (error: unknown) => Promise<void>,
+): Promise<void> {
+  try {
+    // Drop superseded requests before they reach the backend. In particular,
+    // playback-follow updates may arrive faster than viewport API responses.
+    const result = await queue.enqueue(async () => {
+      if (!isCurrent()) return { executed: false as const };
+      return { executed: true as const, value: await call() };
+    });
+    if (result.executed && isCurrent()) apply(result.value);
+  } catch (error) {
+    if (isCurrent()) await recover(error);
   }
 }
