@@ -7,6 +7,7 @@ from unittest import mock
 import numpy as np
 
 from core.audio_player import AudioPlayer
+from core.note_model import Note
 
 
 class PlaybackSpeedSyncTests(unittest.TestCase):
@@ -101,6 +102,30 @@ class PlaybackSpeedSyncTests(unittest.TestCase):
 
         self.assertEqual(player.pos, 123)
         self.assertEqual(player._pos_float, 123.75)
+
+    def test_curve_preview_phase_stays_continuous_after_octave_shift(self):
+        player = self._player()
+        player.note_sound_enabled = True
+        player.note_volume = 1.0
+        player.note_instrument = "sine"
+        player.set_preview_notes([
+            Note(0.0, 0.12, 69.0, kind="curve", midi_end=72.0,
+                 ctrl1_midi=69.0, ctrl2_midi=72.0),
+        ])
+        self.assertGreater(len(player.preview_notes), 2)
+        segment = player.preview_notes[1]
+
+        for octave_shift in (0, 1, -1):
+            with self.subTest(octave_shift=octave_shift):
+                player.note_octave_shift = octave_shift
+                output = np.zeros((1, 1), dtype=np.float32)
+                player._mix_preview_notes(
+                    output,
+                    np.array([float(segment.start)], dtype=np.float64),
+                )
+                expected_phase = segment.phase * (2.0 ** octave_shift)
+                expected = math.sin(expected_phase) * player.note_volume
+                self.assertAlmostEqual(float(output[0, 0]), expected, places=5)
 
 
 if __name__ == "__main__":
