@@ -194,7 +194,7 @@ class AdoFAIMixin:
             "songConflictAction": "cancel",
             "songOffsetAuto": True,
             "songOffsetMs": round(auto_offset, 3),
-            "selectedOnly": bool(selected),
+            "selectedOnly": False,
         }
 
     def _valid_export_indices(self, indices: list[int] | None) -> list[int]:

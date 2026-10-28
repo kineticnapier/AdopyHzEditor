@@ -356,13 +356,13 @@ class NoteMixin:
             self._status = f"{len(valid)}個のノートをクオンタイズしました"
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
-    def apply_interpolation(self, indices: list[int]) -> dict[str, Any]:
+    def apply_interpolation(self, indices: list[int], interpolation: str | None = None) -> dict[str, Any]:
         with self._lock:
             valid = sorted({int(i) for i in indices if 0 <= int(i) < len(self.notes) and self.notes[int(i)].is_curve})
             if not valid:
                 return {"notes": self._note_dicts(), "status": "カーブノートが選択されていません"}
             self._push_undo()
-            mode = str(self.settings["curveInterpolation"])
+            mode = self._normalize_setting("curveInterpolation", interpolation) if interpolation is not None else str(self.settings["curveInterpolation"])
             for i in valid:
                 self.notes[i] = self.notes[i].with_interpolation(mode)
             self._dirty = True
@@ -370,13 +370,13 @@ class NoteMixin:
             self._status = f"{len(valid)}個のカーブに補間を適用しました"
             return {"notes": self._note_dicts(), "status": self._status}
 
-    def apply_target_angle(self, indices: list[int]) -> dict[str, Any]:
+    def apply_target_angle(self, indices: list[int], target_angle: float | None = None) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
                 return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
             self._push_undo()
-            angle = float(self.settings["targetAngle"])
+            angle = float(self._normalize_setting("targetAngle", target_angle)) if target_angle is not None else float(self.settings["targetAngle"])
             for i in valid:
                 self.notes[i] = self.notes[i].with_target_angle(angle)
             self._dirty = True
