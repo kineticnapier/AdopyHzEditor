@@ -12,13 +12,15 @@ import type {
 } from "../editor/EditorCanvas";
 import { midiLabel, midiToHz } from "../editor/musicMath";
 import { commitNumericEdit } from "./numericInputModel";
+import NotePresetPanel from "./NotePresetPanel";
 
-type Page = "inspector" | "settings";
+type Page = "inspector" | "settings" | "presets";
 type Props = {
   api: BackendApi | null;
   settings: EditorSettings;
   notes: NoteDto[];
   selected: number[];
+  playbackTime: number;
   audioName: string | null;
   busy: boolean;
   analysisAvailable: boolean;
@@ -31,6 +33,7 @@ type Props = {
     call: () => Promise<NoteMutationResult>,
     selection?: (result: NoteMutationResult) => number[] | undefined,
   ): Promise<NoteMutationResult | undefined>;
+  onQueuedPresetAction<T>(call: () => Promise<T>): Promise<T | undefined>;
   onStatus(text: string): void;
   onTrackSelectionChange(selection: TrackSelectionState): void;
   onConvertTracks(mode: "fixed" | "curve"): Promise<void>;
@@ -58,6 +61,7 @@ export default function SettingsPanel({
   settings,
   notes,
   selected,
+  playbackTime,
   audioName,
   busy,
   analysisAvailable,
@@ -67,6 +71,7 @@ export default function SettingsPanel({
   onPatch,
   onStateAction,
   onQueuedMutation,
+  onQueuedPresetAction,
   onStatus,
   onTrackSelectionChange,
   onConvertTracks,
@@ -97,12 +102,13 @@ export default function SettingsPanel({
     settings.analysisSource === "vorbis_direct" &&
     actualAnalysisSource !== "vorbis_direct";
   useEffect(() => {
-    if (selected.length || trackSelection.ids.length) setPage("inspector");
+    if (selected.length || trackSelection.ids.length)
+      setPage((current) => current === "presets" ? current : "inspector");
   }, [selected.length, trackSelection.ids.length]);
 
   return (
     <aside className="settings inspector-panel">
-      <h2>{page === "inspector" ? "インスペクタ" : "設定"}</h2>
+      <h2>{page === "inspector" ? "インスペクタ" : page === "presets" ? "単音プリセット" : "設定"}</h2>
       <nav className="inspector-tabs">
         <button
           className={page === "inspector" ? "active" : ""}
@@ -117,6 +123,13 @@ export default function SettingsPanel({
           onClick={() => setPage("settings")}
         >
           設定
+        </button>
+        <button
+          className={page === "presets" ? "active" : ""}
+          aria-pressed={page === "presets"}
+          onClick={() => setPage("presets")}
+        >
+          プリセット
         </button>
       </nav>
       <div className="settings-body">
@@ -743,6 +756,16 @@ export default function SettingsPanel({
               </Row>
             </Fold>
           </>
+        )}
+        {page === "presets" && (
+          <NotePresetPanel
+            api={api}
+            selected={selected}
+            playbackTime={playbackTime}
+            onQueuedMutation={onQueuedMutation}
+            onQueuedPresetAction={onQueuedPresetAction}
+            onStatus={onStatus}
+          />
         )}
       </div>
     </aside>
