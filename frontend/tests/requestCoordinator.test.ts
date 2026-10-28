@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 
 import { AsyncActionGuard, enqueueAppliedTask, enqueueRecoverableViewTask, enqueueStateTask, enqueueStateTaskAfterSettings, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
+import { runMidiExport } from "../src/editor/midiExport.ts";
 
 test("a late stale response cannot become current", () => {
   const gate = new LatestRequestGate();
@@ -547,4 +548,73 @@ test("document generation invalidates a delayed playback poll", async () => {
   resolvePoll();
   await poll;
   assert.equal(applyCount, 0);
+});
+
+test("MIDI export waits for earlier edits and precedes document replacement", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let generation = 0;
+  let releaseEdit!: () => void;
+  const edit = queue.enqueue(async () => {
+    events.push("edit-start");
+    await new Promise<void>((resolve) => { releaseEdit = resolve; });
+    events.push("edit-end");
+  });
+  await Promise.resolve();
+
+  const exported = enqueueAppliedTask(
+    queue,
+    () => runMidiExport(
+      async () => { events.push("export"); return { status: "saved" }; },
+      () => { events.push("export-status"); },
+    ),
+    () => undefined,
+    () => generation === 0,
+  );
+  const load = enqueueStateTask(
+    queue,
+    async () => { events.push("load-B"); return "B"; },
+    () => { generation += 1; events.push("B-applied"); },
+  );
+  assert.deepEqual(events, ["edit-start"]);
+  releaseEdit();
+  await Promise.all([edit, exported, load]);
+  assert.deepEqual(events, [
+    "edit-start", "edit-end", "export", "export-status", "load-B", "B-applied",
+  ]);
+});
+
+test("MIDI export queued after document replacement never opens an export dialog", async () => {
+  const queue = new SerialTaskQueue();
+  let generation = 0;
+  let exportCalls = 0;
+  const load = enqueueStateTask(
+    queue,
+    async () => "B",
+    () => { generation += 1; },
+  );
+  const exported = enqueueAppliedTask(
+    queue,
+    () => runMidiExport(
+      async () => { exportCalls += 1; return { status: "unexpected" }; },
+      () => { throw new Error("stale export must not report success"); },
+    ),
+    () => undefined,
+    () => generation === 0,
+  );
+  await Promise.all([load, exported]);
+  assert.equal(exportCalls, 0);
+});
+
+test("App routes both MIDI export modes through the document queue", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const exportBlock = app.match(/  function exportMidi\(selectedOnly = false\) \{[\s\S]*?\n  \}/)?.[0];
+  assert.ok(exportBlock, "exportMidi() must exist");
+  assert.match(exportBlock, /const generation = documentGeneration\.current/);
+  assert.match(exportBlock, /const selectedAtRequest = \[\.\.\.selected\]/);
+  assert.match(exportBlock, /export_selected_midi_dialog\(selectedAtRequest\)/);
+  assert.match(exportBlock, /api\.export_midi_dialog\(\)/);
+  assert.match(exportBlock, /enqueueAppliedTask\(\s*mutationQueue\.current/);
+  assert.match(exportBlock, /runMidiExport\(action,/);
+  assert.match(exportBlock, /generation === documentGeneration\.current/);
 });
