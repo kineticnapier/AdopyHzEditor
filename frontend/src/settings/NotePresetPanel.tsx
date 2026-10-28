@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BackendApi, NoteMutationResult, NotePreset } from "./bridge";
+import { presetInsertSelection } from "./presetSelection";
+import "./presets.css";
 
 type Props = {
   api: BackendApi | null;
   selected: number[];
   playbackTime: number;
-  onMutation(result: NoteMutationResult, selection?: number[]): void;
+  onQueuedMutation(call: () => Promise<NoteMutationResult>, selection?: (result: NoteMutationResult) => number[] | undefined): Promise<NoteMutationResult | undefined>;
+  onQueuedPresetAction<T>(call: () => Promise<T>): Promise<T | undefined>;
   onStatus(text: string): void;
 };
 
@@ -15,7 +18,7 @@ function describe(preset: NotePreset) {
   return `${preset.kind === "curve" ? "カーブ" : "固定音"} / MIDI ${midi} / ${sec}秒`;
 }
 
-export default function NotePresetPanel({ api, selected, playbackTime, onMutation, onStatus }: Props) {
+export default function NotePresetPanel({ api, selected, playbackTime, onQueuedMutation, onQueuedPresetAction, onStatus }: Props) {
   const [presets, setPresets] = useState<NotePreset[]>([]);
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState("");
@@ -38,9 +41,12 @@ export default function NotePresetPanel({ api, selected, playbackTime, onMutatio
     if (!api || selected.length !== 1 || !name.trim()) return;
     setBusy(true);
     try {
-      const result = await api.save_note_preset(name.trim(), selected[0]);
+      const presetName = name.trim();
+      const selectedIndex = selected[0];
+      const result = await onQueuedPresetAction(() => api.save_note_preset(presetName, selectedIndex));
+      if (!result) return;
       setPresets(result.presets);
-      setChosen(name.trim());
+      setChosen(presetName);
       onStatus(result.status);
     } catch (e) {
       onStatus(String(e));
@@ -53,8 +59,10 @@ export default function NotePresetPanel({ api, selected, playbackTime, onMutatio
     if (!api || !chosen) return;
     setBusy(true);
     try {
-      const result = await api.insert_note_preset(chosen, playbackTime);
-      onMutation(result, result.indices ?? (result.index === undefined ? [] : [result.index]));
+      await onQueuedMutation(
+        () => api.insert_note_preset(chosen, playbackTime),
+        presetInsertSelection,
+      );
     } catch (e) {
       onStatus(String(e));
     } finally {
@@ -67,7 +75,9 @@ export default function NotePresetPanel({ api, selected, playbackTime, onMutatio
     if (!window.confirm(`プリセット「${chosen}」を削除しますか？`)) return;
     setBusy(true);
     try {
-      const result = await api.delete_note_preset(chosen);
+      const presetName = chosen;
+      const result = await onQueuedPresetAction(() => api.delete_note_preset(presetName));
+      if (!result) return;
       setPresets(result.presets);
       setChosen(result.presets[0]?.name ?? "");
       onStatus(result.status);
@@ -81,12 +91,12 @@ export default function NotePresetPanel({ api, selected, playbackTime, onMutatio
   return <section className="note-presets">
     <h3>単音プリセット</h3>
     <div className="preset-save-row">
-      <input value={name} maxLength={80} placeholder="プリセット名" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
+      <input aria-label="プリセット名" value={name} maxLength={80} placeholder="プリセット名" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
       <button disabled={!api || busy || selected.length !== 1 || !name.trim()} onClick={() => void save()}>選択音を保存</button>
     </div>
     {presets.length === 0 ? <div className="hint">1個のノートを選択して保存すると、別の曲でも同じ音高・長さを再利用できます。</div> : <>
       <div className="preset-use-row">
-        <select value={chosen} onChange={(e) => setChosen(e.target.value)}>{presets.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}</select>
+        <select aria-label="保存済みプリセット" value={chosen} onChange={(e) => setChosen(e.target.value)}>{presets.map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}</select>
         <button className="primary-soft" disabled={!api || busy || !chosen} onClick={() => void insert()}>再生位置へ挿入</button>
         <button disabled={!api || busy || !chosen} onClick={() => void remove()}>削除</button>
       </div>
