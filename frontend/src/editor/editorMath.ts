@@ -99,3 +99,8 @@ export function boundedGridRange(start: number, windowSeconds: number, beat: num
   const total = Math.max(0, last - first + 1), stride = Math.max(1, Math.ceil(total / Math.max(1, maxLines)));
   return { first, last, stride, count: total ? Math.floor((last - first) / stride) + 1 : 0 };
 }
+
+/** Right-click acts on the note under the pointer; Delete acts on the selection. */
+export function contextMenuDeleteIndices(hit: number | null): number[] {
+  return hit === null ? [] : [hit];
+}

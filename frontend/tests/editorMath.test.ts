@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop } from "../src/editor/editorMath.ts";
+import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop } from "../src/editor/editorMath.ts";
 
 const curve = { start: 0, end: 100, midi: 0, velocity: 100, kind: "curve" as const, midi_end: 0, ctrl1_midi: 127, ctrl2_midi: 127 };
 
@@ -42,4 +42,12 @@ test("long notes retain distinct resize handles", () => {
   assert.equal(noteEdgeAt(100, 140, 104), "start");
   assert.equal(noteEdgeAt(100, 140, 136), "end");
   assert.equal(noteEdgeAt(100, 140, 120), null);
+});
+
+test("context menu deletes only the pointed note, never the full selection", () => {
+  const selection = [0, 2, 4];
+  assert.deepEqual(contextMenuDeleteIndices(2), [2]);
+  assert.deepEqual(contextMenuDeleteIndices(3), [3]);
+  assert.deepEqual(contextMenuDeleteIndices(null), []);
+  assert.deepEqual(selection, [0, 2, 4]);
 });

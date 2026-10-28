@@ -1,8 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { AppState, BackendApi, EditorSettings, NoteDto, NoteMutationResult } from "./bridge";
 import type { TrackHoverInfo, TrackSelectionState } from "../editor/EditorCanvas";
 import { midiLabel, midiToHz } from "../editor/musicMath";
-import { commitNumericText } from "./numericInputModel";
+import { commitNumericEdit } from "./numericInputModel";
 
 type Page="inspector"|"settings";
 type Props={
@@ -161,8 +161,9 @@ function Row({label,children}:{label:string;children:ReactNode}){return <label c
 function Range({value,min=0,max=100,disabled=false,onChange}:{value:number;min?:number;max?:number;disabled?:boolean;onChange(v:number):void}){return <div className="range-wrap"><input type="range" min={min} max={max} value={value} disabled={disabled} onChange={e=>onChange(+e.target.value)}/><output>{value}</output></div>}
 function NumberInput({value,min,max,step,suffix,disabled=false,onChange}:{value:number;min:number;max:number;step:number;suffix?:string;disabled?:boolean;onChange(v:number):void}){
   const fallback=Number.isFinite(value)?value:0,[text,setText]=useState(String(fallback)),[editing,setEditing]=useState(false);
+  const cancelledRef=useRef(false);
   useEffect(()=>{if(!editing)setText(String(fallback))},[editing,fallback]);
-  function commit(){const next=commitNumericText(text,fallback,min,max);setEditing(false);setText(String(next));if(next!==fallback)onChange(next)}
-  return <div className="number-wrap"><input type="number" value={text} min={min} max={max} step={step} disabled={disabled} onFocus={()=>setEditing(true)} onChange={e=>setText(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();else if(e.key==="Escape"){setText(String(fallback));e.currentTarget.blur()}}}/>{suffix&&<span>{suffix}</span>}</div>
+  function commit(){const next=commitNumericEdit(text,fallback,min,max,cancelledRef.current);cancelledRef.current=false;setEditing(false);setText(String(next));if(next!==fallback)onChange(next)}
+  return <div className="number-wrap"><input type="number" value={text} min={min} max={max} step={step} disabled={disabled} onFocus={()=>{cancelledRef.current=false;setEditing(true)}} onChange={e=>setText(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==="Enter")e.currentTarget.blur();else if(e.key==="Escape"){e.preventDefault();cancelledRef.current=true;setText(String(fallback));e.currentTarget.blur()}}}/>{suffix&&<span>{suffix}</span>}</div>
 }
 function Select({value,options,disabled=false,onChange}:{value:string;options:Array<[string,string]>;disabled?:boolean;onChange(v:string):void}){return <select value={value} disabled={disabled} onChange={e=>onChange(e.target.value)}>{options.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>}
