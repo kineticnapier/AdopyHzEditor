@@ -48,6 +48,7 @@ import {
   AsyncActionGuard,
   enqueueAppliedTask,
   enqueueStateTask,
+  enqueueStateTaskAfterSettings,
   LatestRequestGate,
   SerialTaskQueue,
   runWithErrorFeedback,
@@ -199,6 +200,7 @@ export default function App() {
   const settingsRequests = useRef(new LatestRequestGate());
   const pendingSettings = useRef<Partial<EditorSettings>>({});
   const settingsFlush = useRef<Promise<void> | null>(null);
+  const stateTransitionPending = useRef(0);
   const mutationQueue = useRef(new SerialTaskQueue());
   const viewQueue = useRef(new SerialTaskQueue());
   const viewRequests = useRef(new LatestRequestGate());
@@ -592,6 +594,10 @@ export default function App() {
   ]);
 
   async function patch(changes: Partial<EditorSettings>) {
+    if (stateTransitionPending.current > 0) {
+      setStatus("プロジェクト処理中は設定を変更できません");
+      return;
+    }
     const sourceChanged =
       changes.analysisSource !== undefined &&
       changes.analysisSource !== settings.analysisSource;
@@ -671,6 +677,7 @@ export default function App() {
     clearSelection = false,
   ): Promise<AppState> {
     if (!api) throw new Error("バックエンドに接続されていません");
+    stateTransitionPending.current += 1;
     setBusy(true);
     spectrumRequests.current.invalidate();
     spectrumRequest.current += 1;
@@ -678,10 +685,15 @@ export default function App() {
     try {
       // Keep the backend action and applyState inside the edit queue.
       // Edits queued after a document switch are rejected by generation.
-      const state = await enqueueStateTask(mutationQueue.current, action, (next) => {
-        applyState(next);
-        if (clearSelection) setSelected([]);
-      });
+      const state = await enqueueStateTaskAfterSettings(
+        mutationQueue.current,
+        flushPendingSettings,
+        action,
+        (next) => {
+          applyState(next);
+          if (clearSelection) setSelected([]);
+        },
+      );
       if (state.analysis.available && state.analysis.source !== "vorbis_direct")
         await refreshSpectrum(api, state.view);
       else setSpectrum(null);
@@ -691,7 +703,8 @@ export default function App() {
       }
       return state;
     } finally {
-      setBusy(false);
+      stateTransitionPending.current -= 1;
+      setBusy(stateTransitionPending.current > 0);
     }
   }
   async function runStateAction(
@@ -727,6 +740,7 @@ export default function App() {
     await pendingSaveGuard.current.run(async () => {
       const pending = pendingDestructive;
       if (!api || !pending) return;
+      stateTransitionPending.current += 1;
       setSavingPending(true);
       setBusy(true);
       let state: AppState | undefined;
@@ -740,7 +754,8 @@ export default function App() {
       } catch (e) {
         setStatus(String(e));
       } finally {
-        setBusy(false);
+        stateTransitionPending.current -= 1;
+        setBusy(stateTransitionPending.current > 0);
         setSavingPending(false);
       }
       if (!state) return;
@@ -763,11 +778,14 @@ export default function App() {
     const pending = pendingDestructive;
     if (!pending) return;
     setPendingDestructive(null);
-    await flushPendingSettings();
+    stateTransitionPending.current += 1;
     try {
+      await flushPendingSettings();
       await pending.run();
     } catch (e) {
       setStatus(String(e));
+    } finally {
+      stateTransitionPending.current -= 1;
     }
   }
   function applyMutation(
