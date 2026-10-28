@@ -32,10 +32,14 @@ export function enqueueAppliedTask<T>(
   queue: SerialTaskQueue,
   call: () => Promise<T>,
   apply: (result: T) => void,
-): Promise<T> {
+  isCurrent: () => boolean = () => true,
+): Promise<T | undefined> {
   return queue.enqueue(async () => {
+    // A queued task must not mutate a document that replaced its origin.
+    if (!isCurrent()) return undefined;
     const result = await call();
-    apply(result);
+    // An in-flight response can also outlive a document switch.
+    if (isCurrent()) apply(result);
     return result;
   });
 }
