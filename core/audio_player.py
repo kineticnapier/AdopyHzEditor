@@ -327,7 +327,15 @@ class AudioPlayer:
             freq = midi_to_hz(float(midi) + octave_shift * 12)
             sample_index = source_positions[out_s:out_e]
             # 絶対サンプル時刻から生成するのでブロック境界で位相が飛びにくい
-            phase_offset = float(getattr(segment, "phase", 2.0 * np.pi * freq * ns / sr))
+            base_phase = getattr(segment, "phase", None)
+            if base_phase is None:
+                phase_offset = 2.0 * np.pi * freq * ns / sr
+            else:
+                # PreviewSegment.phase is accumulated at the stored/base MIDI
+                # pitch. Octave transposition scales both frequency and the
+                # accumulated phase by the same power of two, including when
+                # the setting changes after the segments were prepared.
+                phase_offset = float(base_phase) * (2.0 ** octave_shift)
             phase = phase_offset + 2.0 * np.pi * freq * (sample_index - ns) / sr
             local = sample_index - ns
             local_sec = local / float(sr)
