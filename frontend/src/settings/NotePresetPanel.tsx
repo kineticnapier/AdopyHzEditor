@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BackendApi, NoteMutationResult, NotePreset } from "./bridge";
 import { presetInsertSelection } from "./presetSelection";
+import { LatestRequestGate } from "../api/requestCoordinator";
 import "./presets.css";
 
 type Props = {
@@ -23,16 +24,20 @@ export default function NotePresetPanel({ api, selected, playbackTime, onQueuedM
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState("");
   const [busy, setBusy] = useState(false);
+  const listRequests = useRef(new LatestRequestGate());
 
   useEffect(() => {
+    const request = listRequests.current.issue();
     if (!api) return;
     let alive = true;
     void api.get_note_presets().then((items) => {
-      if (!alive) return;
+      if (!alive || !listRequests.current.isCurrent(request)) return;
       setPresets(items);
       setChosen((old) => old && items.some((x) => x.name === old) ? old : (items[0]?.name ?? ""));
-    }).catch((e) => onStatus(String(e)));
-    return () => { alive = false; };
+    }).catch((e) => {
+      if (alive && listRequests.current.isCurrent(request)) onStatus(String(e));
+    });
+    return () => { alive = false; listRequests.current.invalidate(); };
   }, [api, onStatus]);
 
   const current = useMemo(() => presets.find((x) => x.name === chosen) ?? null, [presets, chosen]);
@@ -45,6 +50,7 @@ export default function NotePresetPanel({ api, selected, playbackTime, onQueuedM
       const selectedIndex = selected[0];
       const result = await onQueuedPresetAction(() => api.save_note_preset(presetName, selectedIndex));
       if (!result) return;
+      listRequests.current.invalidate();
       setPresets(result.presets);
       setChosen(presetName);
       onStatus(result.status);
