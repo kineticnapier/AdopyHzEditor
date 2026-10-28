@@ -75,3 +75,14 @@ export function enqueueStateTask<T>(
     return state;
   });
 }
+
+/** Finish pending settings writes before replacing or saving a document. */
+export async function enqueueStateTaskAfterSettings<T>(
+  queue: SerialTaskQueue,
+  settleSettings: () => Promise<void>,
+  call: () => Promise<T>,
+  apply: (state: T) => void,
+): Promise<T> {
+  await settleSettings();
+  return enqueueStateTask(queue, call, apply);
+}
