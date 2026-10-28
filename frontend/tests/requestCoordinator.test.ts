@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-import { AsyncActionGuard, enqueueAppliedTask, enqueueStateTask, enqueueStateTaskAfterSettings, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
+import { AsyncActionGuard, enqueueAppliedTask, enqueueRecoverableViewTask, enqueueStateTask, enqueueStateTaskAfterSettings, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
 
 test("a late stale response cannot become current", () => {
   const gate = new LatestRequestGate();
@@ -271,4 +271,58 @@ test("settings failure releases the reserved document-switch queue slot", async 
   );
   assert.equal(called, false);
   assert.equal(await queue.enqueue(async () => 7), 7);
+});
+
+test("current view failure invokes recovery and the view queue remains usable", async () => {
+  const queue = new SerialTaskQueue();
+  const recovered: string[] = [];
+  await enqueueRecoverableViewTask(
+    queue,
+    async (): Promise<number> => { throw new Error("set_view failed"); },
+    () => true,
+    () => { throw new Error("failed request must not apply"); },
+    async (error) => {
+      recovered.push(String(error));
+      recovered.push(String(await queue.enqueue(async () => 7)));
+    },
+  );
+  assert.match(recovered[0], /set_view failed/);
+  assert.deepEqual(recovered.slice(1), ["7"]);
+});
+
+test("stale view failure cannot recover over a newer request", async () => {
+  const recovered: string[] = [];
+  await enqueueRecoverableViewTask(
+    new SerialTaskQueue(),
+    async (): Promise<number> => { throw new Error("old request"); },
+    () => false,
+    () => { throw new Error("stale response must not apply"); },
+    async () => { recovered.push("stale recovery"); },
+  );
+  assert.deepEqual(recovered, []);
+});
+
+test("view request applies only the current successful response", async () => {
+  const queue = new SerialTaskQueue();
+  const applied: number[] = [];
+  await enqueueRecoverableViewTask(
+    queue, async () => 12, () => true,
+    (value) => { applied.push(value); },
+    async () => { throw new Error("unexpected recovery"); },
+  );
+  await enqueueRecoverableViewTask(
+    queue, async () => 13, () => false,
+    (value) => { applied.push(value); },
+    async () => { throw new Error("unexpected recovery"); },
+  );
+  assert.deepEqual(applied, [12]);
+});
+
+test("wheel and fit view share the recoverable request path", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /await enqueueRecoverableViewTask\(\s*viewQueue\.current,/);
+  assert.match(app, /applyViewAction\(\(\) => api\.set_view\(changes\), "表示範囲の変更"\)/);
+  assert.match(app, /applyViewAction\(\(\) => api\.fit_view\(\), "全体表示"\)/);
+  assert.match(app, /viewQueue\.current\.enqueue\(\(\) => api\.get_state\(\)\)/);
+  assert.match(app, /generation === documentGeneration\.current/);
 });
