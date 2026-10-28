@@ -183,7 +183,7 @@ test("failed document transition does not apply state and queue recovers", async
 test("state actions, blank workspace and pending save use the same queue", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const dialogs = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
-  assert.match(app, /enqueueStateTask\(mutationQueue\.current, action/);
+  assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*action/);
   assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
   assert.match(app, /enqueueStateTask\(\s*mutationQueue\.current,\s*\(\) => api\.save_project_dialog\(\)/);
   assert.match(dialogs, /await onApply\(value\)/);
@@ -202,6 +202,7 @@ test("pending settings finish before document state is requested or applied", as
     async () => { events.push("load-document"); return "new document"; },
     () => { events.push("apply-document"); },
   );
+  await Promise.resolve(); // The reserved queue slot starts in a microtask.
   assert.deepEqual(events, ["settings-start"]);
   releaseSettings();
   assert.equal(await transition, "new document");
@@ -214,4 +215,65 @@ test("document transitions reject concurrent settings edits", () => {
   assert.match(app, /stateTransitionPending\.current \+= 1;/);
   assert.match(app, /stateTransitionPending\.current -= 1;/);
   assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,/);
+});
+
+test("document switch keeps its queue position while settings are pending", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let generation = 0;
+  let releaseFirst!: () => void;
+  let releaseSettings!: () => void;
+  let settingsStarted!: () => void;
+  const started = new Promise<void>((resolve) => { settingsStarted = resolve; });
+
+  const first = enqueueAppliedTask(
+    queue,
+    () => new Promise<number>((resolve) => {
+      events.push("edit-start");
+      releaseFirst = () => resolve(1);
+    }),
+    () => { events.push("edit-applied"); },
+    () => generation === 0,
+  );
+  await Promise.resolve();
+
+  const transition = enqueueStateTaskAfterSettings(
+    queue,
+    () => {
+      events.push("settings-start");
+      settingsStarted();
+      return new Promise<void>((resolve) => { releaseSettings = resolve; });
+    },
+    async () => { events.push("load-B"); return "B"; },
+    () => { generation += 1; events.push("B-applied"); },
+  );
+  const stale = enqueueAppliedTask(
+    queue,
+    async () => { events.push("late-backend-call"); return 2; },
+    () => { events.push("late-applied"); },
+    () => generation === 0,
+  );
+
+  releaseFirst();
+  await started;
+  assert.deepEqual(events, ["edit-start", "edit-applied", "settings-start"]);
+  releaseSettings();
+  assert.deepEqual(await Promise.all([first, transition, stale]), [1, "B", undefined]);
+  assert.deepEqual(events, ["edit-start", "edit-applied", "settings-start", "load-B", "B-applied"]);
+});
+
+test("settings failure releases the reserved document-switch queue slot", async () => {
+  const queue = new SerialTaskQueue();
+  let called = false;
+  await assert.rejects(
+    enqueueStateTaskAfterSettings(
+      queue,
+      async () => { throw new Error("settings rejected"); },
+      async () => { called = true; return "B"; },
+      () => { called = true; },
+    ),
+    /settings rejected/,
+  );
+  assert.equal(called, false);
+  assert.equal(await queue.enqueue(async () => 7), 7);
 });
