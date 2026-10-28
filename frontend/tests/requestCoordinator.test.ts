@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-import { AsyncActionGuard, enqueueAppliedTask, enqueueStateTask, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
+import { AsyncActionGuard, enqueueAppliedTask, enqueueStateTask, enqueueStateTaskAfterSettings, LatestRequestGate, SerialTaskQueue, runWithErrorFeedback } from "../src/api/requestCoordinator.ts";
 
 test("a late stale response cannot become current", () => {
   const gate = new LatestRequestGate();
@@ -187,4 +187,31 @@ test("state actions, blank workspace and pending save use the same queue", () =>
   assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
   assert.match(app, /enqueueStateTask\(\s*mutationQueue\.current,\s*\(\) => api\.save_project_dialog\(\)/);
   assert.match(dialogs, /await onApply\(value\)/);
+});
+
+test("pending settings finish before document state is requested or applied", async () => {
+  const queue = new SerialTaskQueue();
+  const events: string[] = [];
+  let releaseSettings!: () => void;
+  const transition = enqueueStateTaskAfterSettings(
+    queue,
+    () => new Promise<void>((resolve) => {
+      events.push("settings-start");
+      releaseSettings = () => { events.push("settings-finished"); resolve(); };
+    }),
+    async () => { events.push("load-document"); return "new document"; },
+    () => { events.push("apply-document"); },
+  );
+  assert.deepEqual(events, ["settings-start"]);
+  releaseSettings();
+  assert.equal(await transition, "new document");
+  assert.deepEqual(events, ["settings-start", "settings-finished", "load-document", "apply-document"]);
+});
+
+test("document transitions reject concurrent settings edits", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /if \(stateTransitionPending\.current > 0\) \{/);
+  assert.match(app, /stateTransitionPending\.current \+= 1;/);
+  assert.match(app, /stateTransitionPending\.current -= 1;/);
+  assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,/);
 });
