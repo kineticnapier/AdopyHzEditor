@@ -777,10 +777,12 @@ export default function App() {
   ) {
     const generation = documentGeneration.current;
     return runWithErrorFeedback(
-      () => enqueueAppliedTask(mutationQueue.current, call, (result) => {
-        if (generation === documentGeneration.current)
-          applyMutation(result, selection(result), markDirty(result));
-      }),
+      () => enqueueAppliedTask(
+        mutationQueue.current,
+        call,
+        (result) => applyMutation(result, selection(result), markDirty(result)),
+        () => generation === documentGeneration.current,
+      ),
       () => undefined,
       (message) => setStatus(`ノート編集に失敗しました: ${message}`),
     );
