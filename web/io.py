@@ -155,11 +155,12 @@ class IOMixin:
         if audio_path and Path(audio_path).exists():
             with self._lock:self._busy=True
             try:
-                # Decode and analyze before changing notes, settings, paths,
-                # history, dirty state, or the active player source.
-                prepared_audio=self._prepare_audio_path(
+                # Respect the project's requested analysis source while keeping
+                # project replacement transactional. Supported Direct sources
+                # are restored as explicit-analysis pending rather than silently
+                # building CQT; unsupported sources alone fall back to CQT.
+                prepared_audio=self._prepare_requested_audio_path(
                     audio_path,
-                    analyze=True,
                     settings=prepared_settings,
                 )
             finally:
@@ -176,18 +177,25 @@ class IOMixin:
             self._dirty=False
             self._status=f"{Path(path).name} を読み込みました"
             if prepared_audio is not None and audio_path:
-                decoded,spec=prepared_audio
+                decoded,spec,analysis_stats,analysis_kind=prepared_audio
                 self._commit_prepared_audio(
                     audio_path,
                     decoded,
                     spec,
                     source_generation=source_request,
+                    analysis_stats=analysis_stats,
+                    direct_pending=analysis_kind=="direct_pending",
                 )
                 self._apply_player_settings()
                 self._sync_notes_to_player()
-                self._status=f"{Path(path).name} と音声を読み込みました"
+                if analysis_kind=="direct_pending":
+                    self._status=f"{Path(path).name} と音声を読み込みました（Vorbis Direct解析待ち）"
+                elif analysis_kind=="fallback":
+                    self._status=f"{Path(path).name} と音声を読み込みました（Vorbis Direct非対応のためCQT）"
+                else:
+                    self._status=f"{Path(path).name} と音声を読み込みました"
             else:
-                self.audio_path=None;self.spectrogram=None
+                self._detach_active_audio()
                 note_end=max((n.end for n in self.notes),default=0.0)
                 saved_duration=settings.get("workspace_duration")
                 saved_midi_min=settings.get("workspace_midi_min")
@@ -227,7 +235,13 @@ class IOMixin:
             self._load_audio_path(source,analyze=True)
             with self._lock:
                 # Rebuild preview notes because the audio sample rate may have changed.
-                self._sync_notes_to_player();self._dirty=True;self._status=f"プロジェクト音源を {Path(source).name} に再指定しました"
+                self._sync_notes_to_player();self._dirty=True
+                suffix = (
+                    "（Vorbis Direct解析待ち）"
+                    if bool(self.analysis_stats.get("pending"))
+                    else ""
+                )
+                self._status=f"プロジェクト音源を {Path(source).name} に再指定しました{suffix}"
         finally:
             with self._lock:self._busy=False
         return self.get_state()
