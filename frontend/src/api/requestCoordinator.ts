@@ -92,3 +92,19 @@ export function enqueueStateTaskAfterSettings<T>(
     return state;
   });
 }
+
+/** Apply only the newest view response; report and recover current failures. */
+export async function enqueueRecoverableViewTask<T>(
+  queue: SerialTaskQueue,
+  call: () => Promise<T>,
+  isCurrent: () => boolean,
+  apply: (value: T) => void,
+  recover: (error: unknown) => Promise<void>,
+): Promise<void> {
+  try {
+    const value = await queue.enqueue(call);
+    if (isCurrent()) apply(value);
+  } catch (error) {
+    if (isCurrent()) await recover(error);
+  }
+}
