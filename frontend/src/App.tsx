@@ -573,7 +573,7 @@ export default function App() {
     playback.duration,
   ]);
   useEffect(() => {
-    if (!followPlayback || !playback.playing || view.windowSeconds <= 0) return;
+    if (stateTransitionPending.current > 0 || !followPlayback || !playback.playing || view.windowSeconds <= 0) return;
     const next = followViewportStart(
       view.start,
       view.windowSeconds,
@@ -656,7 +656,7 @@ export default function App() {
     action: () => Promise<ViewState>,
     label: string,
   ) {
-    if (!api) return;
+    if (!api || stateTransitionPending.current > 0) return;
     const request = viewRequests.current.issue();
     const generation = documentGeneration.current;
     const isCurrent = () =>
@@ -681,6 +681,10 @@ export default function App() {
     );
   }
   async function updateView(changes: Partial<ViewState>) {
+    if (stateTransitionPending.current > 0) {
+      setStatus("プロジェクト処理中は表示範囲を変更できません");
+      return;
+    }
     if (Object.keys(changes).some((key) => key !== "mode"))
       setFollowPlayback(false);
     if (changes.mode === "notes") {
@@ -691,6 +695,10 @@ export default function App() {
     if (api) await applyViewAction(() => api.set_view(changes), "表示範囲の変更");
   }
   async function fitView() {
+    if (stateTransitionPending.current > 0) {
+      setStatus("プロジェクト処理中は表示範囲を変更できません");
+      return;
+    }
     setFollowPlayback(false);
     if (api) await applyViewAction(() => api.fit_view(), "全体表示");
   }
@@ -700,6 +708,8 @@ export default function App() {
   ): Promise<AppState> {
     if (!api) throw new Error("バックエンドに接続されていません");
     stateTransitionPending.current += 1;
+    // Invalidate pending viewport writes before reserving the document queue.
+    viewRequests.current.invalidate();
     setBusy(true);
     spectrumRequests.current.invalidate();
     spectrumRequest.current += 1;
@@ -707,10 +717,15 @@ export default function App() {
     try {
       // Keep the backend action and applyState inside the edit queue.
       // Edits queued after a document switch are rejected by generation.
+      // A prior viewport write must finish before a new document is loaded.
+      const guardedAction = async () => {
+        await viewQueue.current.enqueue(async () => undefined);
+        return action();
+      };
       const state = await enqueueStateTaskAfterSettings(
         mutationQueue.current,
         flushPendingSettings,
-        action,
+        guardedAction,
         (next) => {
           applyState(next);
           if (clearSelection) setSelected([]);
