@@ -45,7 +45,7 @@ assert "create_notes_from_tracks" not in EditingMixin.__dict__
 
     def test_bridge_calls_web_readability_policy_explicitly(self):
         bridge = Bridge()
-        bridge.audio_path = "song.ogg"
+        bridge.audio_path = "test.ogg"
         bridge.frequency_track_store = SimpleNamespace()
         expected = FrequencyTrackRegion(
             packed_points=b"",

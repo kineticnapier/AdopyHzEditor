@@ -137,7 +137,7 @@ class DirectAnalysisStateRound2Tests(unittest.TestCase):
                 ),
                 mock.patch.object(web_backend, "analyze_cqt") as cqt,
             ):
-                    state = bridge.load_project_dialog()
+                state = bridge.load_project_dialog()
 
         cqt.assert_not_called()
         self.assertEqual(bridge.settings["analysisSource"], "vorbis_direct")
@@ -188,7 +188,7 @@ class DirectAnalysisStateRound2Tests(unittest.TestCase):
                     return_value=spec,
                 ) as cqt,
             ):
-                    state = bridge.load_project_dialog()
+                state = bridge.load_project_dialog()
 
         cqt.assert_called_once()
         self.assertTrue(state["analysis"]["available"])
@@ -226,7 +226,7 @@ class DirectAnalysisStateRound2Tests(unittest.TestCase):
                 ),
                 mock.patch.object(web_backend, "analyze_cqt") as cqt,
             ):
-                    state = bridge.relink_project_audio_dialog()
+                state = bridge.relink_project_audio_dialog()
 
         cqt.assert_not_called()
         self.assertEqual(bridge.audio_path, str(audio.resolve()))

@@ -15,6 +15,7 @@ type Args = {
   view: ViewState;
   nudgeSeconds: number;
   openAudio(): void; saveProject(): void; saveProjectAs(): void; loadProject(): void; importMidi(): void;
+  exportMidi(): void;
   openAdoExport(): void; openHelp(): void; setStatus(text: string): void; undo(): void; redo(): void;
   duplicate(): void; quantize(): void; select(indices: number[]): void;
   copy(): void; cut(): void; paste(): void; applyTargetAngle(): void;
@@ -40,7 +41,7 @@ export default function useEditorShortcuts(a: Args) {
       if (ctrl && key === "o") return handled(a.openAudio);
       if (ctrl && key === "l") return handled(a.loadProject);
       if (ctrl && key === "i") return handled(a.importMidi);
-      if (ctrl && key === "m") return handled(() => void api.export_midi_dialog().then(x => a.setStatus(x.status)).catch(e => a.setStatus(`MIDI出力に失敗しました: ${String(e)}`)));
+      if (ctrl && key === "m") return handled(a.exportMidi);
       if (ctrl && key === "e") return handled(a.openAdoExport);
       if (ctrl && key === "z" && !event.shiftKey) return handled(a.undo);
       if ((ctrl && key === "y") || (ctrl && event.shiftKey && key === "z")) return handled(a.redo);

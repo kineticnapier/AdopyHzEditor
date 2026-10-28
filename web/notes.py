@@ -213,7 +213,13 @@ class NoteMixin:
 
             updated = [n.shifted(dx=float(dx), dy=float(dy)).normalized() for n in original]
             if updated == original:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートの位置は変わりませんでした"}
+                self._status = "ノートの位置は変更されませんでした"
+                return {
+                    "notes": self._note_dicts(),
+                    "changed": False,
+                    "status": self._status,
+                }
+
             self._push_undo()
             for i, note in zip(valid, updated):
                 self.notes[i] = note
@@ -333,8 +339,15 @@ class NoteMixin:
                 if b <= a:
                     a = max(0.0, b - max(0.001, step))
                 updated.append(self._with_times(n, a, b))
-            if updated == [self.notes[i].normalized() for i in valid]:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートは既にグリッドへ揃っています"}
+            original = [self.notes[i].normalized() for i in valid]
+            if updated == original:
+                self._status = "ノートは既にグリッドに揃っています"
+                return {
+                    "notes": self._note_dicts(),
+                    "changed": False,
+                    "status": self._status,
+                }
+
             self._push_undo()
             for i, note in zip(valid, updated):
                 self.notes[i] = note
