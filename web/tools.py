@@ -46,6 +46,9 @@ class ToolsMixin:
 
     def apply_blank_workspace(self, options: dict[str, Any]) -> dict[str, Any]:
         duration = max(1.0, min(36000.0, float(options.get("duration", self.duration))))
+        # Existing notes are explicitly preserved by this operation, so the
+        # editable document duration must not become shorter than their tail.
+        duration = max(duration, max((float(n.end) for n in self.notes), default=0.0))
         midi_min = max(0, min(127, int(options.get("midiMin", self.midi_min))))
         midi_max = max(0, min(127, int(options.get("midiMax", self.midi_max))))
         if midi_max <= midi_min:
@@ -55,13 +58,12 @@ class ToolsMixin:
 
         with self._lock:
             self.player.stop()
-            self.player.clear_audio()
-            # A blank workspace is a derived document.  Keeping the previous
+            self._detach_active_audio()
+            # A blank workspace is a derived document. Keeping the previous
             # save target would let Ctrl+S overwrite the source project after
             # its audio reference has deliberately been removed.
             self.project_path = None
-            self.audio_path = None
-            self.spectrogram = None
+            self.project_audio_reference = None
             self.duration = duration
             self.midi_min = midi_min
             self.midi_max = midi_max
@@ -92,9 +94,8 @@ class ToolsMixin:
             # Notes-only loading creates a derived workspace. Keeping the source
             # project path would let a normal save overwrite it without audio.
             self.project_path = None
-            self.audio_path = None
-            self.spectrogram = None
-            self.player.clear_audio()
+            self._detach_active_audio()
+            self.project_audio_reference = None
             self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
             self._dirty = True
@@ -117,7 +118,7 @@ class ToolsMixin:
                 key=lambda n: (n.start, n.midi, n.end),
             )
             self.duration = max(self.duration, max(n.end for n in self.notes))
-            if self.audio_path is None or self.spectrogram is None:
+            if self.audio_path is None:
                 self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
             self._dirty = True
@@ -347,6 +348,21 @@ class ToolsMixin:
 
     def insert_harmonic_diagram(self, options: dict[str, Any]) -> dict[str, Any]:
         rows, start, duration = self._harmonic_diagram_rows(options)
+        invalid = [
+            row
+            for row in rows
+            if not (0.0 <= float(row["midi"]) <= 127.0)
+        ]
+        if invalid:
+            values = ", ".join(
+                f'{float(row["midi"]):.3f}'
+                for row in invalid[:4]
+            )
+            suffix = "…" if len(invalid) > 4 else ""
+            raise ValueError(
+                "MIDI範囲外の倍音は挿入できません "
+                f"(0–127): {values}{suffix}"
+            )
         with self._lock:
             self._push_undo()
             first = len(self.notes)

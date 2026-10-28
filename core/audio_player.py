@@ -311,7 +311,8 @@ class AudioPlayer:
             first_active = bisect_right(self._preview_ends, block_start)
         else:
             first_active = 0
-        for segment in preview_notes[first_active:]:
+        for index in range(first_active, len(preview_notes)):
+            segment = preview_notes[index]
             ns, ne, midi = segment
             if ne <= block_start:
                 continue

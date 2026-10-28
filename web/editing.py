@@ -200,7 +200,7 @@ class EditingMixin:
             for n in source:
                 pitches.extend(x for x in (n.midi, n.midi_end, n.ctrl1_midi, n.ctrl2_midi) if x is not None)
             if pitches:
-                dy = _clamp(float(dy), self.midi_min - min(pitches), self.midi_max - max(pitches))
+                dy = _clamp(float(dy), -min(pitches), 127.0 - max(pitches))
 
             self._push_undo()
             new_indices: list[int] = []
@@ -236,7 +236,7 @@ class EditingMixin:
             for n in notes:
                 pitches.extend(x for x in (n.midi, n.midi_end, n.ctrl1_midi, n.ctrl2_midi) if x is not None)
             if pitches:
-                pitch_delta = _clamp(pitch_delta, self.midi_min - min(pitches), self.midi_max - max(pitches))
+                pitch_delta = _clamp(pitch_delta, -min(pitches), 127.0 - max(pitches))
 
             align_start = min(n.start for n in notes)
             align_end = max(n.end for n in notes)
