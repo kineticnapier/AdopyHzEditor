@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop } from "../src/editor/editorMath.ts";
+import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop } from "../src/editor/editorMath.ts";
 
 const curve = { start: 0, end: 100, midi: 0, velocity: 100, kind: "curve" as const, midi_end: 0, ctrl1_midi: 127, ctrl2_midi: 127 };
 
@@ -33,6 +33,36 @@ test("time index excludes notes outside the pointer time", () => {
   assert.deepEqual(candidates,[500]);
 });
 
+test("time range index returns only notes intersecting the viewport", () => {
+  const notes = [
+    { start: 0, end: 1, midi: 60, velocity: 100 },
+    { start: 2, end: 4, midi: 61, velocity: 100 },
+    { start: 8, end: 9, midi: 62, velocity: 100 },
+  ];
+  assert.deepEqual(notesInTimeRange(buildNoteTimeIndex(notes), 3, 5), [1]);
+});
+
+test("track spatial index keeps long, crossing, and point segments discoverable", () => {
+  const segments = [
+    { ax: 0, ay: 0, bx: 100, by: 100 },
+    { ax: 0, ay: 100, bx: 100, by: 0 },
+    { ax: 150, ay: 50, bx: 150, by: 50 },
+  ];
+  const index = buildSegmentSpatialIndex(segments, 24, 8);
+  assert.deepEqual(new Set(nearbySegmentIndices(index, 50, 50)), new Set([0, 1]));
+  assert.deepEqual(nearbySegmentIndices(index, 150, 50), [2]);
+  assert.deepEqual(nearbySegmentIndices(index, 250, 250), []);
+});
+
+test("keyboard note navigation follows time order and clamps at both ends", () => {
+  const order = [2, 0, 1];
+  assert.equal(adjacentNoteIndex(order, null, 1), 2);
+  assert.equal(adjacentNoteIndex(order, null, -1), 1);
+  assert.equal(adjacentNoteIndex(order, 2, 1), 0);
+  assert.equal(adjacentNoteIndex(order, 1, 1), 1);
+  assert.equal(adjacentNoteIndex(order, 2, -1), 2);
+});
+
 test("short notes prioritize move instead of making their whole width a resize handle", () => {
   assert.equal(noteEdgeAt(100, 116, 100), null);
   assert.equal(noteEdgeAt(100, 115, 107.5), null);
@@ -42,4 +72,12 @@ test("long notes retain distinct resize handles", () => {
   assert.equal(noteEdgeAt(100, 140, 104), "start");
   assert.equal(noteEdgeAt(100, 140, 136), "end");
   assert.equal(noteEdgeAt(100, 140, 120), null);
+});
+
+test("context menu deletes only the pointed note, never the full selection", () => {
+  const selection = [0, 2, 4];
+  assert.deepEqual(contextMenuDeleteIndices(2), [2]);
+  assert.deepEqual(contextMenuDeleteIndices(3), [3]);
+  assert.deepEqual(contextMenuDeleteIndices(null), []);
+  assert.deepEqual(selection, [0, 2, 4]);
 });

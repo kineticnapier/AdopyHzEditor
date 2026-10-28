@@ -35,7 +35,7 @@ class WebUiCompatibilityTests(unittest.TestCase):
             mock.patch.object(bridge, "_dialog", return_value="project.adopyhz"),
             mock.patch.object(
                 bridge,
-                "_prepare_audio_path",
+                "_prepare_requested_audio_path",
                 return_value=(
                     SimpleNamespace(
                         samples=np.zeros((32, 2), dtype=np.float32),
@@ -43,6 +43,8 @@ class WebUiCompatibilityTests(unittest.TestCase):
                         duration=32 / 44100,
                     ),
                     None,
+                    {},
+                    "cqt",
                 ),
             ),
             mock.patch.object(web_io, "load_project", return_value=("song.wav", [note], {})),
@@ -115,6 +117,28 @@ class WebUiCompatibilityTests(unittest.TestCase):
         self.assertIn("形状を適用", result["status"])
         self.assertAlmostEqual(bridge.notes[0].ctrl1_midi, 63.0)
         self.assertAlmostEqual(bridge.notes[0].ctrl2_midi, 69.0)
+
+    def test_curve_actions_use_explicit_ui_values_not_stale_settings(self):
+        bridge = Bridge()
+        bridge.notes = [
+            Note(0.0, 1.0, 60.0, 100, "curve", 72.0, 63.0, 69.0, "bezier_pitch").normalized()
+        ]
+        bridge.settings["curveInterpolation"] = "bezier_pitch"
+        bridge.settings["targetAngle"] = 180.0
+
+        bridge.apply_interpolation([0], "linear_hz")
+        bridge.apply_target_angle([0], 137.5)
+
+        self.assertEqual(bridge.notes[0].interpolation, "linear_hz")
+        self.assertAlmostEqual(bridge.notes[0].target_angle, 137.5)
+
+    def test_normal_adofai_export_defaults_to_all_notes_even_with_selection(self):
+        bridge = Bridge()
+        bridge.notes = [Note(0.0, 0.5, 60.0).normalized()]
+
+        defaults = bridge.get_adofai_export_defaults([0])
+
+        self.assertFalse(defaults["selectedOnly"])
 
     def test_analysis_adapter_maps_profile_and_resolution(self):
         captured = {}

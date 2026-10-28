@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from mido import MidiFile, MidiTrack, Message, MetaMessage, bpm2tempo
 from core.note_model import Note
 
@@ -64,23 +64,23 @@ def export_midi(notes: list[Note], path: str | Path, *, bpm: float = 120.0, tick
 
     track.append(MetaMessage("end_of_track", time=0))
 
+    # mido opens a filename directly, which would truncate an existing export
+    # before all bytes have been written.  Complete the file beside the target
+    # first so os.replace is an atomic commit on the same filesystem.
     target = Path(path)
-    temp_path: Path | None = None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
+    os.close(fd)
+    temporary = Path(temporary_name)
     try:
-        fd, temp_name = tempfile.mkstemp(
-            dir=target.parent,
-            prefix=f".{target.name}.",
-            suffix=target.suffix or ".mid",
-        )
-        os.close(fd)
-        temp_path = Path(temp_name)
-        mid.save(str(temp_path))
-        with temp_path.open("rb") as staged:
-            os.fsync(staged.fileno())
-        os.replace(temp_path, target)
+        mid.save(str(temporary))
+        with temporary.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
     finally:
-        if temp_path is not None:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass

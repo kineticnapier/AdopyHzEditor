@@ -27,3 +27,34 @@ export class SerialTaskQueue {
     return result;
   }
 }
+
+export function enqueueAppliedTask<T>(
+  queue: SerialTaskQueue,
+  call: () => Promise<T>,
+  apply: (result: T) => void,
+): Promise<T> {
+  return queue.enqueue(async () => {
+    const result = await call();
+    apply(result);
+    return result;
+  });
+}
+
+export async function runWithErrorFeedback<T>(
+  task:()=>Promise<T>,
+  onSuccess:(value:T)=>void,
+  onError:(message:string)=>void,
+):Promise<T|undefined>{
+  try{const value=await task();onSuccess(value);return value}
+  catch(error){onError(String(error));return undefined}
+}
+
+export class AsyncActionGuard{
+  private running=false;
+  get isRunning(){return this.running}
+  async run(action:()=>Promise<void>):Promise<boolean>{
+    if(this.running)return false;
+    this.running=true;
+    try{await action();return true}finally{this.running=false}
+  }
+}

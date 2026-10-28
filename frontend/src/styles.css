@@ -38,10 +38,10 @@ button:disabled { cursor: default; opacity: .48; }
 .status-pill::before{content:"";position:absolute;left:0;top:50%;width:7px;height:7px;border-radius:50%;background:#6d7781;transform:translateY(-50%)}
 .status-pill.on { color: #cfe6d9; }
 .status-pill.on::before{background:var(--positive)}
-.toolbar { display: flex; gap: 6px; align-items: center; padding: 5px 8px; background: var(--surface-2); border-bottom: 1px solid #0d1013; min-width: 0; }
+.toolbar { display: flex; gap: 6px; align-items: center; padding: 5px 8px; background: var(--surface-2); border-bottom: 1px solid #0d1013; min-width: 0; overflow-x:auto; overflow-y:hidden; }
 .toolbar button, .timeline button, .settings button { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-3); color: var(--text); padding: 4px 8px; min-height: 28px; }
 .toolbar button:hover:not(:disabled), .timeline button:hover:not(:disabled), .settings button:hover:not(:disabled) { background: #303841;border-color:var(--line-strong) }
-.transport-group, .view-toggle { display: flex; align-items: center; gap: 4px; }
+.transport-group, .view-toggle { display: flex; align-items: center; gap: 4px; flex:0 0 auto; }
 .transport-group .icon-button { width: 30px; padding: 4px; }
 .transport-group svg{display:block;width:15px;height:15px;margin:auto;fill:currentColor;stroke:currentColor;stroke-width:1.25;stroke-linejoin:round}
 .toolbar .play { background: #246c49; border-color: #388961; min-width: 34px; }
@@ -58,12 +58,14 @@ button:disabled { cursor: default; opacity: .48; }
 .canvas-wrap canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 .canvas-wrap canvas:focus-visible{outline:2px solid var(--focus);outline-offset:-3px}
 .canvas-wrap .playhead-canvas { position: absolute; inset: 0; pointer-events: none; cursor: default; }
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .modal-backdrop{backdrop-filter:none!important}
 .canvas-empty{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);display:grid;gap:5px;text-align:center;pointer-events:none;color:var(--muted)}
 .canvas-empty strong{color:#d8e0e7;font-size:14px;font-weight:600}.canvas-empty span{font-size:11px}.canvas-empty small{font-size:10px}.canvas-empty kbd{font:10px var(--font-data);padding:2px 4px;border:1px solid var(--line);border-radius:3px;background:var(--surface-2)}
 .canvas-readout{height:24px;display:flex;align-items:center;gap:13px;padding:0 8px;border-top:1px solid #101419;background:#15191e;color:#aeb8c1;font:10px var(--font-data);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}
 .canvas-readout strong{color:#d9e1e8;font-weight:500;overflow:hidden;text-overflow:ellipsis}
-.timeline { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 5px 8px; background: var(--surface-2); border-top: 1px solid #101419; font-size: 11px; }
+.timeline { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 5px 8px; background: var(--surface-2); border-top: 1px solid #101419; font-size: 11px; overflow-x:auto; overflow-y:hidden; }
+.timeline>*{flex:0 0 auto}.timeline>.timeline-slider{flex:1 1 100px}
 .timeline-slider { flex: 1; min-width: 100px; }
 .timeline-field { display: flex; align-items: center; gap: 4px; color: #bfc7cf; white-space: nowrap; }
 .timeline-field > span { color: #aeb8c2; }

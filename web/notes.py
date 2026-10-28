@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Iterable
 
 from core.note_model import Note
@@ -8,6 +9,11 @@ from core.note_model import Note
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, float(value)))
+
+
+def _round_like_javascript(value: float) -> int:
+    """Match Math.round so preview and committed snap agree at midpoints."""
+    return math.floor(float(value) + 0.5)
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,22 @@ class NoteMixin:
             midi_max=int(self.midi_max),
         )
 
+    def _document_checkpoint(self) -> tuple[Any, ...]:
+        """Comparable saved content, independent of undo history position."""
+        return (
+            tuple(self.notes),
+            tuple(sorted(self.settings.items())),
+            self.audio_path,
+            self.project_audio_reference,
+            float(self.duration),
+            int(self.midi_min),
+            int(self.midi_max),
+        )
+
+    def _refresh_dirty_from_checkpoint(self) -> None:
+        checkpoint = getattr(self, "_saved_checkpoint", None)
+        self._dirty = checkpoint is None or self._document_checkpoint() != checkpoint
+
     def _push_undo(self) -> None:
         self._undo_stack.append(self._snapshot())
         if len(self._undo_stack) > 200:
@@ -65,7 +87,7 @@ class NoteMixin:
             items = state
         self.notes = [item if isinstance(item, Note) else Note.from_dict(dict(item)) for item in items]
         self._sync_notes_to_player()
-        self._dirty = True
+        self._refresh_dirty_from_checkpoint()
 
     def _sync_notes_to_player(self) -> None:
         self.player.set_preview_notes(self.notes)
@@ -79,7 +101,7 @@ class NoteMixin:
             return t
         step = 60.0 / max(1e-6, float(self.settings["bpm"])) / max(1, int(self.settings["snapDiv"]))
         offset = float(self.settings["offsetMs"]) / 1000.0
-        return _clamp(offset + round((t - offset) / step) * step, 0.0, self.duration)
+        return _clamp(offset + _round_like_javascript((t - offset) / step) * step, 0.0, self.duration)
 
     def _snap_pitch(self, midi: float) -> float:
         step = max(1e-6, float(self.pitch_step))
@@ -204,7 +226,7 @@ class NoteMixin:
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(valid)}個のノートを移動しました"
-            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def resize_notes(self, indices: list[int], edge: str, delta_seconds: float) -> dict[str, Any]:
         """Resize selected notes from the left or right edge.
@@ -305,7 +327,7 @@ class NoteMixin:
             offset = float(self.settings["offsetMs"]) / 1000.0
 
             def q(t: float) -> float:
-                return _clamp(offset + round((float(t) - offset) / step) * step, 0.0, self.duration)
+                return _clamp(offset + _round_like_javascript((float(t) - offset) / step) * step, 0.0, self.duration)
 
             updated: list[Note] = []
             for i in valid:
@@ -332,15 +354,15 @@ class NoteMixin:
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(valid)}個のノートをクオンタイズしました"
-            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
-    def apply_interpolation(self, indices: list[int]) -> dict[str, Any]:
+    def apply_interpolation(self, indices: list[int], interpolation: str | None = None) -> dict[str, Any]:
         with self._lock:
             valid = sorted({int(i) for i in indices if 0 <= int(i) < len(self.notes) and self.notes[int(i)].is_curve})
             if not valid:
                 return {"notes": self._note_dicts(), "status": "カーブノートが選択されていません"}
             self._push_undo()
-            mode = str(self.settings["curveInterpolation"])
+            mode = self._normalize_setting("curveInterpolation", interpolation) if interpolation is not None else str(self.settings["curveInterpolation"])
             for i in valid:
                 self.notes[i] = self.notes[i].with_interpolation(mode)
             self._dirty = True
@@ -348,13 +370,13 @@ class NoteMixin:
             self._status = f"{len(valid)}個のカーブに補間を適用しました"
             return {"notes": self._note_dicts(), "status": self._status}
 
-    def apply_target_angle(self, indices: list[int]) -> dict[str, Any]:
+    def apply_target_angle(self, indices: list[int], target_angle: float | None = None) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
                 return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
             self._push_undo()
-            angle = float(self.settings["targetAngle"])
+            angle = float(self._normalize_setting("targetAngle", target_angle)) if target_angle is not None else float(self.settings["targetAngle"])
             for i in valid:
                 self.notes[i] = self.notes[i].with_target_angle(angle)
             self._dirty = True
@@ -380,7 +402,7 @@ class NoteMixin:
             self._redo_stack.append(self._snapshot())
             self._restore_snapshot(self._undo_stack.pop())
             self._status = "元に戻しました"
-            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def redo(self) -> dict[str, Any]:
         with self._lock:
@@ -389,7 +411,7 @@ class NoteMixin:
             self._undo_stack.append(self._snapshot())
             self._restore_snapshot(self._redo_stack.pop())
             self._status = "やり直しました"
-            return {"notes": self._note_dicts(), "changed": True, "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def copy_notes(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:

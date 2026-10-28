@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { boundedGridRange, buildNoteTimeIndex, noteCandidatesAt, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, type NoteTimeIndex } from "./editorMath";
+import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
+import { wheelViewChange } from "./wheelNavigation";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -36,30 +37,30 @@ type Props = {
 type DragMode = "create" | "curve" | "region" | "track-region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
 type DragState = { mode: DragMode; startTime: number; startMidi: number; nowTime: number; nowMidi: number; indices: number[]; trackAdditive?: boolean };
 
-function hitNote(notes: NoteDto[], index: NoteTimeIndex, time: number, midi: number, pitchStep = 1) {
-  const hits: Array<[number, number]> = [];
+function hitNote(notes: NoteDto[], index: NoteTimeIndex, time: number, midi: number, midiPerPixel:number) {
+  const hits: Array<[number, number]> = [],curveTolerance=Math.max(.03,midiPerPixel*6),fixedTolerance=.43+midiPerPixel*4;
   noteCandidatesAt(index,time).forEach(noteIndex => {
     const note=notes[noteIndex];
     if (time < note.start - 1e-9 || time > note.end + 1e-9) return;
     if ((note.kind ?? "note") === "curve") {
       const u = note.end <= note.start ? 0 : (time - note.start) / (note.end - note.start);
-      if (Math.abs(midi - noteMidiAt(note, u)) <= .6) hits.push([note.end - note.start, noteIndex]);
-    } else if (Math.abs(midi - note.midi) <= Math.max(.6, pitchStep * .55)) hits.push([note.end - note.start, noteIndex]);
+      const distance=Math.abs(midi-noteMidiAt(note,u));if(distance<=curveTolerance)hits.push([distance,noteIndex]);
+    } else {const distance=Math.abs(midi-note.midi);if(distance<=fixedTolerance)hits.push([distance,noteIndex]);}
   });
   hits.sort((a, b) => a[0] - b[0]);
   return hits[0]?.[1] ?? null;
 }
+const COLOR_MAPS: Record<string, Array<[number, [number, number, number]]>> = {
+  wavetone: [[0,[0,0,0]],[.12,[0,0,120]],[.35,[0,80,255]],[.55,[0,255,180]],[.75,[255,240,0]],[1,[255,0,0]]],
+  viridis: [[0,[68,1,84]],[.33,[49,104,142]],[.66,[53,183,121]],[1,[253,231,37]]],
+  magma: [[0,[0,0,4]],[.33,[113,31,129]],[.66,[237,104,37]],[1,[252,253,191]]],
+  inferno: [[0,[0,0,4]],[.33,[120,28,109]],[.66,[237,105,37]],[1,[252,255,164]]],
+  plasma: [[0,[13,8,135]],[.33,[126,3,168]],[.66,[224,100,98]],[1,[240,249,33]]],
+};
 function colorFor(v: number, map: string): [number, number, number] {
   const x = Math.max(0, Math.min(1, v));
   if (map === "gray") { const q = Math.round(x * 255); return [q, q, q]; }
-  const maps: Record<string, Array<[number, [number, number, number]]>> = {
-    wavetone: [[0,[0,0,0]],[.12,[0,0,120]],[.35,[0,80,255]],[.55,[0,255,180]],[.75,[255,240,0]],[1,[255,0,0]]],
-    viridis: [[0,[68,1,84]],[.33,[49,104,142]],[.66,[53,183,121]],[1,[253,231,37]]],
-    magma: [[0,[0,0,4]],[.33,[113,31,129]],[.66,[237,104,37]],[1,[252,253,191]]],
-    inferno: [[0,[0,0,4]],[.33,[120,28,109]],[.66,[237,105,37]],[1,[252,255,164]]],
-    plasma: [[0,[13,8,135]],[.33,[126,3,168]],[.66,[224,100,98]],[1,[240,249,33]]],
-  };
-  const stops = maps[map] ?? maps.wavetone;
+  const stops = COLOR_MAPS[map] ?? COLOR_MAPS.wavetone;
   for (let i = 0; i < stops.length - 1; i += 1) {
     const [a, ca] = stops[i], [b, cb] = stops[i + 1];
     if (x <= b) {
@@ -113,8 +114,10 @@ export default function EditorCanvas(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null), playheadRef = useRef<HTMLCanvasElement>(null), containerRef = useRef<HTMLDivElement>(null), lastCursorReport = useRef(0);
   const [size, setSize] = useState({ width: 800, height: 500 });
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [keyboardNote, setKeyboardNote] = useState<number | null>(null);
   const selectedSet=useMemo(()=>new Set(props.selected),[props.selected]);
   const noteTimeIndex=useMemo(()=>buildNoteTimeIndex(props.notes),[props.notes]);
+  const keyboardOrder=noteTimeIndex.order;
   const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
   const decodedTracks = useMemo(() => decodeFrequencyTracks(props.frequencyTracks), [props.frequencyTracks]);
   const selectedTrackSet = useMemo(() => new Set(props.trackSelection.ids), [props.trackSelection.ids]);
@@ -166,6 +169,15 @@ export default function EditorCanvas(props: Props) {
       midi: (py:number) => bottom+(height-py)/height*visible,
     };
   }, [props.view, size]);
+  const trackHitIndex = useMemo(() => {
+    if (!decodedTracks) return null;
+    const segments = Array.from({ length: decodedTracks.count }, (_, i) => {
+      const connected = (decodedTracks.flags[i] & 1) === 0 && i > 0 && decodedTracks.ids[i] === decodedTracks.ids[i - 1];
+      const a = connected ? i - 1 : i;
+      return { ax: coords.x(decodedTracks.times[a]), ay: coords.y(decodedTracks.midis[a]), bx: coords.x(decodedTracks.times[i]), by: coords.y(decodedTracks.midis[i]) };
+    });
+    return { segments, index: buildSegmentSpatialIndex(segments) };
+  }, [coords, decodedTracks]);
 
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -183,8 +195,12 @@ export default function EditorCanvas(props: Props) {
       const sx=Math.max(0,(props.view.start-dataStart)/span*decoded.cols), sw=Math.max(1,Math.min(decoded.cols-sx,props.view.windowSeconds/span*decoded.cols));
       const top=props.view.pitchBottom+props.view.visibleNotes-.5,bottom=props.view.pitchBottom-.5;
       const {sy,sh}=spectrogramPitchCrop(decoded.rows,decoded.midiMin,decoded.pitchStep??1,bottom,top);
-      ctx.save(); ctx.globalAlpha=props.view.mode==="spec"?1:.7; ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
-      ctx.drawImage(spectrumCanvas,sx,sy,sw,sh,0,0,w,h); ctx.restore();
+      const sourceBottom=decoded.midiMin,sourceTop=decoded.midiMin+(decoded.rows-1)*(decoded.pitchStep??1),visibleBottom=Math.max(bottom,sourceBottom),visibleTop=Math.min(top,sourceTop);
+      if(visibleTop>visibleBottom){
+        const dy=(top-visibleTop)/Math.max(1,props.view.visibleNotes)*h,dh=(visibleTop-visibleBottom)/Math.max(1,props.view.visibleNotes)*h;
+        ctx.save(); ctx.globalAlpha=props.view.mode==="spec"?1:.7; ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
+        ctx.drawImage(spectrumCanvas,sx,sy,sw,sh,0,dy,w,dh); ctx.restore();
+      }
     }
     if(directSpectrumCanvas&&props.directSpectrum&&props.view.mode!=="notes"){
       const payload=props.directSpectrum;
@@ -249,17 +265,20 @@ export default function EditorCanvas(props: Props) {
       ctx.restore();
     }
 
-    props.notes.forEach((note,index)=>drawNote(note,selectedSet.has(index)));
+    for(const index of notesInTimeRange(noteTimeIndex,props.view.start,props.view.start+props.view.windowSeconds)){const note=props.notes[index];if(note)drawNote(note,selectedSet.has(index))}
+    if(keyboardNote!==null){const note=props.notes[keyboardNote];if(note){const x=coords.x(note.start),y=coords.y(note.midi);ctx.save();ctx.strokeStyle="#ffffff";ctx.lineWidth=2;ctx.setLineDash([2,2]);ctx.strokeRect(x-6,y-7,12,14);ctx.restore();}}
 
-  },[coords,decoded,decodedTracks,directSpectrumCanvas,props.directSpectrum,props.notes,props.settings,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas]);
+  },[coords,decoded,decodedTracks,directSpectrumCanvas,keyboardNote,noteTimeIndex,props.directSpectrum,props.notes,props.settings.bpm,props.settings.displayMode,props.settings.gridEnabled,props.settings.offsetMs,props.settings.spectrumOpacity,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas]);
 
   useEffect(()=>{
     const canvas=playheadRef.current;if(!canvas)return;const dpr=window.devicePixelRatio||1;
     canvas.width=Math.max(1,Math.round(size.width*dpr));canvas.height=Math.max(1,Math.round(size.height*dpr));canvas.style.width=`${size.width}px`;canvas.style.height=`${size.height}px`;
     const ctx=canvas.getContext("2d");if(!ctx)return;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,size.width,size.height);
     if(drag&&["move","duplicate-move","resize-start","resize-end"].includes(drag.mode)){
-      const rawDx=drag.nowTime-drag.startTime,dy=Math.round(drag.nowMidi-drag.startMidi),first=props.notes[drag.indices[0]];
+      const rawDx=drag.nowTime-drag.startTime;let dy=Math.round(drag.nowMidi-drag.startMidi);const first=props.notes[drag.indices[0]];
       let dx=rawDx;if(first&&props.settings.snapEnabled&&Math.abs(rawDx)>1e-12&&(drag.mode==="move"||drag.mode==="duplicate-move"))dx=snapTime(props.settings,props.playback.duration,first.start+rawDx)-first.start;
+      const dragged=drag.indices.map(index=>props.notes[index]).filter((note):note is NoteDto=>Boolean(note));
+      if(dragged.length){const minStart=Math.min(...dragged.map(note=>note.start)),maxEnd=Math.max(...dragged.map(note=>note.end));dx=Math.max(-minStart,Math.min(Math.max(0,props.playback.duration-maxEnd),dx));const pitches=dragged.flatMap(note=>[note.midi,note.midi_end,note.ctrl1_midi,note.ctrl2_midi].filter((value):value is number=>value!==undefined));if(pitches.length)dy=Math.max(-Math.min(...pitches),Math.min(127-Math.max(...pitches),dy))}
       for(const index of drag.indices){const note=props.notes[index];if(!note)continue;const ghost=drag.mode==="resize-start"?resizeNote(note,"start",rawDx,props.settings,props.playback.duration):drag.mode==="resize-end"?resizeNote(note,"end",rawDx,props.settings,props.playback.duration):shiftNote(note,dx,dy);const x1=coords.x(ghost.start),x2=coords.x(ghost.end);ctx.save();ctx.globalAlpha=.72;ctx.setLineDash([5,3]);
         if((ghost.kind??"note")==="curve"){const steps=Math.max(8,Math.min(96,Math.round((ghost.end-ghost.start)/.02)));ctx.beginPath();for(let i=0;i<=steps;i++){const u=i/steps;i?ctx.lineTo(coords.x(ghost.start+(ghost.end-ghost.start)*u),coords.y(noteMidiAt(ghost,u))):ctx.moveTo(coords.x(ghost.start),coords.y(noteMidiAt(ghost,0)))}ctx.strokeStyle=drag.mode==="duplicate-move"?"#67e8a7":"#8dd7ff";ctx.lineWidth=3;ctx.stroke()}else{const yt=coords.y(ghost.midi+.43),yb=coords.y(ghost.midi-.43);ctx.fillStyle=drag.mode==="duplicate-move"?"rgba(72,220,145,.45)":"rgba(90,190,255,.38)";ctx.fillRect(x1,yt,Math.max(2,x2-x1),Math.max(2,yb-yt));ctx.strokeStyle=drag.mode==="duplicate-move"?"#7af0b2":"#9ddcff";ctx.strokeRect(x1,yt,Math.max(2,x2-x1),Math.max(2,yb-yt))}ctx.restore()}
     }
@@ -285,10 +304,11 @@ export default function EditorCanvas(props: Props) {
   function hoveredTrack(px:number,py:number){
     if(!decodedTracks||props.view.mode==="notes")return null;
     let bestDistance=64,best:null|{id:number;frequency:number;noteName:string;duration:number;magnitude:number}=null;
-    for(let i=0;i<decodedTracks.count;i+=1){
+    const candidates = trackHitIndex ? nearbySegmentIndices(trackHitIndex.index, px, py) : [];
+    for(const i of candidates){
       const bx=coords.x(decodedTracks.times[i]),by=coords.y(decodedTracks.midis[i]);let distance=(px-bx)**2+(py-by)**2,midi=decodedTracks.midis[i],magnitude=decodedTracks.magnitudes[i];
       if((decodedTracks.flags[i]&1)===0&&i>0&&decodedTracks.ids[i]===decodedTracks.ids[i-1]){
-        const ax=coords.x(decodedTracks.times[i-1]),ay=coords.y(decodedTracks.midis[i-1]),dx=bx-ax,dy=by-ay,length=Math.max(1e-9,dx*dx+dy*dy),fraction=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/length)),qx=ax+dx*fraction,qy=ay+dy*fraction;
+        const segment=trackHitIndex!.segments[i],ax=segment.ax,ay=segment.ay,dx=bx-ax,dy=by-ay,length=Math.max(1e-9,dx*dx+dy*dy),fraction=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/length)),qx=ax+dx*fraction,qy=ay+dy*fraction;
         distance=(px-qx)**2+(py-qy)**2;midi=decodedTracks.midis[i-1]+(decodedTracks.midis[i]-decodedTracks.midis[i-1])*fraction;magnitude=decodedTracks.magnitudes[i-1]+(decodedTracks.magnitudes[i]-decodedTracks.magnitudes[i-1])*fraction;
       }
       if(distance<bestDistance){bestDistance=distance;best={id:decodedTracks.ids[i],frequency:midiToHz(midi),noteName:midiLabel(midi),duration:decodedTracks.durations[i],magnitude};}
@@ -314,7 +334,7 @@ export default function EditorCanvas(props: Props) {
       setDrag({mode:"cut-range",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:props.selected});
       return;
     }
-    const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.spectrum?.pitchStep??1);
+    const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
     if(hit!==null){
       clearTrackSelection();
       let next=props.selected;
@@ -326,14 +346,14 @@ export default function EditorCanvas(props: Props) {
       setDrag({mode,startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:next});
       return;
     }
+    if(event.shiftKey&&decodedTracks&&props.view.mode!=="notes"){
+      setDrag({mode:"track-region",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:[],trackAdditive:event.ctrlKey});
+      return;
+    }
     const trackHit=hoveredTrack(p.x,p.y);
     if(trackHit){
       props.onTrackSelectionChange({ids:updateTrackSelection(props.trackSelection.ids,trackHit.id,event.ctrlKey),range:null,useRange:false});
       props.onSelect([]);
-      return;
-    }
-    if(event.shiftKey&&decodedTracks){
-      setDrag({mode:"track-region",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:[],trackAdditive:event.ctrlKey});
       return;
     }
     clearTrackSelection();
@@ -346,7 +366,7 @@ export default function EditorCanvas(props: Props) {
     const track=hoveredTrack(p.x,p.y);
     if(now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove?.(p.time,p.midi);props.onTrackHover?.(track);}
     if(event.ctrlKey&&event.altKey&&props.selected.length){event.currentTarget.style.cursor="crosshair";return;}
-    const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.spectrum?.pitchStep??1);
+    const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
     event.currentTarget.style.cursor=hit!==null&&!event.altKey&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":track?"pointer":"crosshair";
   }
   async function onPointerUp(event:ReactPointerEvent<HTMLCanvasElement>){
@@ -375,7 +395,7 @@ export default function EditorCanvas(props: Props) {
       const d=cur.nowTime-cur.startTime;if(Math.abs(d)>1e-4)await props.onResize(cur.indices,cur.mode==="resize-start"?"start":"end",d);return;
     }
     if(cur.mode==="region"){props.onSelect(props.notes.flatMap((n,i)=>noteIntersects(n,cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi)?[i]:[]));return;}
-    if(Math.abs(cur.nowTime-cur.startTime)<.035){props.onSelect([]);await props.onSeek(cur.startTime);return;}
+    if(Math.abs(cur.nowTime-cur.startTime)*size.width/Math.max(.001,props.view.windowSeconds)<4){props.onSelect([]);await props.onSeek(cur.startTime);return;}
     const a=Math.min(cur.startTime,cur.nowTime),b=Math.max(cur.startTime,cur.nowTime);
     if(cur.mode==="curve"){
       const p0=cur.startTime<=cur.nowTime?cur.startMidi:cur.nowMidi,p3=cur.startTime<=cur.nowTime?cur.nowMidi:cur.startMidi;
@@ -387,25 +407,37 @@ export default function EditorCanvas(props: Props) {
     setDrag(null);
   }
   async function onContextMenu(event:ReactMouseEvent<HTMLCanvasElement>){
-    event.preventDefault();const p=eventPosition(event),hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.spectrum?.pitchStep??1);if(hit===null)return;
-    await props.onDelete(props.selected.includes(hit)&&props.selected.length>1?props.selected:[hit]);
+    event.preventDefault();const p=eventPosition(event),hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
+    const indices=contextMenuDeleteIndices(hit);
+    if(indices.length)await props.onDelete(indices);
   }
-  function onWheel(event:ReactWheelEvent<HTMLCanvasElement>){
-    event.preventDefault();const sign=event.deltaY<0?1:-1;
-    if(event.shiftKey){
-      const maxBottom=Math.max(0,128-props.view.visibleNotes);
-      void props.onView({pitchBottom:Math.max(0,Math.min(maxBottom,props.view.pitchBottom+sign*3))});
+  function onCanvasKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setKeyboardNote(null);
+      props.onSelect([]);
+      return;
     }
-    else if(event.altKey){
-      const visibleNotes=Math.max(6,Math.min(128,props.view.visibleNotes-sign*4));
-      const pitchBottom=Math.max(0,Math.min(props.view.pitchBottom,128-visibleNotes));
-      void props.onView({visibleNotes,pitchBottom});
-    }
-    else if(event.ctrlKey)void props.onView({windowSeconds:props.view.windowSeconds*(sign>0?.85:1.18)});
-    else void props.onView({start:props.view.start-sign*props.view.windowSeconds*.08});
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (!keyboardOrder.length) return;
+    event.preventDefault();
+    const delta = event.key === "ArrowRight" ? 1 : -1;
+    const next = adjacentNoteIndex(keyboardOrder, keyboardNote ?? props.selected.at(-1) ?? null, delta);
+    if (next === null) return;
+    setKeyboardNote(next);
+    props.onSelect(event.shiftKey ? Array.from(new Set([...props.selected, next])).sort((a, b) => a - b) : [next]);
+    const note = props.notes[next], changes: Partial<ViewState> = {};
+    if (note.start < props.view.start || note.end > props.view.start + props.view.windowSeconds)
+      changes.start = Math.max(0, note.start - props.view.windowSeconds * .15);
+    if (note.midi < props.view.pitchBottom || note.midi > props.view.pitchBottom + props.view.visibleNotes)
+      changes.pitchBottom = Math.max(0, Math.min(127 - props.view.visibleNotes, note.midi - props.view.visibleNotes / 2));
+    if (Object.keys(changes).length) void props.onView(changes);
   }
+  useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const handler=(event:WheelEvent)=>{event.preventDefault();const rect=canvas.getBoundingClientRect(),changes=wheelViewChange(event,props.view,{timeRatio:Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),pitchRatio:Math.max(0,Math.min(1,(rect.bottom-event.clientY)/Math.max(1,rect.height)))});if(changes)void props.onView(changes)};canvas.addEventListener("wheel",handler,{passive:false});return()=>canvas.removeEventListener("wheel",handler)},[props.onView,props.view]);
   return <div className="canvas-wrap" ref={containerRef}>
-    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。操作方法はF1で確認できます。" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)} onWheel={onWheel}/>
+    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
+    <span id="editor-keyboard-help" className="sr-only">左右矢印で時間順にノートを選択します。Shiftと矢印で複数選択、Escapeで選択解除します。F1で操作方法を確認できます。</span>
+    <span id="editor-selection-status" className="sr-only" aria-live="polite">{keyboardNote === null ? "" : (()=>{const note=props.notes[keyboardNote];return note ? `${keyboardNote + 1}番目の${(note.kind??"note")==="curve"?"カーブノート":"ノート"}、開始${note.start.toFixed(3)}秒、${midiLabel(note.midi)}、選択${props.selected.length}件` : ""})()}</span>
   </div>;
 }
