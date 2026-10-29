@@ -13,6 +13,7 @@ import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
+import { previewIsCurrent } from "./previewFreshness";
 type Common = {
   api: ToolBackendApi;
   onClose(): void;
@@ -250,7 +251,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
     [resultKey, setResultKey] = useState(""),
     [error, setError] = useState(""),
     [chart, setChart] = useState("");
-  const optsKey = JSON.stringify(opts), resultCurrent = result !== null && resultKey === optsKey;
+  const optsKey = JSON.stringify(opts), resultCurrent = previewIsCurrent(result, resultKey, optsKey);
   useEffect(() => {
     let alive = true;
     const requestedKey = optsKey;
@@ -491,6 +492,7 @@ export function HarmonicDiagramDialog({
     [previewKey,setPreviewKey]=useState(""),
     [error, setError] = useState(""),
     [attempt, setAttempt] = useState(0);
+  const previewCurrent = previewIsCurrent(preview, previewKey, JSON.stringify(opts));
   useEffect(() => {
     let alive = true;
     setError("");
@@ -528,7 +530,7 @@ export function HarmonicDiagramDialog({
   }, [api, opts]);
   async function insert() {
     if (!opts) return;
-    if(!preview||previewKey!==JSON.stringify(opts)){setError("最新設定のプレビューを待っています");return}
+    if(!previewCurrent){setError("最新設定のプレビューを待っています");return}
     await insertOnce.current(async () => {
       setInserting(true);
       try {
@@ -649,7 +651,7 @@ export function HarmonicDiagramDialog({
           {error && <div className="dialog-error inline">{error}</div>}
         </section>
         <section className="harmonic-preview">
-          {preview && (
+          {previewCurrent && preview ? (
             <>
               <div className="preview-summary">
                 {preview.startSeconds.toFixed(6)}秒 –{" "}
@@ -665,6 +667,10 @@ export function HarmonicDiagramDialog({
                 </div>
               ))}
             </>
+          ) : (
+            <div className="dialog-loading" role="status">
+              {error ? "プレビューを表示できません" : "プレビューを計算中…"}
+            </div>
           )}
         </section>
       </div>
@@ -674,7 +680,7 @@ export function HarmonicDiagramDialog({
         <button
           className="primary"
           onClick={() => void insert()}
-          disabled={inserting || !preview || previewKey !== JSON.stringify(opts)}
+          disabled={inserting || !previewCurrent}
         >
           挿入
         </button>
