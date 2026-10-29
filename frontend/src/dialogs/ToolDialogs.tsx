@@ -11,6 +11,7 @@ import type {
 import { useDialogAccessibility } from "./useDialogAccessibility";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
+import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 type Common = {
   api: ToolBackendApi;
@@ -703,15 +704,27 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
     text: string;
     info: string;
   } | null>(null), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
+  const [openError, setOpenError] = useState(""), [opening, setOpening] = useState(false);
+  const openOnce = useRef(createExclusiveAsyncAction());
   useEffect(() => {
     let alive=true;setError("");
     void api.get_update_info().then(value=>alive&&setInfo(value)).catch(reason=>alive&&setError(String(reason)));
     return()=>{alive=false};
   }, [api,attempt]);
   async function open() {
-    const x = await api.open_releases_page();
-    onStatus(x.ok ? "リリースページを開きました" : `リリース: ${x.url}`);
-    onClose();
+    await openOnce.current(async () => {
+      setOpening(true);
+      setOpenError("");
+      try {
+        await runReleasePageAction(
+          () => api.open_releases_page(),
+          () => { onStatus("リリースページを開きました"); onClose(); },
+          setOpenError,
+        );
+      } finally {
+        setOpening(false);
+      }
+    });
   }
   return (
     <Modal title="更新を確認" onClose={onClose}>
@@ -725,11 +738,12 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
         ) : (
           <div className="dialog-loading">確認中…</div>
         )}
+        {openError && <div className="dialog-error" role="alert">{openError}</div>}
       </div>
       <div className="dialog-footer">
         <span />
         <button onClick={onClose}>あとで</button>
-        <button className="primary" onClick={() => void open()}>
+        <button className="primary" disabled={opening} onClick={() => void open()}>
           リリースページを開く
         </button>
       </div>
