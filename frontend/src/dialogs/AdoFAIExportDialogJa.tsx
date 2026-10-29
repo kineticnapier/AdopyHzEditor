@@ -98,24 +98,28 @@ export default function AdoFAIExportDialogJa({
   }
   async function tilePreview() {
     if (!fixed) return;
-    const request = previewRequests.current.issue(),
-      snapshot = { ...fixed },
-      selection = [...selected];
-    const r = await run(() => api.preview_adofai_tiles(snapshot, selection));
-    if (r && previewRequests.current.isCurrent(request)) {
-      setTile(r);
+    const snapshot = { ...fixed }, selection = [...selected];
+    const r = await run(async () => {
+      const request = previewRequests.current.issue();
+      const result = await api.preview_adofai_tiles(snapshot, selection);
+      return { request, result };
+    });
+    if (r && previewRequests.current.isCurrent(r.request)) {
+      setTile(r.result);
       setDebug(null);
       setPreviewMode("tile");
     }
   }
   async function debugPreview() {
     if (!fixed) return;
-    const request = previewRequests.current.issue(),
-      snapshot = { ...fixed },
-      selection = [...selected];
-    const r = await run(() => api.preview_adofai_debug(snapshot, selection));
-    if (r && previewRequests.current.isCurrent(request)) {
-      setDebug(r);
+    const snapshot = { ...fixed }, selection = [...selected];
+    const r = await run(async () => {
+      const request = previewRequests.current.issue();
+      const result = await api.preview_adofai_debug(snapshot, selection);
+      return { request, result };
+    });
+    if (r && previewRequests.current.isCurrent(r.request)) {
+      setDebug(r.result);
       setTile(null);
       setPreviewMode("debug");
     }
