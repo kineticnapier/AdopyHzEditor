@@ -37,3 +37,25 @@ test("separate dialogs have independent guards", async () => {
   release();
   await waiting;
 });
+
+test("harmonic insertion ignores duplicate requests while the mutation queue is pending", async () => {
+  const insertOnce = createExclusiveAsyncAction();
+  let resolve!: (value: { status: string } | undefined) => void;
+  let insertCalls = 0;
+  const queuedMutation = () => {
+    insertCalls += 1;
+    return new Promise<{ status: string } | undefined>(r => { resolve = r; });
+  };
+  const first = insertOnce(queuedMutation);
+  assert.equal(await insertOnce(queuedMutation), undefined);
+  assert.equal(insertCalls, 1);
+  resolve({ status: "挿入しました" });
+  assert.deepEqual(await first, { status: "挿入しました" });
+  assert.deepEqual(await insertOnce(async () => ({ status: "再実行" })), { status: "再実行" });
+});
+
+test("harmonic insertion lock releases when a queued mutation becomes stale", async () => {
+  const insertOnce = createExclusiveAsyncAction();
+  assert.equal(await insertOnce(async () => undefined), undefined);
+  assert.deepEqual(await insertOnce(async () => ({ status: "再試行" })), { status: "再試行" });
+});
