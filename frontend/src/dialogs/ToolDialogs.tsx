@@ -144,6 +144,7 @@ export function BlankWorkspaceDialog({
   onStatus,
   onApply,
 }: Common & { onApply(options: BlankWorkspaceOptions): Promise<void> }) {
+  const applyOnce = useRef(createExclusiveAsyncAction());
   const [value, setValue] = useState<BlankWorkspaceOptions | null>(null),
     [loadError, setLoadError] = useState(""),
     [attempt, setAttempt] = useState(0),
@@ -160,20 +161,22 @@ export function BlankWorkspaceDialog({
     };
   }, [api, attempt]);
   async function apply() {
-    if (!value || applying) return;
-    setApplying(true);
-    try {
-      await onApply(value);
-      onStatus("空のワークスペースに切り替えました");
-      onClose();
-    } catch (e) {
-      onStatus(String(e));
-    } finally {
-      setApplying(false);
-    }
+    if (!value) return;
+    await applyOnce.current(async () => {
+      setApplying(true);
+      try {
+        await onApply(value);
+        onStatus("空のワークスペースに切り替えました");
+        onClose();
+      } catch (e) {
+        onStatus(String(e));
+      } finally {
+        setApplying(false);
+      }
+    });
   }
   return (
-    <Modal title="空のワークスペース" onClose={() => { if (!applying) onClose(); }}>
+    <Modal title="空のワークスペース" onClose={onClose} locked={applying}>
       {loadError ? (
         <LoadFailure
           error={loadError}
@@ -190,6 +193,7 @@ export function BlankWorkspaceDialog({
                 <Field label="長さ">
                   <Num
                     value={value.duration}
+                    disabled={applying}
                     min={1}
                     max={36000}
                     step={1}
@@ -200,6 +204,7 @@ export function BlankWorkspaceDialog({
                 <Field label="最低MIDI">
                   <Num
                     value={value.midiMin}
+                    disabled={applying}
                     min={0}
                     max={127}
                     onChange={(v) =>
@@ -210,6 +215,7 @@ export function BlankWorkspaceDialog({
                 <Field label="最高MIDI">
                   <Num
                     value={value.midiMax}
+                    disabled={applying}
                     min={0}
                     max={127}
                     onChange={(v) =>
