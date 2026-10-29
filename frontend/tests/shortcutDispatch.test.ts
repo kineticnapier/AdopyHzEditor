@@ -123,3 +123,28 @@ test("AltGraph and unassigned Ctrl+Alt chords do not trigger editor actions", ()
   assert.equal(press("a", { ctrlKey: true, altKey: true }), true);
   assert.deepEqual(calls, ["angle"]);
 });
+
+test("unassigned Ctrl+Shift and Meta+Shift chords do not run editor actions", () => {
+  const { calls, press } = setup();
+  for (const key of ["i", "m", "e", "o", "l", "a", "c", "x", "v", "d", "y", " "]) {
+    assert.equal(press(key, { ctrlKey: true, shiftKey: true }), false, `Ctrl+Shift+${key}`);
+    assert.equal(press(key, { metaKey: true, shiftKey: true }), false, `Meta+Shift+${key}`);
+  }
+  assert.equal(press("a", { ctrlKey: true, altKey: true, shiftKey: true }), false);
+  assert.deepEqual(calls, []);
+});
+
+test("explicit Ctrl+Shift actions and Ctrl+Alt+A still work", () => {
+  const { calls, press } = setup();
+  assert.equal(press("s", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("z", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("ArrowLeft", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("ArrowRight", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("ArrowUp", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("ArrowDown", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("a", { ctrlKey: true, altKey: true }), true);
+  assert.deepEqual(calls, [
+    "saveAs", "redo", "move:-0.25,0", "move:0.25,0",
+    "move:0,1", "move:0,-1", "angle",
+  ]);
+});
