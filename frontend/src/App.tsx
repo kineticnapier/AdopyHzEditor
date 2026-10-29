@@ -195,7 +195,7 @@ export default function App() {
   } | null>(null);
   const [pendingDestructive, setPendingDestructive] =
     useState<PendingDestructiveAction | null>(null);
-  const peakRequest = useRef(0);
+  const peakRequest = useRef(new LatestRequestGate());
   const spectrumRequests = useRef(new LatestRequestGate());
   const settingsRequests = useRef(new LatestRequestGate());
   const pendingSettings = useRef<Partial<EditorSettings>>({});
@@ -267,6 +267,8 @@ export default function App() {
 
   function applyState(state: AppState) {
     documentGeneration.current += 1;
+    peakRequest.current.invalidate();
+    setCursorReadout(null);
     // Ignore playback replies issued for the previous document.
     playbackRequests.current.invalidate();
     trackSelectionRequests.current.invalidate();
@@ -611,6 +613,8 @@ export default function App() {
       changes.analysisSource !== undefined &&
       changes.analysisSource !== settings.analysisSource;
     if (sourceChanged) {
+      peakRequest.current.invalidate();
+      setCursorReadout(null);
       trackSelectionRequests.current.invalidate();
       setAnalysisAvailable(false);
       setSpectrum(null);
@@ -715,6 +719,9 @@ export default function App() {
   ): Promise<AppState> {
     if (!api) throw new Error("バックエンドに接続されていません");
     stateTransitionPending.current += 1;
+    // A pending CQT peak belongs to the previous document or analysis state.
+    peakRequest.current.invalidate();
+    setCursorReadout(null);
     // Invalidate pending viewport writes before reserving the document queue.
     viewRequests.current.invalidate();
     setBusy(true);
@@ -1048,13 +1055,19 @@ export default function App() {
       );
   }
   async function cursorMoved(time: number, midi: number) {
+    // Issue before the early return: moving into a non-CQT view also
+    // invalidates any pending response from the previous cursor position.
+    const request = peakRequest.current.issue();
+    const generation = documentGeneration.current;
     setCursorReadout({ time, midi });
-    if (!api || !analysisAvailable || analysisSource === "vorbis_direct")
+    if (!api || !analysisAvailable || analysisSource === "vorbis_direct" ||
+        stateTransitionPending.current > 0)
       return;
-    const request = ++peakRequest.current;
     try {
       const peak = await api.get_cursor_peak(time, midi, 5);
-      if (request !== peakRequest.current) return;
+      if (!peakRequest.current.isCurrent(request) ||
+          generation !== documentGeneration.current ||
+          stateTransitionPending.current > 0) return;
       const label = formatCursorPeakLabel(peak);
       if (label !== null)
         setCursorReadout({ time: peak.time ?? time, midi, peak: label });
