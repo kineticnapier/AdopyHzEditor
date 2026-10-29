@@ -16,7 +16,16 @@ export type ShortcutActions = {
   seek(delta: number): void; seekTo(time: number): void; updateView(changes: Partial<ViewState>): void;
 };
 
-export type ShortcutEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "preventDefault">;
+export type ShortcutEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "preventDefault"> & {
+  target?: EventTarget | null;
+};
+
+/** Commit a focused editor field before saving, just as a toolbar click does. */
+function commitFocusedEditBeforeSave(event: ShortcutEvent): void {
+  const target = event.target as HTMLElement | null | undefined;
+  const field = target?.closest?.("input,textarea,[contenteditable='true']") as HTMLElement | null | undefined;
+  field?.blur();
+}
 
 /** Only explicitly assigned combinations may run while Ctrl/Meta/Alt is pressed. */
 export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions): void {
@@ -27,8 +36,10 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
 
   if (key === "f1") return handled(a.openHelp);
   if (ctrl && key === "o") return handled(a.openAudio);
-  if (ctrl && event.shiftKey && key === "s") return handled(a.saveProjectAs);
-  if (ctrl && key === "s") return handled(a.saveProject);
+  if (ctrl && event.shiftKey && key === "s")
+    return handled(() => { commitFocusedEditBeforeSave(event); a.saveProjectAs(); });
+  if (ctrl && key === "s")
+    return handled(() => { commitFocusedEditBeforeSave(event); a.saveProject(); });
   if (ctrl && key === "l") return handled(a.loadProject);
   if (ctrl && key === "i") return handled(a.importMidi);
   if (ctrl && key === "m") return handled(a.exportMidi);
