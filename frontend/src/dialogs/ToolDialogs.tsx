@@ -94,6 +94,13 @@ function Num({
     if (!editing) setText(String(fallback));
   }, [editing, fallback]);
   function commit() {
+    if (disabled) {
+      // Disabling a focused input can fire blur after an action has started.
+      cancelledRef.current = false;
+      setEditing(false);
+      setText(String(fallback));
+      return;
+    }
     const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current);
     cancelledRef.current = false;
     setEditing(false);
@@ -507,6 +514,7 @@ export function HarmonicDiagramDialog({
   ): Promise<NoteMutationResult | undefined>;
 }) {
   const insertOnce = useRef(createExclusiveAsyncAction());
+  const insertingRef = useRef(false);
   const [inserting, setInserting] = useState(false);
   const [opts, setOpts] = useState<HarmonicDiagramOptions | null>(null),
     [preview, setPreview] = useState<HarmonicPreview | null>(null),
@@ -514,6 +522,10 @@ export function HarmonicDiagramDialog({
     [error, setError] = useState(""),
     [attempt, setAttempt] = useState(0);
   const previewCurrent = previewIsCurrent(preview, previewKey, JSON.stringify(opts));
+  function updateOpts(next: HarmonicDiagramOptions) {
+    // A numeric field can commit on blur while disabling the form.
+    if (!insertingRef.current) setOpts(next);
+  }
   useEffect(() => {
     let alive = true;
     setError("");
@@ -553,6 +565,7 @@ export function HarmonicDiagramDialog({
     if (!opts) return;
     if(!previewCurrent){setError("最新設定のプレビューを待っています");return}
     await insertOnce.current(async () => {
+      insertingRef.current = true;
       setInserting(true);
       try {
         const r = await onQueuedMutation(
@@ -565,6 +578,7 @@ export function HarmonicDiagramDialog({
       } catch (e) {
         setError(String(e));
       } finally {
+        insertingRef.current = false;
         setInserting(false);
       }
     });
@@ -580,20 +594,20 @@ export function HarmonicDiagramDialog({
   return (
     <Modal title="倍音ダイアグラム" onClose={onClose} wide locked={inserting}>
       <div className="dialog-body harmonic-layout">
-        <section className="tool-form">
+        <fieldset className="tool-form harmonic-form" disabled={inserting}>
           <Field label="基準周波数">
             <Num
               value={opts.rootHz}
               min={0.001}
               max={100000}
-              onChange={(v) => setOpts({ ...opts, rootHz: v })}
+              onChange={(v) => updateOpts({ ...opts, rootHz: v })}
             />
             <span>Hz</span>
           </Field>
           <Field label="基準倍率">
             <input
               value={opts.rootShift}
-              onChange={(e) => setOpts({ ...opts, rootShift: e.target.value })}
+              onChange={(e) => updateOpts({ ...opts, rootShift: e.target.value })}
             />
           </Field>
           <Field label="1次元オフセット">
@@ -602,14 +616,14 @@ export function HarmonicDiagramDialog({
               min={-64}
               max={64}
               onChange={(v) =>
-                setOpts({ ...opts, base1dOffset: Math.round(v) })
+                updateOpts({ ...opts, base1dOffset: Math.round(v) })
               }
             />
           </Field>
           <Field label="倍音列">
             <input
               value={opts.harmonics}
-              onChange={(e) => setOpts({ ...opts, harmonics: e.target.value })}
+              onChange={(e) => updateOpts({ ...opts, harmonics: e.target.value })}
             />
           </Field>
           <Field label="時間単位">
@@ -632,7 +646,7 @@ export function HarmonicDiagramDialog({
               min={1}
               max={2000}
               disabled={opts.timeUnit !== "beats"}
-              onChange={(v) => setOpts({ ...opts, bpm: v })}
+              onChange={(v) => updateOpts({ ...opts, bpm: v })}
             />
           </Field>
           <Field label="開始">
@@ -641,7 +655,7 @@ export function HarmonicDiagramDialog({
               min={0}
               max={36000}
               step={0.25}
-              onChange={(v) => setOpts({ ...opts, start: v })}
+              onChange={(v) => updateOpts({ ...opts, start: v })}
             />
           </Field>
           <Field label="長さ">
@@ -650,7 +664,7 @@ export function HarmonicDiagramDialog({
               min={0.001}
               max={36000}
               step={0.25}
-              onChange={(v) => setOpts({ ...opts, duration: v })}
+              onChange={(v) => updateOpts({ ...opts, duration: v })}
             />
           </Field>
           <Field label="EDO">
@@ -658,7 +672,7 @@ export function HarmonicDiagramDialog({
               value={opts.edo}
               min={1}
               max={999}
-              onChange={(v) => setOpts({ ...opts, edo: Math.round(v) })}
+              onChange={(v) => updateOpts({ ...opts, edo: Math.round(v) })}
             />
           </Field>
           <Field label="番号オフセット">
@@ -666,11 +680,11 @@ export function HarmonicDiagramDialog({
               value={opts.offset}
               min={-999}
               max={999}
-              onChange={(v) => setOpts({ ...opts, offset: Math.round(v) })}
+              onChange={(v) => updateOpts({ ...opts, offset: Math.round(v) })}
             />
           </Field>
           {error && <div className="dialog-error inline">{error}</div>}
-        </section>
+        </fieldset>
         <section className="harmonic-preview">
           {previewCurrent && preview ? (
             <>
