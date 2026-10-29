@@ -24,11 +24,11 @@ function setup() {
     seekTo: time => calls.push("seekTo:" + time),
     updateView: changes => calls.push("view:" + JSON.stringify(changes)),
   };
-  const press = (key: string, mods: Modifiers = {}) => {
+  const press = (key: string, mods: Modifiers = {}, target?: EventTarget | null) => {
     let prevented = false;
     dispatchEditorShortcut({
       key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
-      preventDefault() { prevented = true; }, ...mods,
+      target, preventDefault() { prevented = true; }, ...mods,
     }, a);
     return prevented;
   };
@@ -72,4 +72,37 @@ test("assigned Ctrl and Shift combinations still work", () => {
   assert.equal(press(" ", {}), true);
   assert.equal(press("ArrowRight", { shiftKey: true }), true);
   assert.deepEqual(calls, ["save", "saveAs", 'view:{"pitchBottom":36}', "move:-0.25,0", "stop", "play", "seek:5"]);
+});
+
+
+test("Ctrl+S commits the focused number input before invoking save", () => {
+  const { calls, press } = setup();
+  const input = {
+    closest(selector: string) {
+      assert.match(selector, /input/);
+      return { blur() { calls.push("commit-input"); } };
+    },
+  } as unknown as EventTarget;
+  assert.equal(press("s", { ctrlKey: true }, input), true);
+  assert.deepEqual(calls, ["commit-input", "save"]);
+});
+
+test("Ctrl+Shift+S and Meta+S commit focused edits before saving", () => {
+  const { calls, press } = setup();
+  const field = {
+    closest() { return { blur() { calls.push("commit-input"); } }; },
+  } as unknown as EventTarget;
+  assert.equal(press("s", { ctrlKey: true, shiftKey: true }, field), true);
+  assert.equal(press("s", { metaKey: true }, field), true);
+  assert.deepEqual(calls, ["commit-input", "saveAs", "commit-input", "save"]);
+});
+
+test("save shortcuts do not blur non-editing targets or fail without a target", () => {
+  const { calls, press } = setup();
+  const button = {
+    closest() { return null; },
+  } as unknown as EventTarget;
+  assert.equal(press("s", { ctrlKey: true }, button), true);
+  assert.equal(press("s", { ctrlKey: true, shiftKey: true }), true);
+  assert.deepEqual(calls, ["save", "saveAs"]);
 });
