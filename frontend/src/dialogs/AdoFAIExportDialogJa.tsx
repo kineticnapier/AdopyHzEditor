@@ -783,6 +783,8 @@ function Num({
           if (event.key === "Enter") event.currentTarget.blur();
           else if (event.key === "Escape") {
             event.preventDefault();
+            // Cancel this edit without closing the surrounding modal.
+            event.stopPropagation();
             cancelledRef.current = true;
             setText(String(fallback));
             event.currentTarget.blur();
