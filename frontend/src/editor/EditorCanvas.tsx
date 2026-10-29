@@ -4,6 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSp
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange } from "./wheelNavigation";
+import { isNoteNavigationKey } from "./noteKeyboardNavigation";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -419,7 +420,7 @@ export default function EditorCanvas(props: Props) {
       props.onSelect([]);
       return;
     }
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (!isNoteNavigationKey(event)) return;
     if (!keyboardOrder.length) return;
     event.preventDefault();
     const delta = event.key === "ArrowRight" ? 1 : -1;
