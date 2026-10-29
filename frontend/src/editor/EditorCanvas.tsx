@@ -5,7 +5,7 @@ import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type Tr
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange } from "./wheelNavigation";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canvasEscapeAction, releaseCanvasPointerCapture } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -342,7 +342,7 @@ export default function EditorCanvas(props: Props) {
   }
   function clearTrackSelection(){props.onTrackSelectionChange({ids:[],range:null,useRange:false});}
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
-    if(event.button!==0)return;
+    if(event.button!==0 || !canStartCanvasGesture(activePointerIdRef.current))return;
     event.currentTarget.focus({ preventScroll: true });
     keyboardSelectionRef.current = null;
     setKeyboardNote(null);
@@ -381,6 +381,7 @@ export default function EditorCanvas(props: Props) {
     setDrag({mode:event.ctrlKey?"region":event.altKey?"curve":"create",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:[]});
   }
   function onPointerMove(event:ReactPointerEvent<HTMLCanvasElement>){
+    if(activePointerIdRef.current!==null && !isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
     const p=eventPosition(event);
     if(drag){setDrag({...drag,nowTime:p.time,nowMidi:p.midi});return;}
     const now=performance.now();
@@ -391,7 +392,8 @@ export default function EditorCanvas(props: Props) {
     event.currentTarget.style.cursor=hit!==null&&!event.altKey&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":track?"pointer":"crosshair";
   }
   async function onPointerUp(event:ReactPointerEvent<HTMLCanvasElement>){
-    if (activePointerIdRef.current === event.pointerId) activePointerIdRef.current = null;
+    if(!isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
+    activePointerIdRef.current = null;
     if(!drag)return;
     const p=eventPosition(event),cur={...drag,nowTime:p.time,nowMidi:p.midi};setDrag(null);
     if(cur.mode==="track-region"){
@@ -426,7 +428,8 @@ export default function EditorCanvas(props: Props) {
     }else await props.onAdd(a,b,(cur.startMidi+cur.nowMidi)/2,"note",cur.nowMidi);
   }
   function cancelDrag(event:ReactPointerEvent<HTMLCanvasElement>){
-    if (activePointerIdRef.current === event.pointerId) activePointerIdRef.current = null;
+    if(!isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
+    activePointerIdRef.current = null;
     releaseCanvasPointerCapture(event.currentTarget, event.pointerId);
     setDrag(null);
   }
