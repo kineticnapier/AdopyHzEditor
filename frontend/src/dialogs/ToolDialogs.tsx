@@ -744,7 +744,7 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
     });
   }
   return (
-    <Modal title="更新を確認" onClose={onClose}>
+    <Modal title="更新を確認" onClose={onClose} locked={opening}>
       <div className="dialog-body export-dialog-body">
         {error ? <LoadFailure error={error} onRetry={()=>setAttempt(value=>value+1)}/> : info ? (
           <>
@@ -759,7 +759,7 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
       </div>
       <div className="dialog-footer">
         <span />
-        <button onClick={onClose}>あとで</button>
+        <button onClick={onClose} disabled={opening}>あとで</button>
         <button className="primary" disabled={opening} onClick={() => void open()}>
           リリースページを開く
         </button>
