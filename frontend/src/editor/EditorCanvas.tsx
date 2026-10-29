@@ -4,7 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSp
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange } from "./wheelNavigation";
-import { isNoteNavigationKey } from "./noteKeyboardNavigation";
+import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -116,6 +116,19 @@ export default function EditorCanvas(props: Props) {
   const [size, setSize] = useState({ width: 800, height: 500 });
   const [drag, setDrag] = useState<DragState | null>(null);
   const [keyboardNote, setKeyboardNote] = useState<number | null>(null);
+  const keyboardSelectionRef = useRef<number[] | null>(null);
+  const lastSelectionRef = useRef(props.selected);
+  const lastNotesRef = useRef(props.notes);
+  useEffect(() => {
+    const expected = keyboardSelectionRef.current;
+    keyboardSelectionRef.current = null;
+    const previous = lastSelectionRef.current;
+    const notesChanged = lastNotesRef.current !== props.notes;
+    lastSelectionRef.current = props.selected;
+    lastNotesRef.current = props.notes;
+    setKeyboardNote(focused =>
+      reconcileKeyboardNote(focused, previous, expected, props.selected, props.notes.length, notesChanged));
+  }, [props.selected, props.notes]);
   const selectedSet=useMemo(()=>new Set(props.selected),[props.selected]);
   const noteTimeIndex=useMemo(()=>buildNoteTimeIndex(props.notes),[props.notes]);
   const keyboardOrder=noteTimeIndex.order;
@@ -328,6 +341,8 @@ export default function EditorCanvas(props: Props) {
   function clearTrackSelection(){props.onTrackSelectionChange({ids:[],range:null,useRange:false});}
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
     if(event.button!==0)return;
+    keyboardSelectionRef.current = null;
+    setKeyboardNote(null);
     event.currentTarget.setPointerCapture(event.pointerId);
     const p=eventPosition(event);
     if(event.ctrlKey&&event.altKey&&props.selected.length){
@@ -337,6 +352,7 @@ export default function EditorCanvas(props: Props) {
     }
     const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
     if(hit!==null){
+      setKeyboardNote(hit);
       clearTrackSelection();
       let next=props.selected;
       if(event.ctrlKey){next=props.selected.includes(hit)?props.selected.filter(x=>x!==hit):[...props.selected,hit];props.onSelect(next);return;}
@@ -416,6 +432,7 @@ export default function EditorCanvas(props: Props) {
   function onCanvasKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
+      keyboardSelectionRef.current = [];
       setKeyboardNote(null);
       props.onSelect([]);
       return;
@@ -426,8 +443,10 @@ export default function EditorCanvas(props: Props) {
     const delta = event.key === "ArrowRight" ? 1 : -1;
     const next = adjacentNoteIndex(keyboardOrder, keyboardNote ?? props.selected.at(-1) ?? null, delta);
     if (next === null) return;
+    const nextSelection = event.shiftKey ? Array.from(new Set([...props.selected, next])).sort((a, b) => a - b) : [next];
+    keyboardSelectionRef.current = nextSelection;
     setKeyboardNote(next);
-    props.onSelect(event.shiftKey ? Array.from(new Set([...props.selected, next])).sort((a, b) => a - b) : [next]);
+    props.onSelect(nextSelection);
     const note = props.notes[next], changes: Partial<ViewState> = {};
     if (note.start < props.view.start || note.end > props.view.start + props.view.windowSeconds)
       changes.start = Math.max(0, note.start - props.view.windowSeconds * .15);
