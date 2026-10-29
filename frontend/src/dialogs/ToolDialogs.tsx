@@ -11,6 +11,7 @@ import type {
 import { useDialogAccessibility } from "./useDialogAccessibility";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
+import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 type Common = {
   api: ToolBackendApi;
   onClose(): void;
@@ -232,6 +233,8 @@ export function BlankWorkspaceDialog({
 }
 
 export function QuickHzDialog({ api, onClose, onStatus }: Common) {
+  const appendOnce = useRef(createExclusiveAsyncAction());
+  const [appending, setAppending] = useState(false);
   const [opts, setOpts] = useState<QuickHzOptions>({
     bpm: 175,
     hz: 16,
@@ -300,12 +303,22 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
       return;
     }
     if (!resultCurrent) { setError("最新設定のプレビューを待っています"); return; }
-    try {
-      const x = await api.append_quick_hz_chart(chart, opts);
-      onStatus(x.status);
-    } catch (e) {
-      setError(String(e));
-    }
+    await appendOnce.current(async () => {
+      setAppending(true);
+      try {
+        const x = await api.append_quick_hz_chart(chart, opts);
+        if (x.ok) {
+          setError("");
+          onStatus(x.status);
+        } else {
+          setError(x.status);
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setAppending(false);
+      }
+    });
   }
   async function copy() {
     if (!result?.output || !resultCurrent) return;
@@ -430,7 +443,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               />
               上書き
             </label>
-            <button onClick={() => void append()} disabled={!chart || !resultCurrent}>
+            <button onClick={() => void append()} disabled={!chart || !resultCurrent || appending}>
               末尾へ追加
             </button>
           </div>
