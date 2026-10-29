@@ -36,7 +36,7 @@ test("harmonic changes are rejected synchronously while the insertion is pending
   assert.match(insert, /await insertOnce\.current\(async \(\) => \{\s*insertingRef\.current = true;\s*setInserting\(true\);/);
   assert.match(insert, /finally \{\s*insertingRef\.current = false;\s*setInserting\(false\);/);
   const form = harmonic.slice(harmonic.indexOf('<fieldset className="tool-form harmonic-form"'), harmonic.indexOf("</fieldset>"));
-  assert.ok(!form.includes("setOpts("), "form must not bypass the busy guard");
+  assert.ok(!/\bsetOpts\(/.test(form), "form must not bypass the busy guard");
   assert.ok((form.match(/updateOpts\(/g) ?? []).length >= 9);
 });
 
