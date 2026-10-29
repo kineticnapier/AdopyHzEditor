@@ -18,6 +18,7 @@ export type ShortcutActions = {
 
 export type ShortcutEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "preventDefault"> & {
   target?: EventTarget | null;
+  getModifierState?: (key: string) => boolean;
 };
 
 /** Commit a focused editor field before saving, just as a toolbar click does. */
@@ -33,6 +34,11 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   const ctrl = event.ctrlKey || event.metaKey;
   const plain = !ctrl && !event.altKey;
   const handled = (action: () => void) => { event.preventDefault(); action(); };
+
+  // AltGr can be reported as Ctrl+Alt, but is text input rather than a shortcut.
+  if (event.getModifierState?.("AltGraph")) return;
+  // Ctrl+Alt+A is assigned; other Ctrl+Alt combinations are not.
+  if (ctrl && event.altKey && key !== "a") return;
 
   if (key === "f1") return handled(a.openHelp);
   if (ctrl && key === "o") return handled(a.openAudio);
