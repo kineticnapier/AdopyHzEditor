@@ -415,7 +415,13 @@ test("document replacement waits for a started viewport write", async () => {
 
 test("document transition invalidates viewport work and blocks new view changes", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(app, /stateTransitionPending\.current \+= 1;\s*\/\/ Invalidate pending viewport writes[^\n]*\n\s*viewRequests\.current\.invalidate\(\)/);
+  const transitionStart = app.indexOf("stateTransitionPending.current += 1;");
+  const viewportInvalidation = app.indexOf("viewRequests.current.invalidate();", transitionStart);
+  const queueBarrier = app.indexOf("const guardedAction = async () => {", transitionStart);
+  assert.ok(transitionStart >= 0, "document transition must mark itself pending");
+  assert.ok(viewportInvalidation > transitionStart, "viewport requests must be invalidated");
+  assert.ok(queueBarrier > viewportInvalidation, "invalidation must precede the queue barrier");
+  assert.match(app.slice(transitionStart, viewportInvalidation), /peakRequest\\.current\\.invalidate\\(\\)/);
   assert.match(app, /const guardedAction = async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return action\(\);/);
   assert.match(app, /async function updateView\(changes: Partial<ViewState>\) \{\s*if \(stateTransitionPending\.current > 0\)/);
   assert.match(app, /async function fitView\(\) \{\s*if \(stateTransitionPending\.current > 0\)/);
