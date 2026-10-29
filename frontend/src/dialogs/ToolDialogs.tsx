@@ -14,6 +14,7 @@ import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { previewIsCurrent } from "./previewFreshness";
+import { dismissUnlessBusy } from "./dialogClosePolicy";
 type Common = {
   api: ToolBackendApi;
   onClose(): void;
@@ -24,18 +25,21 @@ function Modal({
   children,
   onClose,
   wide,
+  locked = false,
 }: {
   title: string;
   children: ReactNode;
   onClose(): void;
   wide?: boolean;
+  locked?: boolean;
 }) {
-  const { dialogRef, titleId } = useDialogAccessibility(onClose);
+  const close = () => { dismissUnlessBusy(locked, onClose); };
+  const { dialogRef, titleId } = useDialogAccessibility(close);
   return (
     <div
       className="modal-backdrop"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) close();
       }}
     >
       <section
@@ -45,10 +49,11 @@ function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-busy={locked}
       >
         <header className="modal-title">
           <strong id={titleId}>{title}</strong>
-          <button aria-label="閉じる" onClick={onClose}>
+          <button aria-label="閉じる" disabled={locked} onClick={close}>
             ×
           </button>
         </header>
@@ -341,7 +346,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
     );
   }
   return (
-    <Modal title="Quick Hz ツール" onClose={onClose} wide>
+    <Modal title="Quick Hz ツール" onClose={onClose} wide locked={appending}>
       <div className="dialog-body quick-hz-layout">
         <section className="tool-form">
           <Field label="BPM">
@@ -431,7 +436,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           )}
           {error && <div className="dialog-error inline">{error}</div>}
           <div className="chart-tools">
-            <button onClick={() => void chooseChart()}>譜面を選択…</button>
+            <button onClick={() => void chooseChart()} disabled={appending}>譜面を選択…</button>
             <span title={chart}>
               {chart ? chart.split(/[\\/]/).pop() : "未選択"}
             </span>
@@ -446,7 +451,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               上書き
             </label>
             <button onClick={() => void append()} disabled={!chart || !resultCurrent || appending}>
-              末尾へ追加
+              {appending ? "追加中…" : "末尾へ追加"}
             </button>
           </div>
         </section>
@@ -464,7 +469,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
       </div>
       <div className="dialog-footer">
         <span />
-        <button className="primary" onClick={onClose}>
+        <button className="primary" onClick={onClose} disabled={appending}>
           閉じる
         </button>
       </div>
@@ -557,7 +562,7 @@ export function HarmonicDiagramDialog({
       </Modal>
     );
   return (
-    <Modal title="倍音ダイアグラム" onClose={onClose} wide>
+    <Modal title="倍音ダイアグラム" onClose={onClose} wide locked={inserting}>
       <div className="dialog-body harmonic-layout">
         <section className="tool-form">
           <Field label="基準周波数">
@@ -676,13 +681,13 @@ export function HarmonicDiagramDialog({
       </div>
       <div className="dialog-footer">
         <span />
-        <button onClick={onClose}>キャンセル</button>
+        <button onClick={onClose} disabled={inserting}>キャンセル</button>
         <button
           className="primary"
           onClick={() => void insert()}
           disabled={inserting || !previewCurrent}
         >
-          挿入
+          {inserting ? "挿入中…" : "挿入"}
         </button>
       </div>
     </Modal>
