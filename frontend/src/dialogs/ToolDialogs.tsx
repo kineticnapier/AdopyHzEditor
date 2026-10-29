@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { NoteMutationResult } from "./bridge";
 import type {
   BlankWorkspaceOptions,
@@ -9,6 +9,7 @@ import type {
   ToolBackendApi,
 } from "./toolsBridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { commitNumericEdit } from "../settings/numericInputModel";
 type Common = {
   api: ToolBackendApi;
   onClose(): void;
@@ -75,19 +76,41 @@ function Num({
   disabled?: boolean;
   onChange(v: number): void;
 }) {
+  const fallback = Number.isFinite(value) ? value : 0;
+  const [text, setText] = useState(String(fallback));
+  const [editing, setEditing] = useState(false);
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    if (!editing) setText(String(fallback));
+  }, [editing, fallback]);
+  function commit() {
+    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current);
+    cancelledRef.current = false;
+    setEditing(false);
+    setText(String(next));
+    if (next !== fallback) onChange(next);
+  }
   return (
-    <input
-      type="number"
-      value={Number.isFinite(value) ? value : 0}
-      min={min}
-      max={max}
-      step={step}
-      disabled={disabled}
-      onChange={(e) => {
-        const v = Number(e.target.value);
-        if (Number.isFinite(v)) onChange(v);
-      }}
-    />
+      <input
+        type="number"
+        value={text}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        onFocus={() => { cancelledRef.current = false; setEditing(true); }}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          else if (event.key === "Escape") {
+            event.preventDefault();
+            cancelledRef.current = true;
+            setText(String(fallback));
+            event.currentTarget.blur();
+          }
+        }}
+      />
   );
 }
 function LoadFailure({ error, onRetry }: { error: string; onRetry(): void }) {
