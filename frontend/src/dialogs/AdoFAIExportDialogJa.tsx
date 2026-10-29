@@ -8,6 +8,7 @@ import type {
 import { LatestRequestGate } from "../api/requestCoordinator";
 import { useDialogAccessibility } from "./useDialogAccessibility";
 import { commitNumericEdit } from "../settings/numericInputModel";
+import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 
 type Props = {
   api: BackendApi;
@@ -33,6 +34,8 @@ export default function AdoFAIExportDialogJa({
     [previewMode, setPreviewMode] = useState<"none" | "tile" | "debug">("none");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const previewRequests = useRef(new LatestRequestGate());
+  const actionOnce = useRef(createExclusiveAsyncAction());
+  const workingRef = useRef(false);
   useEffect(() => {
     previewRequests.current.invalidate();
     setTile(null);
@@ -60,22 +63,28 @@ export default function AdoFAIExportDialogJa({
     k: K,
     v: AdoFAIExportOptions[K],
   ) {
+    // A focused numeric input may blur as the form becomes disabled.
+    if (workingRef.current) return;
     invalidatePreview();
     setOptions((o) =>
       o ? { ...o, [k]: v, harmonyTuning: "equal temperament" } : o,
     );
   }
   async function run<T>(fn: () => Promise<T>) {
-    setWorking(true);
-    setError("");
-    try {
-      return await fn();
-    } catch (e) {
-      setError(String(e));
-      return null;
-    } finally {
-      setWorking(false);
-    }
+    return actionOnce.current(async () => {
+      workingRef.current = true;
+      setWorking(true);
+      setError("");
+      try {
+        return await fn();
+      } catch (e) {
+        setError(String(e));
+        return null;
+      } finally {
+        workingRef.current = false;
+        setWorking(false);
+      }
+    });
   }
   const fixed = options
     ? { ...options, harmonyTuning: "equal temperament" as const }
@@ -162,6 +171,11 @@ export default function AdoFAIExportDialogJa({
       wide={previewMode !== "none"}
     >
       <div className="dialog-body export-dialog-body compact-export">
+        <fieldset
+          disabled={working}
+          aria-label="ADOFAI出力設定"
+          style={{ display: "grid", gap: 8, border: 0, margin: 0, padding: 0, minWidth: 0 }}
+        >
         <Field label="方式">
           <Select
             value={options.method}
@@ -640,6 +654,7 @@ export default function AdoFAIExportDialogJa({
             </Field>
           </div>
         </details>
+        </fieldset>
         {error && <div className="dialog-error">{error}</div>}
         {previewMode === "tile" && tile && <TilePreview preview={tile} />}{" "}
         {previewMode === "debug" && debug && <DebugPreview preview={debug} />}
