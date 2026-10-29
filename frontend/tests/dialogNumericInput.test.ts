@@ -13,7 +13,7 @@ for (const file of dialogFiles) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
     const start = source.indexOf("function Num({");
     assert.ok(start >= 0, "numeric field component exists");
-    const end = source.indexOf("\n}", start);
+    const end = source.indexOf("\n}\n", start);
     assert.ok(end > start, "numeric field component closes");
     const component = source.slice(start, end + 2);
 
@@ -22,6 +22,7 @@ for (const file of dialogFiles) {
     assert.match(component, /onBlur=\{commit\}/);
     assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current\)/);
     assert.match(component, /cancelledRef\.current = true/);
+    assert.match(component, /event\.stopPropagation\(\)/);
     assert.doesNotMatch(component, /Number\(event\.target\.value\)/);
   });
 }
