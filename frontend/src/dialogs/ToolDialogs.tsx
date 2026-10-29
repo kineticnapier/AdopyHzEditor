@@ -10,6 +10,7 @@ import type {
 } from "./toolsBridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
 import { commitNumericEdit } from "../settings/numericInputModel";
+import { runQuickHzOutputAction } from "./quickHzOutputActions";
 type Common = {
   api: ToolBackendApi;
   onClose(): void;
@@ -307,15 +308,22 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
     }
   }
   async function copy() {
-    if (result?.output && resultCurrent) {
-      await navigator.clipboard.writeText(result.output);
-      onStatus("Quick Hz出力をコピーしました");
-    }
+    if (!result?.output || !resultCurrent) return;
+    await runQuickHzOutputAction(
+      "コピー",
+      () => navigator.clipboard.writeText(result.output),
+      () => { setError(""); onStatus("Quick Hz出力をコピーしました"); },
+      setError,
+    );
   }
   async function saveText() {
     if (!result?.output || !resultCurrent) return;
-    const x = await api.save_quick_hz_text(result.output);
-    onStatus(x.status);
+    await runQuickHzOutputAction(
+      "テキスト保存",
+      () => api.save_quick_hz_text(result.output),
+      x => { setError(""); onStatus(x.status); },
+      setError,
+    );
   }
   return (
     <Modal title="Quick Hz ツール" onClose={onClose} wide>
