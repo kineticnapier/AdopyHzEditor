@@ -37,8 +37,12 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
 
   // AltGr can be reported as Ctrl+Alt, but is text input rather than a shortcut.
   if (event.getModifierState?.("AltGraph")) return;
-  // Ctrl+Alt+A is assigned; other Ctrl+Alt combinations are not.
-  if (ctrl && event.altKey && key !== "a") return;
+  // Only explicitly assigned modified chords may reach the action table.
+  // In particular, Ctrl+Shift+I/C/V/M must not import, copy, paste or export.
+  if (ctrl && event.altKey && (key !== "a" || event.shiftKey)) return;
+  if (ctrl && event.shiftKey && key !== "s" && key !== "z" &&
+      key !== "arrowleft" && key !== "arrowright" &&
+      key !== "arrowup" && key !== "arrowdown") return;
 
   if (key === "f1") return handled(a.openHelp);
   if (ctrl && key === "o") return handled(a.openAudio);
