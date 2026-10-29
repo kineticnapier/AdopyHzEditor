@@ -7,6 +7,7 @@ import type {
 } from "./bridge";
 import { LatestRequestGate } from "../api/requestCoordinator";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { commitNumericEdit } from "../settings/numericInputModel";
 
 type Props = {
   api: BackendApi;
@@ -753,17 +754,39 @@ function Num({
   suffix?: string;
   onChange(v: number): void;
 }) {
+  const fallback = Number.isFinite(value) ? value : 0;
+  const [text, setText] = useState(String(fallback));
+  const [editing, setEditing] = useState(false);
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    if (!editing) setText(String(fallback));
+  }, [editing, fallback]);
+  function commit() {
+    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current);
+    cancelledRef.current = false;
+    setEditing(false);
+    setText(String(next));
+    if (next !== fallback) onChange(next);
+  }
   return (
     <div className="number-with-suffix">
       <input
         type="number"
-        value={Number.isFinite(value) ? value : 0}
+        value={text}
         min={min}
         max={max}
         step={step}
-        onChange={(e) => {
-          const v = Number(e.target.value);
-          if (Number.isFinite(v)) onChange(v);
+        onFocus={() => { cancelledRef.current = false; setEditing(true); }}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          else if (event.key === "Escape") {
+            event.preventDefault();
+            cancelledRef.current = true;
+            setText(String(fallback));
+            event.currentTarget.blur();
+          }
         }}
       />
       {suffix && <span>{suffix}</span>}
