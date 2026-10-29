@@ -140,10 +140,7 @@ test("document transition waits for prior edits and rejects old queued edits", a
   let release!: () => void;
   const first = enqueueAppliedTask(
     queue,
-    () => new Promise<void>((resolve) => {
-      events.push("edit-start");
-      release = resolve;
-    }),
+    () => new Promise<void>((resolve) => { events.push("edit-start"); release = resolve; }),
     () => { events.push("edit-applied"); },
     () => generation === 0,
   );
@@ -170,9 +167,7 @@ test("failed document transition does not apply state and queue recovers", async
   const queue = new SerialTaskQueue();
   let applied = false;
   await assert.rejects(
-    enqueueStateTask(queue, async (): Promise<number> => {
-      throw new Error("load failed");
-    }, () => { applied = true; }),
+    enqueueStateTask(queue, async (): Promise<number> => { throw new Error("load failed"); }, () => { applied = true; }),
     /load failed/,
   );
   assert.equal(applied, false);

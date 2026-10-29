@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop } from "../src/editor/editorMath.ts";
+import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramTimeCrop } from "../src/editor/editorMath.ts";
 
 const curve = { start: 0, end: 100, midi: 0, velocity: 100, kind: "curve" as const, midi_end: 0, ctrl1_midi: 127, ctrl2_midi: 127 };
 
@@ -19,6 +19,35 @@ test("spectrogram crop honors sub-semitone pitch steps", () => {
   const crop = spectrogramPitchCrop(8, 60, .25, 60, 61);
   assert.equal(crop.sy, 3.5);
   assert.equal(crop.sh, 4);
+});
+
+test("CQT stale viewport crop keeps absolute time position while scrolling right", () => {
+  const crop = spectrogramTimeCrop(0, 12, .96, 12, 1200, 1200);
+  assert.ok(crop);
+  assert.equal(crop.sx, 96);
+  assert.equal(crop.sw, 1104);
+  assert.equal(crop.dx, 0);
+  assert.equal(crop.dw, 1104);
+});
+
+test("CQT stale viewport crop leaves the uncovered left edge blank while scrolling left", () => {
+  const crop = spectrogramTimeCrop(.96, 12.96, 0, 12, 1200, 1200);
+  assert.ok(crop);
+  assert.equal(crop.sx, 0);
+  assert.equal(crop.sw, 1104);
+  assert.equal(crop.dx, 96);
+  assert.equal(crop.dw, 1104);
+});
+
+test("CQT stale viewport crop returns null when time ranges do not overlap", () => {
+  assert.equal(spectrogramTimeCrop(0, 12, 12.1, 12, 1200, 1200), null);
+});
+
+test("CQT viewport zoom maps the overlapping source interval to the correct destination width", () => {
+  const zoomIn = spectrogramTimeCrop(0, 12, 3, 6, 1200, 1200);
+  assert.deepEqual(zoomIn, { sx: 300, sw: 600, dx: 0, dw: 1200 });
+  const zoomOut = spectrogramTimeCrop(0, 12, 0, 24, 1200, 1200);
+  assert.deepEqual(zoomOut, { sx: 0, sw: 1200, dx: 0, dw: 600 });
 });
 
 test("grid rendering is bounded for extreme BPM and zoom", () => {

@@ -67,6 +67,33 @@ export function spectrogramPitchCrop(rows: number, midiMin: number, pitchStep: n
   return { sy, sh };
 }
 
+export function spectrogramTimeCrop(
+  sourceStart: number,
+  sourceEnd: number,
+  viewStart: number,
+  viewWindowSeconds: number,
+  sourceCols: number,
+  destinationWidth: number,
+) {
+  const sourceSpan = Math.max(0, sourceEnd - sourceStart);
+  const viewSpan = Math.max(0, viewWindowSeconds);
+  if (sourceSpan <= 1e-12 || viewSpan <= 1e-12 || sourceCols <= 0 || destinationWidth <= 0) return null;
+
+  const viewEnd = viewStart + viewSpan;
+  const overlapStart = Math.max(sourceStart, viewStart);
+  const overlapEnd = Math.min(sourceEnd, viewEnd);
+  if (overlapEnd <= overlapStart) return null;
+
+  const overlap = overlapEnd - overlapStart;
+  return {
+    sx: (overlapStart - sourceStart) / sourceSpan * sourceCols,
+    sw: overlap / sourceSpan * sourceCols,
+    dx: (overlapStart - viewStart) / viewSpan * destinationWidth,
+    dw: overlap / viewSpan * destinationWidth,
+  };
+}
+
+
 export type NoteTimeIndex = { order: number[]; starts: number[]; maxEnds: number[] };
 
 export function buildNoteTimeIndex(notes: NoteDto[]): NoteTimeIndex {

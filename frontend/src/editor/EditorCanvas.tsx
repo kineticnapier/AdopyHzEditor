@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
+import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramTimeCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange } from "./wheelNavigation";
@@ -191,15 +191,15 @@ export default function EditorCanvas(props: Props) {
     ctx.fillStyle="#080b0e"; ctx.fillRect(0,0,w,h);
 
     if (spectrumCanvas && props.view.mode !== "notes" && decoded?.duration && decoded.midiMin !== undefined && decoded.midiMax !== undefined) {
-      const dataStart=decoded.start??0,dataEnd=decoded.end??decoded.duration,span=Math.max(1e-6,dataEnd-dataStart);
-      const sx=Math.max(0,(props.view.start-dataStart)/span*decoded.cols), sw=Math.max(1,Math.min(decoded.cols-sx,props.view.windowSeconds/span*decoded.cols));
+      const dataStart=decoded.start??0,dataEnd=decoded.end??decoded.duration;
+      const timeCrop=spectrogramTimeCrop(dataStart,dataEnd,props.view.start,props.view.windowSeconds,decoded.cols,w);
       const top=props.view.pitchBottom+props.view.visibleNotes-.5,bottom=props.view.pitchBottom-.5;
       const {sy,sh}=spectrogramPitchCrop(decoded.rows,decoded.midiMin,decoded.pitchStep??1,bottom,top);
       const sourceBottom=decoded.midiMin,sourceTop=decoded.midiMin+(decoded.rows-1)*(decoded.pitchStep??1),visibleBottom=Math.max(bottom,sourceBottom),visibleTop=Math.min(top,sourceTop);
-      if(visibleTop>visibleBottom){
+      if(timeCrop&&visibleTop>visibleBottom){
         const dy=(top-visibleTop)/Math.max(1,props.view.visibleNotes)*h,dh=(visibleTop-visibleBottom)/Math.max(1,props.view.visibleNotes)*h;
         ctx.save(); ctx.globalAlpha=props.view.mode==="spec"?1:.7; ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
-        ctx.drawImage(spectrumCanvas,sx,sy,sw,sh,0,dy,w,dh); ctx.restore();
+        ctx.drawImage(spectrumCanvas,timeCrop.sx,sy,timeCrop.sw,sh,timeCrop.dx,dy,timeCrop.dw,dh); ctx.restore();
       }
     }
     if(directSpectrumCanvas&&props.directSpectrum&&props.view.mode!=="notes"){
@@ -376,7 +376,7 @@ export default function EditorCanvas(props: Props) {
       const range=normalizeTrackRange(cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi);
       if(range.endTime-range.startTime>=.001){
         const ids=await props.onFindTracks(range);
-        if(ids===null)return; // A newer document or selection superseded this query.
+        if(ids===null)return; // Ignore a stale document or superseded selection.
         props.onTrackSelectionChange({ids:mergeTrackSelection(props.trackSelection.ids,ids,Boolean(cur.trackAdditive)),range,useRange:ids.length>0});
         props.onSelect([]);
       }
