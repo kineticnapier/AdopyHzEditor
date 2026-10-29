@@ -205,6 +205,7 @@ export default function App() {
   const viewQueue = useRef(new SerialTaskQueue());
   const viewRequests = useRef(new LatestRequestGate());
   const playbackRequests = useRef(new LatestRequestGate());
+  const trackSelectionRequests = useRef(new LatestRequestGate());
   const deletingSelection = useRef("");
   const documentGeneration = useRef(0);
   const analysisIdentity = useRef("");
@@ -268,6 +269,7 @@ export default function App() {
     documentGeneration.current += 1;
     // Ignore playback replies issued for the previous document.
     playbackRequests.current.invalidate();
+    trackSelectionRequests.current.invalidate();
     const identity = `${state.audio.path ?? ""}\0${state.analysis.source ?? "cqt"}\0${state.analysis.available}`;
     if (identity !== analysisIdentity.current) {
       analysisIdentity.current = identity;
@@ -609,6 +611,7 @@ export default function App() {
       changes.analysisSource !== undefined &&
       changes.analysisSource !== settings.analysisSource;
     if (sourceChanged) {
+      trackSelectionRequests.current.invalidate();
       setAnalysisAvailable(false);
       setSpectrum(null);
       setDirectSpectrum(null);
@@ -691,6 +694,7 @@ export default function App() {
     if (Object.keys(changes).some((key) => key !== "mode"))
       setFollowPlayback(false);
     if (changes.mode === "notes") {
+      trackSelectionRequests.current.invalidate();
       setTrackSelection({ ids: [], range: null, useRange: false });
       setHoveredTrack(null);
     }
@@ -1058,8 +1062,14 @@ export default function App() {
       /* Cursor diagnostics must not interrupt editing. */
     }
   }
-  async function findTracks(range: TrackSelectionRange) {
-    if (!api) return [];
+  async function findTracks(range: TrackSelectionRange): Promise<number[] | null> {
+    if (!api || stateTransitionPending.current > 0) return null;
+    const generation = documentGeneration.current;
+    const request = trackSelectionRequests.current.issue();
+    const isCurrent = () =>
+      generation === documentGeneration.current &&
+      stateTransitionPending.current === 0 &&
+      trackSelectionRequests.current.isCurrent(request);
     try {
       const result = await api.find_frequency_tracks(
         range.startTime,
@@ -1067,9 +1077,11 @@ export default function App() {
         range.minMidi,
         range.maxMidi,
       );
+      if (!isCurrent()) return null;
       setStatus(result.status);
       return result.trackIds;
     } catch (e) {
+      if (!isCurrent()) return null;
       setStatus(String(e));
       return [];
     }
@@ -1286,6 +1298,7 @@ export default function App() {
               onCursorMove={(time, midi) => void cursorMoved(time, midi)}
               onTrackHover={setHoveredTrack}
               onTrackSelectionChange={(selection) => {
+                trackSelectionRequests.current.invalidate();
                 setTrackSelection(selection);
                 if (selection.ids.length) setPanelOpen(true);
               }}

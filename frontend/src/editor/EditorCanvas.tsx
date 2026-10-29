@@ -31,7 +31,7 @@ type Props = {
   onCursorMove?(time: number, midi: number): void;
   onTrackHover?(track: TrackHoverInfo|null): void;
   onTrackSelectionChange(selection:TrackSelectionState):void;
-  onFindTracks(range: TrackSelectionRange): Promise<number[]>;
+  onFindTracks(range: TrackSelectionRange): Promise<number[] | null>;
 };
 
 type DragMode = "create" | "curve" | "region" | "track-region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
@@ -376,6 +376,7 @@ export default function EditorCanvas(props: Props) {
       const range=normalizeTrackRange(cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi);
       if(range.endTime-range.startTime>=.001){
         const ids=await props.onFindTracks(range);
+        if(ids===null)return; // A newer document or selection superseded this query.
         props.onTrackSelectionChange({ids:mergeTrackSelection(props.trackSelection.ids,ids,Boolean(cur.trackAdditive)),range,useRange:ids.length>0});
         props.onSelect([]);
       }
