@@ -630,7 +630,7 @@ export function HarmonicDiagramDialog({
             <select
               value={opts.timeUnit}
               onChange={(e) =>
-                setOpts({
+                updateOpts({
                   ...opts,
                   timeUnit: e.target.value as "seconds" | "beats",
                 })
