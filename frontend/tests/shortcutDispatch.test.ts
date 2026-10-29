@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dispatchEditorShortcut, type ShortcutActions, type ShortcutEvent } from "../src/editor/shortcutDispatch.ts";
 
-type Modifiers = Partial<Pick<ShortcutEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey">>;
+type Modifiers = Partial<Pick<ShortcutEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "getModifierState">>;
 
 function setup() {
   const calls: string[] = [];
@@ -105,4 +105,21 @@ test("save shortcuts do not blur non-editing targets or fail without a target", 
   assert.equal(press("s", { ctrlKey: true }, button), true);
   assert.equal(press("s", { ctrlKey: true, shiftKey: true }), true);
   assert.deepEqual(calls, ["save", "saveAs"]);
+});
+
+
+test("AltGraph and unassigned Ctrl+Alt chords do not trigger editor actions", () => {
+  const { calls, press } = setup();
+  const input = {
+    closest: () => ({ blur: () => calls.push("blur") }),
+  } as unknown as EventTarget;
+  assert.equal(press("s", { ctrlKey: true, altKey: true }, input), false);
+  assert.equal(press("s", { ctrlKey: true, altKey: true, shiftKey: true }, input), false);
+  assert.equal(press("o", { ctrlKey: true, altKey: true }), false);
+  const altGraph = { ctrlKey: true, altKey: true, getModifierState: (name: string) => name === "AltGraph" };
+  assert.equal(press("s", altGraph, input), false);
+  assert.equal(press("a", altGraph), false);
+  assert.deepEqual(calls, []);
+  assert.equal(press("a", { ctrlKey: true, altKey: true }), true);
+  assert.deepEqual(calls, ["angle"]);
 });
