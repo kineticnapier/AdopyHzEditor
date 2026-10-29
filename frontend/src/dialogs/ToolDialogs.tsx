@@ -483,6 +483,8 @@ export function HarmonicDiagramDialog({
     selection?: (result: NoteMutationResult) => number[] | undefined,
   ): Promise<NoteMutationResult | undefined>;
 }) {
+  const insertOnce = useRef(createExclusiveAsyncAction());
+  const [inserting, setInserting] = useState(false);
   const [opts, setOpts] = useState<HarmonicDiagramOptions | null>(null),
     [preview, setPreview] = useState<HarmonicPreview | null>(null),
     [previewKey,setPreviewKey]=useState(""),
@@ -526,17 +528,22 @@ export function HarmonicDiagramDialog({
   async function insert() {
     if (!opts) return;
     if(!preview||previewKey!==JSON.stringify(opts)){setError("最新設定のプレビューを待っています");return}
-    try {
-      const r = await onQueuedMutation(
-        () => api.insert_harmonic_diagram(opts),
-        result => result.indices ?? [],
-      );
-      if (!r) return;
-      onStatus(r.status);
-      onClose();
-    } catch (e) {
-      setError(String(e));
-    }
+    await insertOnce.current(async () => {
+      setInserting(true);
+      try {
+        const r = await onQueuedMutation(
+          () => api.insert_harmonic_diagram(opts),
+          result => result.indices ?? [],
+        );
+        if (!r) return;
+        onStatus(r.status);
+        onClose();
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setInserting(false);
+      }
+    });
   }
   if (!opts && error)
     return <Modal title="倍音ダイアグラム" onClose={onClose}><LoadFailure error={error} onRetry={() => setAttempt(value => value + 1)} /></Modal>;
@@ -666,7 +673,7 @@ export function HarmonicDiagramDialog({
         <button
           className="primary"
           onClick={() => void insert()}
-          disabled={!preview||previewKey!==JSON.stringify(opts)}
+          disabled={inserting || !preview || previewKey !== JSON.stringify(opts)}
         >
           挿入
         </button>
