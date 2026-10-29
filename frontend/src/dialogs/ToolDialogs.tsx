@@ -15,6 +15,7 @@ import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { previewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
+import { quickHzActionPolicy } from "./quickHzActionPolicy";
 type Common = {
   api: ToolBackendApi;
   onClose(): void;
@@ -263,6 +264,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
     [error, setError] = useState(""),
     [chart, setChart] = useState("");
   const optsKey = JSON.stringify(opts), resultCurrent = previewIsCurrent(result, resultKey, optsKey);
+  const actions = quickHzActionPolicy(appending, Boolean(chart), resultCurrent);
   useEffect(() => {
     let alive = true;
     const requestedKey = optsKey;
@@ -357,6 +359,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
         <section className="tool-form">
           <Field label="BPM">
             <Num
+              disabled={!actions.canEdit}
               value={opts.bpm}
               min={0.001}
               max={999999}
@@ -365,6 +368,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           </Field>
           <Field label="周波数">
             <Num
+              disabled={!actions.canEdit}
               value={opts.hz}
               min={0.001}
               max={100000}
@@ -374,6 +378,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           </Field>
           <Field label="開始床">
             <Num
+              disabled={!actions.canEdit}
               value={opts.startFloor}
               min={0}
               max={10000000}
@@ -385,6 +390,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               <label>
                 <input
                   type="checkbox"
+                  disabled={!actions.canEdit}
                   checked={opts.useEndFloor}
                   onChange={(e) =>
                     setOpts({ ...opts, useEndFloor: e.target.checked })
@@ -394,6 +400,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               </label>
               {opts.useEndFloor ? (
                 <Num
+                  disabled={!actions.canEdit}
                   value={opts.endFloor}
                   min={0}
                   max={10000000}
@@ -403,6 +410,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
                 />
               ) : (
                 <Num
+                  disabled={!actions.canEdit}
                   value={opts.count}
                   min={1}
                   max={10000000}
@@ -414,6 +422,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           <Field label="SetSpeed追加">
             <input
               type="checkbox"
+              disabled={!actions.canEdit}
               checked={opts.addSetSpeed}
               onChange={(e) =>
                 setOpts({ ...opts, addSetSpeed: e.target.checked })
@@ -442,13 +451,14 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           )}
           {error && <div className="dialog-error inline">{error}</div>}
           <div className="chart-tools">
-            <button onClick={() => void chooseChart()} disabled={appending}>譜面を選択…</button>
+            <button onClick={() => void chooseChart()} disabled={!actions.canChooseChart}>譜面を選択…</button>
             <span title={chart}>
               {chart ? chart.split(/[\\/]/).pop() : "未選択"}
             </span>
             <label>
               <input
                 type="checkbox"
+                disabled={!actions.canEdit}
                 checked={opts.overwrite}
                 onChange={(e) =>
                   setOpts({ ...opts, overwrite: e.target.checked })
@@ -456,7 +466,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               />
               上書き
             </label>
-            <button onClick={() => void append()} disabled={!chart || !resultCurrent || appending}>
+            <button onClick={() => void append()} disabled={!actions.canAppend}>
               {appending ? "追加中…" : "末尾へ追加"}
             </button>
           </div>
@@ -464,10 +474,10 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
         <section className="quick-hz-output">
           <textarea value={resultCurrent ? result?.output ?? "" : ""} readOnly spellCheck={false} />
           <div className="preview-actions">
-            <button onClick={() => void copy()} disabled={!resultCurrent}>
+            <button onClick={() => void copy()} disabled={!actions.canOutput}>
               コピー
             </button>
-            <button onClick={() => void saveText()} disabled={!resultCurrent}>
+            <button onClick={() => void saveText()} disabled={!actions.canOutput}>
               テキスト保存…
             </button>
           </div>
@@ -475,7 +485,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
       </div>
       <div className="dialog-footer">
         <span />
-        <button className="primary" onClick={onClose} disabled={appending}>
+        <button className="primary" onClick={onClose} disabled={!actions.canClose}>
           閉じる
         </button>
       </div>
