@@ -322,7 +322,8 @@ test("view request applies only the current successful response", async () => {
 test("wheel and fit view share the recoverable request path", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /await enqueueRecoverableViewTask\(\s*viewQueue\.current,/);
-  assert.match(app, /const normalized = clampPitchViewChange\(view, changes\)/);
+  assert.match(app, /const pitchNormalized = clampPitchViewChange\(view, changes\)/);
+  assert.match(app, /const normalized = clampTimeViewChange\(view, pitchNormalized, playback\.duration\)/);
   assert.match(app, /applyViewAction\(\(\) => api\.set_view\(normalized\), "表示範囲の変更"\)/);
   assert.match(app, /applyViewAction\(\(\) => api\.fit_view\(\), "全体表示"\)/);
   assert.match(app, /viewQueue\.current\.enqueue\(\(\) => api\.get_state\(\)\)/);
