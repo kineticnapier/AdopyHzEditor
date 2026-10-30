@@ -33,6 +33,12 @@ function pitchWheelSteps(
   return steps;
 }
 
+/** Do not dispatch a pan that is already blocked by the beginning of the timeline. */
+function panTime(view: ViewState, units: number): Partial<ViewState> | null {
+  const start = Math.max(0, view.start + units * view.windowSeconds * .08);
+  return start === view.start ? null : { start };
+}
+
 /** Horizontal gestures pan in their actual direction; vertical wheel controls retain existing behavior. */
 export function wheelViewChange(
   event: WheelInput,
@@ -54,7 +60,7 @@ export function wheelViewChange(
   if (Math.abs(deltaX) > Math.abs(deltaY)) {
     resetPitchAccumulator();
     const units = wheelTicks(deltaX, event.deltaMode);
-    return { start: view.start + units * view.windowSeconds * .08 };
+    return panTime(view, units);
   }
 
   const units = wheelTicks(deltaY, event.deltaMode);
@@ -94,5 +100,5 @@ export function wheelViewChange(
     const time=view.start+anchor.timeRatio*view.windowSeconds;
     return {windowSeconds,start:time-anchor.timeRatio*windowSeconds};
   }
-  return { start: view.start + units * view.windowSeconds * .08 };
+  return panTime(view, units);
 }
