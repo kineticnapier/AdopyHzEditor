@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { dispatchEditorShortcut, type ShortcutActions, type ShortcutEvent } from "../src/editor/shortcutDispatch.ts";
 
@@ -16,6 +17,7 @@ function setup(viewOverrides: Partial<ShortcutActions["view"]> = {}) {
     openAdoExport: log("adoExport"), openHelp: log("help"), setStatus: () => {},
     undo: log("undo"), redo: log("redo"), duplicate: log("duplicate"),
     quantize: log("quantize"), select: indices => calls.push("select:" + indices.join(",")),
+    clearTracks: log("clearTracks"),
     copy: log("copy"), cut: log("cut"), paste: log("paste"), applyTargetAngle: log("angle"),
     move: (_indices, dx, dy) => calls.push(`move:${dx},${dy}`),
     stop: log("stop"), play: log("play"), deleteSelected: log("delete"),
@@ -163,4 +165,24 @@ test("keyboard pitch scrolling never moves the view outside MIDI 0..127", () => 
   assert.equal(lower.press("s"), true);
   assert.equal(lower.press("ArrowDown"), true);
   assert.deepEqual(lower.calls, ['view:{"pitchBottom":0}', 'view:{"pitchBottom":0}']);
+});
+
+test("global Escape clears Frequency Tracks before Notes", () => {
+  const { calls, press } = setup();
+  assert.equal(press("Escape"), true);
+  assert.deepEqual(calls, ["clearTracks", "select:"]);
+});
+
+test("modified Escape does not clear either selection", () => {
+  const { calls, press } = setup();
+  assert.equal(press("Escape", { ctrlKey: true }), false);
+  assert.equal(press("Escape", { altKey: true }), false);
+  assert.equal(press("Escape", { metaKey: true }), false);
+  assert.deepEqual(calls, []);
+});
+
+test("global Track clearing is wired through the request-invalidating App handler", () => {
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(source, /clearTracks:\s*\(\)\s*=>\s*changeTrackSelection\(\{\s*ids:\s*\[\],\s*range:\s*null,\s*useRange:\s*false\s*\}\)/);
+  assert.match(source, /function changeTrackSelection\([\s\S]*?trackSelectionRequests\.current\.invalidate\(\)/);
 });

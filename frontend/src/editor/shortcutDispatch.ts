@@ -9,7 +9,7 @@ export type ShortcutActions = {
   openAudio(): void; saveProject(): void; saveProjectAs(): void; loadProject(): void; importMidi(): void;
   exportMidi(): void;
   openAdoExport(): void; openHelp(): void; setStatus(text: string): void; undo(): void; redo(): void;
-  duplicate(): void; quantize(): void; select(indices: number[]): void;
+  duplicate(): void; quantize(): void; select(indices: number[]): void; clearTracks(): void;
   copy(): void; cut(): void; paste(): void; applyTargetAngle(): void;
   move(indices: number[], dx: number, dy: number): void;
   stop(): void; play(): void; deleteSelected(): void; mode(value: ViewState["mode"]): void;
@@ -70,7 +70,7 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (ctrl && !event.altKey && key === " ") return handled(a.stop);
   if (plain && key === " ") return handled(a.play);
   if (plain && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
-  if (plain && key === "escape") return handled(() => a.select([]));
+  if (plain && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
   // Tab and Shift+Tab intentionally retain native focus navigation.
   if (plain && key === "home") return handled(() => a.seekTo(0));
   if (plain && key === "1") return handled(() => a.mode("spec"));

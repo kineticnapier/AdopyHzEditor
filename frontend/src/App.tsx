@@ -1211,6 +1211,7 @@ export default function App() {
     duplicate: () => void duplicate(),
     quantize: () => void quantize(),
     select: setSelected,
+    clearTracks: () => changeTrackSelection({ ids: [], range: null, useRange: false }),
     copy: () => void copySelected(),
     cut: () => void cutSelected(),
     paste: () => void pasteAtPlayback(),
