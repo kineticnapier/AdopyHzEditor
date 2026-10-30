@@ -15,6 +15,7 @@ import {
 } from "./dialogs/ToolDialogs";
 import { useDialogAccessibility } from "./dialogs/useDialogAccessibility";
 import Timeline from "./editor/Timeline";
+import { clampPitchViewChange } from "./editor/pitchViewport";
 import TopToolbar from "./components/TopToolbar";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
 import {
@@ -695,15 +696,17 @@ export default function App() {
       setStatus("プロジェクト処理中は表示範囲を変更できません");
       return;
     }
-    if (Object.keys(changes).some((key) => key !== "mode"))
+    // Keep optimistic canvas coordinates within the same MIDI bounds as Bridge.set_view.
+    const normalized = clampPitchViewChange(view, changes);
+    if (Object.keys(normalized).some((key) => key !== "mode"))
       setFollowPlayback(false);
-    if (changes.mode === "notes") {
+    if (normalized.mode === "notes") {
       trackSelectionRequests.current.invalidate();
       setTrackSelection({ ids: [], range: null, useRange: false });
       setHoveredTrack(null);
     }
-    setView((v) => ({ ...v, ...changes }));
-    if (api) await applyViewAction(() => api.set_view(changes), "表示範囲の変更");
+    setView((v) => ({ ...v, ...normalized }));
+    if (api) await applyViewAction(() => api.set_view(normalized), "表示範囲の変更");
   }
   async function fitView() {
     if (stateTransitionPending.current > 0) {

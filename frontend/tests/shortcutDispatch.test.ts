@@ -4,12 +4,12 @@ import { dispatchEditorShortcut, type ShortcutActions, type ShortcutEvent } from
 
 type Modifiers = Partial<Pick<ShortcutEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "getModifierState">>;
 
-function setup() {
+function setup(viewOverrides: Partial<ShortcutActions["view"]> = {}) {
   const calls: string[] = [];
   const log = (name: string) => () => { calls.push(name); };
   const a: ShortcutActions = {
     notes: [], selected: [0], playbackTime: 37,
-    view: { mode: "spec", start: 0, windowSeconds: 12, pitchBottom: 24, visibleNotes: 60 },
+    view: { mode: "spec", start: 0, windowSeconds: 12, pitchBottom: 24, visibleNotes: 60, ...viewOverrides },
     nudgeSeconds: .25,
     openAudio: log("open"), saveProject: log("save"), saveProjectAs: log("saveAs"),
     loadProject: log("load"), importMidi: log("import"), exportMidi: log("export"),
@@ -147,4 +147,20 @@ test("explicit Ctrl+Shift actions and Ctrl+Alt+A still work", () => {
     "saveAs", "redo", "move:-0.25,0", "move:0.25,0",
     "move:0,1", "move:0,-1", "angle",
   ]);
+});
+
+test("keyboard pitch scrolling never moves the view outside MIDI 0..127", () => {
+  const upper = setup({ pitchBottom: 65, visibleNotes: 60 });
+  assert.equal(upper.press("w"), true);
+  assert.equal(upper.press("ArrowUp"), true);
+  assert.equal(upper.press("ArrowUp", { ctrlKey: true }), true);
+  assert.deepEqual(upper.calls, [
+    'view:{"pitchBottom":68}',
+    'view:{"pitchBottom":66}',
+    'view:{"pitchBottom":68}',
+  ]);
+  const lower = setup({ pitchBottom: 0, visibleNotes: 128 });
+  assert.equal(lower.press("s"), true);
+  assert.equal(lower.press("ArrowDown"), true);
+  assert.deepEqual(lower.calls, ['view:{"pitchBottom":0}', 'view:{"pitchBottom":0}']);
 });
