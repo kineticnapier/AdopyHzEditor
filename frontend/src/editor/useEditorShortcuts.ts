@@ -1,11 +1,7 @@
 import { useEffect } from "react";
 import type { BackendApi } from "./bridge";
 import { dispatchEditorShortcut, type ShortcutActions } from "./shortcutDispatch";
-
-function isTextEditingTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  return Boolean(element?.closest("input,select,textarea,[contenteditable='true']"));
-}
+import { isTextEditingTarget } from "./shortcutTarget";
 
 type Args = ShortcutActions & {
   disabled: boolean;
