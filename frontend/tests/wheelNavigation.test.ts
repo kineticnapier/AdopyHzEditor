@@ -47,3 +47,28 @@ test("zero movement is ignored and line-mode horizontal scrolling is supported",
   assert.equal(wheelViewChange(wheel(0, 0), view), null);
   assert.deepEqual(wheelViewChange(wheel(3, 0, { deltaMode: 1 }), view), { start: 20.96 });
 });
+
+
+test("small pixel deltas pan proportionally instead of a full wheel step", () => {
+  const onePixel = wheelViewChange(wheel(0, 1), view);
+  const oneTick = wheelViewChange(wheel(0, 120), view);
+  assert.ok(onePixel?.start !== undefined && oneTick?.start !== undefined);
+  assert.ok(Math.abs((onePixel.start - view.start) * 120 - (oneTick.start - view.start)) < 1e-10);
+  assert.ok(Math.abs((wheelViewChange(wheel(0, -1), view)?.start ?? NaN) - (view.start - .008)) < 1e-10);
+});
+
+test("vertical line and page deltas normalize to one nominal tick", () => {
+  assert.deepEqual(wheelViewChange(wheel(0, 3, { deltaMode: 1 }), view), { start: 20.96 });
+  assert.deepEqual(wheelViewChange(wheel(0, -1, { deltaMode: 2 }), view), { start: 19.04 });
+});
+
+test("Ctrl trackpad zoom scales with delta and preserves pointer time", () => {
+  const anchor = { timeRatio: .75, pitchRatio: .5 };
+  const change = wheelViewChange(wheel(0, -60, { ctrlKey: true }), view, anchor);
+  assert.ok(change?.windowSeconds !== undefined && change.start !== undefined);
+  assert.ok(Math.abs(change.windowSeconds - view.windowSeconds * Math.sqrt(.85)) < 1e-10);
+  assert.ok(Math.abs(change.start + anchor.timeRatio * change.windowSeconds -
+    (view.start + anchor.timeRatio * view.windowSeconds)) < 1e-10);
+  const out = wheelViewChange(wheel(0, 60, { ctrlKey: true }), view);
+  assert.ok(Math.abs((out?.windowSeconds ?? NaN) - view.windowSeconds * Math.sqrt(1.18)) < 1e-10);
+});
