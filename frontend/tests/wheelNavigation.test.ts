@@ -72,3 +72,37 @@ test("Ctrl trackpad zoom scales with delta and preserves pointer time", () => {
   const out = wheelViewChange(wheel(0, 60, { ctrlKey: true }), view);
   assert.ok(Math.abs((out?.windowSeconds ?? NaN) - view.windowSeconds * Math.sqrt(1.18)) < 1e-10);
 });
+
+test("tiny Shift wheel deltas accumulate to one pitch step without a full-step jump", () => {
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  let current = { ...view };
+  for (let i = 0; i < 39; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), current, undefined, accumulator), null);
+  }
+  const change = wheelViewChange(wheel(0, -1, { shiftKey: true }), current, undefined, accumulator);
+  assert.deepEqual(change, { pitchBottom: 41 });
+  current = { ...current, ...change };
+  assert.equal(wheelViewChange(wheel(0, 1, { shiftKey: true }), current, undefined, accumulator), null);
+});
+
+test("tiny Alt wheel deltas accumulate to one visible-note step", () => {
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 29; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { altKey: true }), view, undefined, accumulator), null);
+  }
+  assert.deepEqual(wheelViewChange(wheel(0, -1, { altKey: true }), view, undefined, accumulator),
+    { visibleNotes: 47, pitchBottom: 40 });
+});
+
+test("changing wheel modifiers or using horizontal pan clears fractional pitch carry", () => {
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 20; i++) wheelViewChange(wheel(0, -1, { shiftKey: true }), view, undefined, accumulator);
+  assert.equal(wheelViewChange(wheel(0, -1, { altKey: true }), view, undefined, accumulator), null);
+  for (let i = 0; i < 20; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), view, undefined, accumulator), null);
+  }
+  assert.ok(wheelViewChange(wheel(120, 0), view, undefined, accumulator)?.start !== undefined);
+  for (let i = 0; i < 20; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), view, undefined, accumulator), null);
+  }
+});
