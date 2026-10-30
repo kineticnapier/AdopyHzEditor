@@ -164,7 +164,30 @@ test("keyboard pitch scrolling never moves the view outside MIDI 0..127", () => 
   const lower = setup({ pitchBottom: 0, visibleNotes: 128 });
   assert.equal(lower.press("s"), true);
   assert.equal(lower.press("ArrowDown"), true);
-  assert.deepEqual(lower.calls, ['view:{"pitchBottom":0}', 'view:{"pitchBottom":0}']);
+  assert.deepEqual(lower.calls, []);
+});
+
+test("keyboard pitch keys at MIDI boundaries do not request unchanged views", () => {
+  const upper = setup({ pitchBottom: 68, visibleNotes: 60 });
+  for (const [key, mods] of [
+    ["w", {}], ["ArrowUp", {}], ["ArrowUp", { ctrlKey: true }],
+  ] as const) assert.equal(upper.press(key, mods), true);
+  assert.deepEqual(upper.calls, []);
+  assert.equal(upper.press("s"), true);
+  assert.deepEqual(upper.calls, ['view:{"pitchBottom":56}']);
+
+  const lower = setup({ pitchBottom: 0, visibleNotes: 60 });
+  for (const [key, mods] of [
+    ["s", {}], ["ArrowDown", {}], ["ArrowDown", { ctrlKey: true }],
+  ] as const) assert.equal(lower.press(key, mods), true);
+  assert.deepEqual(lower.calls, []);
+  assert.equal(lower.press("w"), true);
+  assert.deepEqual(lower.calls, ['view:{"pitchBottom":12}']);
+
+  const full = setup({ pitchBottom: 0, visibleNotes: 128 });
+  assert.equal(full.press("w"), true);
+  assert.equal(full.press("s"), true);
+  assert.deepEqual(full.calls, []);
 });
 
 test("global Escape clears Frequency Tracks before Notes", () => {

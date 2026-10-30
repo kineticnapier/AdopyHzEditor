@@ -79,8 +79,11 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (plain && key === "arrowleft") return handled(() => a.seek(event.shiftKey ? -5 : -1));
   if (plain && key === "arrowright") return handled(() => a.seek(event.shiftKey ? 5 : 1));
   // The shortcut must not request a viewport outside MIDI 0..127.
-  const scrollPitch = (delta: number) =>
-    a.updateView({ pitchBottom: Math.max(0, Math.min(128 - a.view.visibleNotes, a.view.pitchBottom + delta)) });
+  const scrollPitch = (delta: number) => {
+    const pitchBottom = Math.max(0, Math.min(128 - a.view.visibleNotes, a.view.pitchBottom + delta));
+    // Do not disable playback follow or enqueue set_view when already at the MIDI boundary.
+    if (pitchBottom !== a.view.pitchBottom) a.updateView({ pitchBottom });
+  };
   if ((plain && key === "w") || (ctrl && !event.altKey && key === "arrowup")) return handled(() => scrollPitch(12));
   if ((plain && key === "s") || (ctrl && !event.altKey && key === "arrowdown")) return handled(() => scrollPitch(-12));
   if (plain && key === "arrowup") return handled(() => scrollPitch(1));
