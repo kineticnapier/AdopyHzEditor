@@ -189,14 +189,23 @@ jobs:
         working-directory: frontend
         run: npm install --no-audit --no-fund
 
+      # npm sometimes omits Rollup's platform-specific optional package.
+      - name: Verify Rollup Linux native binary
+        working-directory: frontend
+        run: |
+          if ! node -e "require('rollup')" >/dev/null 2>&1; then
+            npm install --no-save --no-package-lock --no-audit --no-fund @rollup/rollup-linux-x64-gnu@4.66.0
+          fi
+          node -e "require('rollup')"
+
       - name: Playback follow frontend tests
         working-directory: frontend
         run: npm run test:follow
 
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-
       - name: Frontend regression tests
         working-directory: frontend
         run: npm test
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
