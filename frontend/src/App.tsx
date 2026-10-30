@@ -15,7 +15,7 @@ import {
 } from "./dialogs/ToolDialogs";
 import { useDialogAccessibility } from "./dialogs/useDialogAccessibility";
 import Timeline from "./editor/Timeline";
-import { clampPitchViewChange } from "./editor/pitchViewport";
+import { clampPitchViewChange, hasEffectiveViewChange } from "./editor/pitchViewport";
 import TopToolbar from "./components/TopToolbar";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
 import {
@@ -699,6 +699,8 @@ export default function App() {
     }
     // Keep optimistic canvas coordinates within the same MIDI bounds as Bridge.set_view.
     const normalized = clampPitchViewChange(view, changes);
+    // A clamped or repeated input must not cancel follow or enqueue set_view.
+    if (!hasEffectiveViewChange(view, normalized)) return;
     if (Object.keys(normalized).some((key) => key !== "mode"))
       setFollowPlayback(false);
     if (normalized.mode === "notes") {

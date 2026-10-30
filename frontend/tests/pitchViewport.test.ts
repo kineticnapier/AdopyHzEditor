@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { clampPitchViewChange, pitchBottomToRevealNote } from "../src/editor/pitchViewport.ts";
+import { clampPitchViewChange, hasEffectiveViewChange, pitchBottomToRevealNote } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
 
 const view: ViewState = {
@@ -44,4 +44,29 @@ test("canvas keyboard note navigation uses the shared viewport bound policy", ()
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   assert.match(source, /const nextPitchBottom = pitchBottomToRevealNote\(props\.view, note\.midi\)/);
   assert.match(source, /nextPitchBottom !== null\) changes\.pitchBottom = nextPitchBottom/);
+});
+
+
+test("unchanged or empty viewport actions do not dispatch another update", () => {
+  assert.equal(hasEffectiveViewChange(view, {}), false);
+  assert.equal(hasEffectiveViewChange(view, { mode: "both" }), false);
+  assert.equal(hasEffectiveViewChange(view, { start: 0, windowSeconds: 12 }), false);
+  assert.equal(hasEffectiveViewChange(view, { pitchBottom: 40, visibleNotes: 60 }), false);
+});
+
+test("clamped pitch inputs that leave the viewport unchanged are ignored", () => {
+  const full = { ...view, pitchBottom: 0, visibleNotes: 128 };
+  assert.equal(hasEffectiveViewChange(full, clampPitchViewChange(full, { pitchBottom: 30 })), false);
+  assert.equal(hasEffectiveViewChange(full, clampPitchViewChange(full, { visibleNotes: 200 })), false);
+});
+
+test("real time, mode, and pitch changes still dispatch", () => {
+  assert.equal(hasEffectiveViewChange(view, { start: 1 }), true);
+  assert.equal(hasEffectiveViewChange(view, { mode: "notes" }), true);
+  assert.equal(hasEffectiveViewChange(view, clampPitchViewChange(view, { visibleNotes: 48 })), true);
+});
+
+test("App filters no-op view changes before disabling playback follow", () => {
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(source, /const normalized = clampPitchViewChange\(view, changes\);[\s\S]*?if \(!hasEffectiveViewChange\(view, normalized\)\) return;[\s\S]*?setFollowPlayback\(false\)/);
 });

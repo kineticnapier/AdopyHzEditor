@@ -23,3 +23,8 @@ export function pitchBottomToRevealNote(
   if (midi >= view.pitchBottom && midi < view.pitchBottom + view.visibleNotes) return null;
   return Math.max(0, Math.min(128 - view.visibleNotes, Math.round(midi - view.visibleNotes / 2)));
 }
+
+/** Skip view writes that cannot change any displayed value. */
+export function hasEffectiveViewChange(view: ViewState, changes: Partial<ViewState>): boolean {
+  return (Object.keys(changes) as Array<keyof ViewState>).some(key => changes[key] !== view[key]);
+}
