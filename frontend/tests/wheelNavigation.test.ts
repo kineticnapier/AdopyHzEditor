@@ -164,3 +164,24 @@ test("blocked fine pitch gestures clear their carry before reversing", () => {
     assert.equal(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, altCarry), null);
   assert.deepEqual(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, altCarry), { visibleNotes: 7, pitchBottom: narrow.pitchBottom });
 });
+
+test("timeline pan at zero is ignored rather than dispatching a negative or unchanged start", () => {
+  const beginning = { ...view, start: 0 };
+  for (const event of [
+    wheel(0, -120),
+    wheel(-120, 0),
+    wheel(-1, 0, { shiftKey: true }),
+    wheel(0, -1, { deltaMode: 1 }),
+  ]) {
+    assert.equal(wheelViewChange(event, beginning), null);
+  }
+  assert.deepEqual(wheelViewChange(wheel(0, 120), beginning), { start: .96 });
+  assert.deepEqual(wheelViewChange(wheel(120, 0), beginning), { start: .96 });
+});
+
+test("timeline pan crossing zero stops at the boundary and reverses normally", () => {
+  const nearStart = { ...view, start: .1 };
+  assert.deepEqual(wheelViewChange(wheel(0, -120), nearStart), { start: 0 });
+  assert.deepEqual(wheelViewChange(wheel(-120, 0), nearStart), { start: 0 });
+  assert.deepEqual(wheelViewChange(wheel(0, 120), { ...nearStart, start: 0 }), { start: .96 });
+});
