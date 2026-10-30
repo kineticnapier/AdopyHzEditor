@@ -1,5 +1,10 @@
 import type { ViewState } from "./bridge";
 
+/** Convert wheel pixels, lines and pages to the same nominal wheel tick. */
+function wheelTicks(delta: number, deltaMode: number): number {
+  return deltaMode === 1 ? delta / 3 : deltaMode === 2 ? delta : delta / 120;
+}
+
 export type WheelInput = Pick<
   WheelEvent,
   "deltaX" | "deltaY" | "deltaMode" | "shiftKey" | "altKey" | "ctrlKey"
@@ -17,10 +22,11 @@ export function wheelViewChange(
   // Trackpads may report both axes; the dominant axis determines the action.
   // Treat a horizontal-only Ctrl/Alt/Shift gesture as panning, not zooming.
   if (Math.abs(deltaX) > Math.abs(deltaY)) {
-    const units = event.deltaMode === 1 ? deltaX / 3 : event.deltaMode === 2 ? deltaX : deltaX / 120;
+    const units = wheelTicks(deltaX, event.deltaMode);
     return { start: view.start + units * view.windowSeconds * .08 };
   }
 
+  const units = wheelTicks(deltaY, event.deltaMode);
   const sign = deltaY < 0 ? 1 : -1;
   if (event.shiftKey) {
     const maxBottom = Math.max(0, 128 - view.visibleNotes);
@@ -36,10 +42,11 @@ export function wheelViewChange(
     return { visibleNotes, pitchBottom };
   }
   if (event.ctrlKey) {
-    const windowSeconds=view.windowSeconds*(sign>0?.85:1.18);
+    // High-resolution trackpads emit many small deltas: zoom proportionally, not once per event.
+    const windowSeconds=view.windowSeconds*(units<0?Math.pow(.85,-units):Math.pow(1.18,units));
     if(!anchor)return {windowSeconds};
     const time=view.start+anchor.timeRatio*view.windowSeconds;
     return {windowSeconds,start:time-anchor.timeRatio*windowSeconds};
   }
-  return { start: view.start - sign * view.windowSeconds * .08 };
+  return { start: view.start + units * view.windowSeconds * .08 };
 }
