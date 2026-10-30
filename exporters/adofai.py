@@ -1156,7 +1156,7 @@ def build_adofai_debug_rows(
                 effective_final = ""
                 if frac > 1e-6 and (limit <= 0 or emitted < limit):
                     effective_final = final_visual_angle(
-                        mode=effective_final_angle_mode,
+                        mode=final_angle_mode,
                         prev_abs=prev_abs,
                         scaled_final_angle=angle * frac,
                         custom_final_angle=final_custom_angle,
