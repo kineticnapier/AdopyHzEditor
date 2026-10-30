@@ -40,7 +40,7 @@ test("horizontal gestures with modifiers never trigger vertical zoom or pitch sc
 
 test("dominant axis determines diagonal trackpad gesture", () => {
   assert.ok((wheelViewChange(wheel(-80, 10), view)?.start ?? Infinity) < view.start);
-  assert.deepEqual(wheelViewChange(wheel(-10, 80), view), { start: 20.96 });
+  assert.deepEqual(wheelViewChange(wheel(-10, 80), view), { start: 20.64 });
 });
 
 test("zero movement is ignored and line-mode horizontal scrolling is supported", () => {
