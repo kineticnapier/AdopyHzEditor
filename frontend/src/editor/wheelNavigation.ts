@@ -88,6 +88,10 @@ export function wheelViewChange(
       if (pitchAccumulator) pitchAccumulator.remainder = 0;
       return null;
     }
+    // Once a gesture reaches either MIDI edge, discard its unusable fractional carry.
+    // Otherwise the first reverse gesture may be cancelled by the previous direction.
+    if (pitchAccumulator && (pitchBottom === 0 || pitchBottom === maxBottom))
+      pitchAccumulator.remainder = 0;
     return { pitchBottom };
   }
   if (event.altKey) {
@@ -104,6 +108,9 @@ export function wheelViewChange(
       if (pitchAccumulator) pitchAccumulator.remainder = 0;
       return null;
     }
+    // Reaching the minimum/maximum span also consumes any leftover outward wheel input.
+    if (pitchAccumulator && (visibleNotes === 6 || visibleNotes === 128))
+      pitchAccumulator.remainder = 0;
     if(!anchor){
       return {visibleNotes,pitchBottom:Math.max(0,Math.min(view.pitchBottom,128-visibleNotes))};
     }

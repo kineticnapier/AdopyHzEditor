@@ -250,3 +250,43 @@ test("outward sub-step Alt gestures at minimum span do not delay reversal", () =
   assert.deepEqual(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, accumulator),
     { visibleNotes: 7, pitchBottom: narrow.pitchBottom });
 });
+
+test("Shift wheel clears fractional carry when arriving at upper MIDI edge", () => {
+  const nearTop = { ...view, pitchBottom: 128 - view.visibleNotes - 1 };
+  const carry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  const outward = wheelViewChange(wheel(0, -60, { shiftKey: true }), nearTop, undefined, carry);
+  assert.deepEqual(outward, { pitchBottom: 128 - view.visibleNotes });
+  assert.equal(carry.remainder, 0);
+  assert.deepEqual(wheelViewChange(wheel(0, 40, { shiftKey: true }), { ...nearTop, ...outward }, undefined, carry),
+    { pitchBottom: nearTop.pitchBottom });
+});
+
+test("Shift wheel clears fractional carry when arriving at lower MIDI edge", () => {
+  const nearBottom = { ...view, pitchBottom: 1 };
+  const carry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  const outward = wheelViewChange(wheel(0, 60, { shiftKey: true }), nearBottom, undefined, carry);
+  assert.deepEqual(outward, { pitchBottom: 0 });
+  assert.equal(carry.remainder, 0);
+  assert.deepEqual(wheelViewChange(wheel(0, -40, { shiftKey: true }), { ...nearBottom, ...outward }, undefined, carry),
+    { pitchBottom: 1 });
+});
+
+test("Alt wheel clears fractional carry when arriving at maximum visible notes", () => {
+  const nearWide = { ...view, pitchBottom: 0, visibleNotes: 127 };
+  const carry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  const outward = wheelViewChange(wheel(0, 45, { altKey: true }), nearWide, undefined, carry);
+  assert.deepEqual(outward, { visibleNotes: 128, pitchBottom: 0 });
+  assert.equal(carry.remainder, 0);
+  assert.deepEqual(wheelViewChange(wheel(0, -30, { altKey: true }), { ...nearWide, ...outward }, undefined, carry),
+    { visibleNotes: 127, pitchBottom: 0 });
+});
+
+test("Alt wheel clears fractional carry when arriving at minimum visible notes", () => {
+  const nearNarrow = { ...view, visibleNotes: 7 };
+  const carry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  const outward = wheelViewChange(wheel(0, -45, { altKey: true }), nearNarrow, undefined, carry);
+  assert.deepEqual(outward, { visibleNotes: 6, pitchBottom: nearNarrow.pitchBottom });
+  assert.equal(carry.remainder, 0);
+  assert.deepEqual(wheelViewChange(wheel(0, 30, { altKey: true }), { ...nearNarrow, ...outward }, undefined, carry),
+    { visibleNotes: 7, pitchBottom: nearNarrow.pitchBottom });
+});
