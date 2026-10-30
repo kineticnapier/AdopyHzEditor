@@ -15,6 +15,7 @@ import {
 } from "./dialogs/ToolDialogs";
 import { useDialogAccessibility } from "./dialogs/useDialogAccessibility";
 import Timeline from "./editor/Timeline";
+import { clampTimeViewChange } from "./editor/timelineNavigation";
 import { clampPitchViewChange, hasEffectiveViewChange } from "./editor/pitchViewport";
 import TopToolbar from "./components/TopToolbar";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
@@ -697,8 +698,9 @@ export default function App() {
       setStatus("プロジェクト処理中は表示範囲を変更できません");
       return;
     }
-    // Keep optimistic canvas coordinates within the same MIDI bounds as Bridge.set_view.
-    const normalized = clampPitchViewChange(view, changes);
+    // Match Bridge.set_view time and MIDI bounds before optimistic rendering.
+    const pitchNormalized = clampPitchViewChange(view, changes);
+    const normalized = clampTimeViewChange(view, pitchNormalized, playback.duration);
     // A clamped or repeated input must not cancel follow or enqueue set_view.
     if (!hasEffectiveViewChange(view, normalized)) return;
     if (Object.keys(normalized).some((key) => key !== "mode"))

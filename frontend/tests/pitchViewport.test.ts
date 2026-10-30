@@ -68,5 +68,5 @@ test("real time, mode, and pitch changes still dispatch", () => {
 
 test("App filters no-op view changes before disabling playback follow", () => {
   const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(source, /const normalized = clampPitchViewChange\(view, changes\);[\s\S]*?if \(!hasEffectiveViewChange\(view, normalized\)\) return;[\s\S]*?setFollowPlayback\(false\)/);
+  assert.match(source, /const pitchNormalized = clampPitchViewChange\(view, changes\);[\s\S]*?const normalized = clampTimeViewChange\(view, pitchNormalized, playback\.duration\);[\s\S]*?if \(!hasEffectiveViewChange\(view, normalized\)\) return;[\s\S]*?setFollowPlayback\(false\)/);
 });

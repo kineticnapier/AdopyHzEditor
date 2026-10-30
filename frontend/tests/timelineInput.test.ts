@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { commitNumericEdit } from "../src/settings/numericInputModel.ts";
-import { timelineSliderStart } from "../src/editor/timelineNavigation.ts";
+import { clampTimeViewChange, timelineSliderStart } from "../src/editor/timelineNavigation.ts";
+import { hasEffectiveViewChange } from "../src/editor/pitchViewport.ts";
+import type { ViewState } from "../src/editor/bridge.ts";
 
 test("Timeline Escape cancels a pending edit even when blur sees stale text", () => {
   const original = 12;
@@ -51,4 +53,44 @@ test("Timeline slider rejects invalid values and disables an immovable thumb", (
   assert.match(source, /disabled=\{max <= 0\}/);
   assert.match(source, /timelineSliderStart\(Number\(e\.target\.value\), view\.start, max\)/);
   assert.match(source, /if \(start !== null\) onView\(\{ start \}\)/);
+});
+
+// A numeric time-width edit must use the same bounds as the backend response.
+const endView: ViewState = {
+  mode: "both", start: 48, windowSeconds: 12, pitchBottom: 40, visibleNotes: 60,
+};
+
+test("Timeline width expansion at chart end shifts the start before rendering", () => {
+  assert.deepEqual(clampTimeViewChange(endView, { windowSeconds: 30 }, 60),
+    { windowSeconds: 30, start: 30 });
+  assert.deepEqual(clampTimeViewChange(endView, { windowSeconds: 120 }, 60),
+    { windowSeconds: 60, start: 0 });
+  assert.deepEqual(clampTimeViewChange(endView, { start: 48, windowSeconds: 60 }, 60),
+    { start: 0, windowSeconds: 60 });
+});
+
+test("Timeline rejects out-of-range or invalid time values without a false update", () => {
+  const full = { ...endView, start: 0, windowSeconds: 60 };
+  assert.deepEqual(clampTimeViewChange(full, { windowSeconds: 100 }, 60), { windowSeconds: 60 });
+  assert.equal(hasEffectiveViewChange(full, clampTimeViewChange(full, { windowSeconds: 100 }, 60)), false);
+  assert.equal(hasEffectiveViewChange(full, clampTimeViewChange(full, { start: -4 }, 60)), false);
+  assert.equal(hasEffectiveViewChange(full, clampTimeViewChange(full, { start: NaN }, 60)), false);
+  assert.equal(hasEffectiveViewChange(full, clampTimeViewChange(full, { windowSeconds: Infinity }, 60)), false);
+});
+
+test("Timeline time-only pan and zoom-in preserve valid positions", () => {
+  assert.deepEqual(clampTimeViewChange(endView, { start: 100 }, 60), { start: 48 });
+  assert.deepEqual(clampTimeViewChange(endView, { start: -4 }, 60), { start: 0 });
+  assert.deepEqual(clampTimeViewChange(endView, { windowSeconds: 6 }, 60), { windowSeconds: 6 });
+  assert.deepEqual(clampTimeViewChange(endView, { mode: "notes" }, 60), { mode: "notes" });
+});
+
+test("Timeline clamps very short durations to the backend minimum window", () => {
+  assert.deepEqual(clampTimeViewChange({ ...endView, start: 0, windowSeconds: .2 },
+    { windowSeconds: .01 }, .05), { windowSeconds: .2 });
+});
+
+test("App normalizes both pitch and time before the follow-playback no-op guard", () => {
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(source, /const pitchNormalized = clampPitchViewChange\(view, changes\);[\s\S]*?const normalized = clampTimeViewChange\(view, pitchNormalized, playback\.duration\);[\s\S]*?if \(!hasEffectiveViewChange\(view, normalized\)\) return;/);
 });
