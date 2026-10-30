@@ -1,10 +1,10 @@
-/** Keep the Quick Hz preview and the chart write bound to the same form settings. */
-export function quickHzActionPolicy(appending: boolean, hasChart: boolean, previewCurrent: boolean) {
+/** Lock Quick Hz settings and actions while either the chart picker or append is pending. */
+export function quickHzActionPolicy(busy: boolean, hasChart: boolean, previewCurrent: boolean) {
   return {
-    canEdit: !appending,
-    canChooseChart: !appending,
-    canAppend: !appending && hasChart && previewCurrent,
-    canOutput: !appending && previewCurrent,
-    canClose: !appending,
+    canEdit: !busy,
+    canChooseChart: !busy,
+    canAppend: !busy && hasChart && previewCurrent,
+    canOutput: !busy && previewCurrent,
+    canClose: !busy,
   };
 }
