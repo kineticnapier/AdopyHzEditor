@@ -18,6 +18,7 @@ export type ShortcutActions = {
 
 export type ShortcutEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "preventDefault"> & {
   target?: EventTarget | null;
+  repeat?: boolean;
   getModifierState?: (key: string) => boolean;
 };
 
@@ -43,6 +44,17 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (ctrl && event.shiftKey && key !== "s" && key !== "z" &&
       key !== "arrowleft" && key !== "arrowright" &&
       key !== "arrowup" && key !== "arrowdown") return;
+
+  // Held file shortcuts must not queue duplicate saves or native dialogs.
+  // Consume repeats to avoid falling through to the browser shortcut.
+  if (event.repeat && (
+    key === "f1" ||
+    (ctrl && !event.altKey &&
+      (key === "s" || (!event.shiftKey && ["o", "l", "i", "m", "e"].includes(key))))
+  )) {
+    event.preventDefault();
+    return;
+  }
 
   if (key === "f1") return handled(a.openHelp);
   if (ctrl && key === "o") return handled(a.openAudio);
