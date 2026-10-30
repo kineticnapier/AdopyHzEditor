@@ -3,6 +3,14 @@ export function canvasEscapeAction(dragging: boolean): "cancel-drag" | "clear-se
   return dragging ? "cancel-drag" : "clear-selection";
 }
 
+/** Clear both selection layers when Escape is pressed without an active drag.
+ * Clearing Track first also invalidates an in-flight range lookup in App.
+ */
+export function clearIdleCanvasSelection(clearTracks: () => void, clearNotes: () => void): void {
+  clearTracks();
+  clearNotes();
+}
+
 /** Only one pointer can own an edit gesture at a time. */
 export function canStartCanvasGesture(activePointerId: number | null): boolean {
   return activePointerId === null;
