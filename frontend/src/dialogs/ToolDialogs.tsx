@@ -256,6 +256,7 @@ export function BlankWorkspaceDialog({
 export function QuickHzDialog({ api, onClose, onStatus }: Common) {
   const appendOnce = useRef(createExclusiveAsyncAction());
   const [appending, setAppending] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const [opts, setOpts] = useState<QuickHzOptions>({
     bpm: 175,
     hz: 16,
@@ -271,7 +272,8 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
     [error, setError] = useState(""),
     [chart, setChart] = useState("");
   const optsKey = JSON.stringify(opts), resultCurrent = previewIsCurrent(result, resultKey, optsKey);
-  const actions = quickHzActionPolicy(appending, Boolean(chart), resultCurrent);
+  const busy = appending || choosing;
+  const actions = quickHzActionPolicy(busy, Boolean(chart), resultCurrent);
   useEffect(() => {
     let alive = true;
     const requestedKey = optsKey;
@@ -301,23 +303,30 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
     };
   }, [api, opts, optsKey]);
   async function chooseChart() {
-    try {
-      const x = await api.choose_quick_hz_chart();
-      onStatus(x.status);
-      if (x.ok && x.path) {
-        setChart(x.path);
-        setOpts((o) => ({
-          ...o,
-          startFloor: x.tailFloor ?? o.startFloor,
-          endFloor: Math.max(
-            o.endFloor,
-            (x.tailFloor ?? 0) + Math.max(1, o.count),
-          ),
-        }));
+    // File selection and chart append must not overlap: a late picker result
+    // could otherwise change the destination while a write is in progress.
+    await appendOnce.current(async () => {
+      setChoosing(true);
+      try {
+        const x = await api.choose_quick_hz_chart();
+        onStatus(x.status);
+        if (x.ok && x.path) {
+          setChart(x.path);
+          setOpts((o) => ({
+            ...o,
+            startFloor: x.tailFloor ?? o.startFloor,
+            endFloor: Math.max(
+              o.endFloor,
+              (x.tailFloor ?? 0) + Math.max(1, o.count),
+            ),
+          }));
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setChoosing(false);
       }
-    } catch (e) {
-      setError(String(e));
-    }
+    });
   }
   async function append() {
     if (!chart) {
@@ -361,7 +370,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
     );
   }
   return (
-    <Modal title="Quick Hz ツール" onClose={onClose} wide locked={appending}>
+    <Modal title="Quick Hz ツール" onClose={onClose} wide locked={busy}>
       <div className="dialog-body quick-hz-layout">
         <section className="tool-form">
           <Field label="BPM">
