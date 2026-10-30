@@ -72,9 +72,16 @@ export function wheelViewChange(
 
   const units = wheelTicks(deltaY, event.deltaMode);
   if (event.shiftKey) {
-    const steps = pitchWheelSteps(-3 * units, "shift", pitchAccumulator);
-    if (steps === 0) return null;
+    const pitchDelta = -3 * units;
     const maxBottom = Math.max(0, 128 - view.visibleNotes);
+    // Even sub-step outward gestures must not leave carry that delays reversing.
+    if ((pitchDelta > 0 && view.pitchBottom >= maxBottom) ||
+        (pitchDelta < 0 && view.pitchBottom <= 0)) {
+      resetPitchAccumulator();
+      return null;
+    }
+    const steps = pitchWheelSteps(pitchDelta, "shift", pitchAccumulator);
+    if (steps === 0) return null;
     const pitchBottom = Math.max(0, Math.min(maxBottom, view.pitchBottom + steps));
     // A clamped gesture must not cancel playback follow or enqueue a redundant API write.
     if (pitchBottom === view.pitchBottom) {
@@ -84,7 +91,13 @@ export function wheelViewChange(
     return { pitchBottom };
   }
   if (event.altKey) {
-    const steps = pitchWheelSteps(4 * units, "alt", pitchAccumulator);
+    const spanDelta = 4 * units;
+    if ((spanDelta > 0 && view.visibleNotes >= 128) ||
+        (spanDelta < 0 && view.visibleNotes <= 6)) {
+      resetPitchAccumulator();
+      return null;
+    }
+    const steps = pitchWheelSteps(spanDelta, "alt", pitchAccumulator);
     if (steps === 0) return null;
     const visibleNotes = Math.max(6, Math.min(128, view.visibleNotes + steps));
     if (visibleNotes === view.visibleNotes) {

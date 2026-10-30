@@ -222,3 +222,31 @@ test("Ctrl zoom out on a full-duration view is a no-op, zoom in still works", ()
   assert.ok(zoomIn.windowSeconds < 60);
   assert.ok(zoomIn.start >= 0 && zoomIn.start <= 60 - zoomIn.windowSeconds);
 });
+
+test("outward sub-step Shift gestures at the upper edge do not delay reversal", () => {
+  const top = { ...view, pitchBottom: 128 - view.visibleNotes };
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 20; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), top, undefined, accumulator), null);
+  }
+  assert.equal(accumulator.remainder, 0);
+  for (let i = 0; i < 39; i++) {
+    assert.equal(wheelViewChange(wheel(0, 1, { shiftKey: true }), top, undefined, accumulator), null);
+  }
+  assert.deepEqual(wheelViewChange(wheel(0, 1, { shiftKey: true }), top, undefined, accumulator),
+    { pitchBottom: top.pitchBottom - 1 });
+});
+
+test("outward sub-step Alt gestures at minimum span do not delay reversal", () => {
+  const narrow = { ...view, visibleNotes: 6 };
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 15; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { altKey: true }), narrow, undefined, accumulator), null);
+  }
+  assert.equal(accumulator.remainder, 0);
+  for (let i = 0; i < 29; i++) {
+    assert.equal(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, accumulator), null);
+  }
+  assert.deepEqual(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, accumulator),
+    { visibleNotes: 7, pitchBottom: narrow.pitchBottom });
+});
