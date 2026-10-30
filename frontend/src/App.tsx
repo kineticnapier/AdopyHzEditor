@@ -1079,6 +1079,12 @@ export default function App() {
       /* Cursor diagnostics must not interrupt editing. */
     }
   }
+  function changeTrackSelection(selection: TrackSelectionState) {
+    // Inspector edits must supersede an in-flight canvas range lookup too.
+    trackSelectionRequests.current.invalidate();
+    setTrackSelection(selection);
+    if (selection.ids.length) setPanelOpen(true);
+  }
   async function findTracks(range: TrackSelectionRange): Promise<number[] | null> {
     if (!api || stateTransitionPending.current > 0) return null;
     const generation = documentGeneration.current;
@@ -1309,11 +1315,7 @@ export default function App() {
               onView={updateView}
               onCursorMove={(time, midi) => void cursorMoved(time, midi)}
               onTrackHover={setHoveredTrack}
-              onTrackSelectionChange={(selection) => {
-                trackSelectionRequests.current.invalidate();
-                setTrackSelection(selection);
-                if (selection.ids.length) setPanelOpen(true);
-              }}
+              onTrackSelectionChange={changeTrackSelection}
               onFindTracks={findTracks}
             />
             {shouldShowCanvasEmptyHint(audioName, notes.length) && (
@@ -1377,7 +1379,7 @@ export default function App() {
             onStateAction={runStateAction}
             onQueuedMutation={queueExternalMutation}
             onStatus={setStatus}
-            onTrackSelectionChange={setTrackSelection}
+            onTrackSelectionChange={changeTrackSelection}
             onConvertTracks={convertSelectedTracks}
           />
         )}

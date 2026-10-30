@@ -102,3 +102,37 @@ test("successful current Track lookup returns ids", async () => {
   );
   assert.deepEqual(ids, [7, 3]);
 });
+
+test("canvas and Inspector share the Track selection invalidation path", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const handler = app.match(/function changeTrackSelection\(selection: TrackSelectionState\) \{([\s\S]*?)\n  \}/);
+  assert.ok(handler, "shared selection handler must exist");
+  const invalidation = handler[1].indexOf("trackSelectionRequests.current.invalidate()");
+  const update = handler[1].indexOf("setTrackSelection(selection)");
+  assert.ok(invalidation >= 0 && update > invalidation, "pending lookup must be invalidated before applying manual selection");
+  assert.equal(app.match(/onTrackSelectionChange=\{changeTrackSelection\}/g)?.length, 2);
+  assert.doesNotMatch(app, /onTrackSelectionChange=\{setTrackSelection\}/);
+});
+
+test("Inspector clear during a pending Track lookup cannot be overwritten", async () => {
+  const gate = new LatestRequestGate();
+  const ticket = gate.issue();
+  let complete!: (value: { trackIds: number[]; status: string }) => void;
+  const response = new Promise<{ trackIds: number[]; status: string }>(resolve => { complete = resolve; });
+  const messages: string[] = [];
+  let selected = [4];
+  const pending = resolveTrackLookup(
+    () => response,
+    () => gate.isCurrent(ticket),
+    message => messages.push(message),
+  );
+  // The shared handler invalidates the request before clearing the Inspector.
+  gate.invalidate();
+  selected = [];
+  complete({ trackIds: [99], status: "old result" });
+  const ids = await pending;
+  if (ids !== null) selected = ids;
+  assert.equal(ids, null);
+  assert.deepEqual(selected, []);
+  assert.deepEqual(messages, []);
+});
