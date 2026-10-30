@@ -4,6 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSp
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange } from "./wheelNavigation";
+import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 import { canStartCanvasGesture, canvasEscapeAction, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
 
@@ -465,8 +466,8 @@ export default function EditorCanvas(props: Props) {
     const note = props.notes[next], changes: Partial<ViewState> = {};
     if (note.start < props.view.start || note.end > props.view.start + props.view.windowSeconds)
       changes.start = Math.max(0, note.start - props.view.windowSeconds * .15);
-    if (note.midi < props.view.pitchBottom || note.midi > props.view.pitchBottom + props.view.visibleNotes)
-      changes.pitchBottom = Math.max(0, Math.min(127 - props.view.visibleNotes, note.midi - props.view.visibleNotes / 2));
+    const nextPitchBottom = pitchBottomToRevealNote(props.view, note.midi);
+    if (nextPitchBottom !== null) changes.pitchBottom = nextPitchBottom;
     if (Object.keys(changes).length) void props.onView(changes);
   }
   useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const handler=(event:WheelEvent)=>{event.preventDefault();const rect=canvas.getBoundingClientRect(),changes=wheelViewChange(event,props.view,{timeRatio:Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),pitchRatio:Math.max(0,Math.min(1,(rect.bottom-event.clientY)/Math.max(1,rect.height)))});if(changes)void props.onView(changes)};canvas.addEventListener("wheel",handler,{passive:false});return()=>canvas.removeEventListener("wheel",handler)},[props.onView,props.view]);

@@ -14,3 +14,12 @@ export function clampPitchViewChange(
     pitchBottom,
   };
 }
+
+/** A note at the upper edge is outside the half-open MIDI viewport. */
+export function pitchBottomToRevealNote(
+  view: Pick<ViewState, "pitchBottom" | "visibleNotes">,
+  midi: number,
+): number | null {
+  if (midi >= view.pitchBottom && midi < view.pitchBottom + view.visibleNotes) return null;
+  return Math.max(0, Math.min(128 - view.visibleNotes, Math.round(midi - view.visibleNotes / 2)));
+}

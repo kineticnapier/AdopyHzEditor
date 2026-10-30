@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clampPitchViewChange } from "../src/editor/pitchViewport.ts";
+import { readFileSync } from "node:fs";
+import { clampPitchViewChange, pitchBottomToRevealNote } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
 
 const view: ViewState = {
@@ -22,4 +23,25 @@ test("changing pitch span also adjusts the lower bound", () => {
 test("non-pitch changes preserve their original payload", () => {
   const change = { start: 3, windowSeconds: 6 };
   assert.equal(clampPitchViewChange(view, change), change);
+});
+
+test("keyboard navigation reveals a note exactly at the exclusive upper pitch edge", () => {
+  const local = { ...view, pitchBottom: 60, visibleNotes: 12 };
+  assert.equal(pitchBottomToRevealNote(local, 71), null);
+  assert.equal(pitchBottomToRevealNote(local, 72), 66);
+  assert.equal(pitchBottomToRevealNote(local, 60), null);
+  assert.equal(pitchBottomToRevealNote(local, 59), 53);
+});
+
+test("keyboard navigation can reach MIDI 127 without overflowing the viewport", () => {
+  assert.equal(pitchBottomToRevealNote({ ...view, pitchBottom: 60 }, 127), 68);
+  assert.equal(pitchBottomToRevealNote({ ...view, pitchBottom: 68 }, 127), null);
+  assert.equal(pitchBottomToRevealNote({ ...view, pitchBottom: 0, visibleNotes: 128 }, 127), null);
+  assert.equal(pitchBottomToRevealNote({ ...view, pitchBottom: 12, visibleNotes: 6 }, 0), 0);
+});
+
+test("canvas keyboard note navigation uses the shared viewport bound policy", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /const nextPitchBottom = pitchBottomToRevealNote\(props\.view, note\.midi\)/);
+  assert.match(source, /nextPitchBottom !== null\) changes\.pitchBottom = nextPitchBottom/);
 });
