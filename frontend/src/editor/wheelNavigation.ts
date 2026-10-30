@@ -81,7 +81,8 @@ export function wheelViewChange(
   resetPitchAccumulator();
   if (event.ctrlKey) {
     // High-resolution trackpads emit many small deltas: zoom proportionally, not once per event.
-    const windowSeconds=view.windowSeconds*(units<0?Math.pow(.85,-units):Math.pow(1.18,units));
+    // Use reciprocal zoom factors so an equal reverse gesture restores the viewport.
+    const windowSeconds=view.windowSeconds*Math.pow(.85,-units);
     if(!anchor)return {windowSeconds};
     const time=view.start+anchor.timeRatio*view.windowSeconds;
     return {windowSeconds,start:time-anchor.timeRatio*windowSeconds};
