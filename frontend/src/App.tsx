@@ -27,6 +27,7 @@ import {
   spectrumRegionKey,
 } from "./editor/directSpectrum";
 import type { TrackSelectionRange } from "./editor/trackSelection";
+import { resolveTrackLookup } from "./editor/trackLookup";
 import { midiLabel, midiToHz } from "./editor/musicMath";
 import { formatCursorPeakLabel } from "./editor/cursorStatus";
 import { shouldShowCanvasEmptyHint } from "./editor/emptyState";
@@ -1086,21 +1087,16 @@ export default function App() {
       generation === documentGeneration.current &&
       stateTransitionPending.current === 0 &&
       trackSelectionRequests.current.isCurrent(request);
-    try {
-      const result = await api.find_frequency_tracks(
+    return resolveTrackLookup(
+      () => api.find_frequency_tracks(
         range.startTime,
         range.endTime,
         range.minMidi,
         range.maxMidi,
-      );
-      if (!isCurrent()) return null;
-      setStatus(result.status);
-      return result.trackIds;
-    } catch (e) {
-      if (!isCurrent()) return null;
-      setStatus(String(e));
-      return [];
-    }
+      ),
+      isCurrent,
+      setStatus,
+    );
   }
   async function convertTracks(
     trackIds: number[],

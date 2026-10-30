@@ -7,6 +7,7 @@ import {
   normalizeTrackRange,
   updateTrackSelection,
 } from "../src/editor/trackSelection.ts";
+import { resolveTrackLookup } from "../src/editor/trackLookup.ts";
 
 test("single track click replaces the selection and ctrl-click toggles", () => {
   assert.deepEqual(updateTrackSelection([1, 2], 7, false), [7]);
@@ -50,7 +51,54 @@ test("Track range lookup has document and selection guards at both ends", () => 
   assert.match(app, /const request = trackSelectionRequests\.current\.issue\(\)/);
   assert.match(app, /generation === documentGeneration\.current/);
   assert.match(app, /trackSelectionRequests\.current\.isCurrent\(request\)/);
-  assert.match(app, /if \(!isCurrent\(\)\) return null;/);
+  assert.match(app, /return resolveTrackLookup\(/);
+  const lookupSource = readFileSync(new URL("../src/editor/trackLookup.ts", import.meta.url), "utf8");
+  assert.match(lookupSource, /if \(!isCurrent\(\)\) return null;/);
   assert.match(canvas, /onFindTracks\(range: TrackSelectionRange\): Promise<number\[\] \| null>/);
   assert.match(canvas, /if\(ids===null\)return;/);
+});
+
+test("failed Track lookup preserves the previous selection", async () => {
+  let selected = [4];
+  const messages: string[] = [];
+  const ids = await resolveTrackLookup(
+    async () => { throw new Error("lookup unavailable"); },
+    () => true,
+    (message) => messages.push(message),
+  );
+  if (ids !== null) selected = ids;
+  assert.equal(ids, null);
+  assert.deepEqual(selected, [4]);
+  assert.match(messages[0], /lookup unavailable/);
+});
+
+test("successful empty Track lookup still clears a non-additive selection", async () => {
+  const messages: string[] = [];
+  const ids = await resolveTrackLookup(
+    async () => ({ trackIds: [], status: "no tracks" }),
+    () => true,
+    (message) => messages.push(message),
+  );
+  assert.deepEqual(ids, []);
+  assert.deepEqual(messages, ["no tracks"]);
+});
+
+test("stale Track lookup errors neither change selection nor show an obsolete error", async () => {
+  const messages: string[] = [];
+  const ids = await resolveTrackLookup(
+    async () => { throw new Error("stale lookup"); },
+    () => false,
+    (message) => messages.push(message),
+  );
+  assert.equal(ids, null);
+  assert.deepEqual(messages, []);
+});
+
+test("successful current Track lookup returns ids", async () => {
+  const ids = await resolveTrackLookup(
+    async () => ({ trackIds: [7, 3], status: "ok" }),
+    () => true,
+    () => {},
+  );
+  assert.deepEqual(ids, [7, 3]);
 });
