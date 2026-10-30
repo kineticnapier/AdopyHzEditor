@@ -1,5 +1,4 @@
 import type { NoteDto, ViewState } from "./bridge";
-import { clampPitchViewChange } from "./pitchViewport";
 
 export type ShortcutActions = {
   notes: NoteDto[];
@@ -79,8 +78,9 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (plain && key === "3") return handled(() => a.mode("both"));
   if (plain && key === "arrowleft") return handled(() => a.seek(event.shiftKey ? -5 : -1));
   if (plain && key === "arrowright") return handled(() => a.seek(event.shiftKey ? 5 : 1));
+  // The shortcut must not request a viewport outside MIDI 0..127.
   const scrollPitch = (delta: number) =>
-    a.updateView(clampPitchViewChange(a.view, { pitchBottom: a.view.pitchBottom + delta }));
+    a.updateView({ pitchBottom: Math.max(0, Math.min(128 - a.view.visibleNotes, a.view.pitchBottom + delta)) });
   if ((plain && key === "w") || (ctrl && !event.altKey && key === "arrowup")) return handled(() => scrollPitch(12));
   if ((plain && key === "s") || (ctrl && !event.altKey && key === "arrowdown")) return handled(() => scrollPitch(-12));
   if (plain && key === "arrowup") return handled(() => scrollPitch(1));
