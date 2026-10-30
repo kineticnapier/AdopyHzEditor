@@ -6,7 +6,7 @@ import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange } from "./wheelNavigation";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -450,7 +450,7 @@ export default function EditorCanvas(props: Props) {
       }
       keyboardSelectionRef.current = [];
       setKeyboardNote(null);
-      props.onSelect([]);
+      clearIdleCanvasSelection(clearTrackSelection, () => props.onSelect([]));
       return;
     }
     if (!isNoteNavigationKey(event)) return;
