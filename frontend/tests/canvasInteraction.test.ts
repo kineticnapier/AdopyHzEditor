@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -56,4 +57,21 @@ test("foreign pointer up/cancel cannot finish the current gesture", () => {
   assert.equal(finishes, 1);
   assert.equal(isCanvasGesturePointer(null, 7), false);
   assert.equal(canStartCanvasGesture(activePointerId), true);
+});
+
+test("idle Escape clears Track before Note selection", () => {
+  const calls: string[] = [];
+  clearIdleCanvasSelection(() => calls.push("tracks"), () => calls.push("notes"));
+  assert.deepEqual(calls, ["tracks", "notes"]);
+});
+
+test("canvas Escape wires Track invalidation into the idle path only", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onCanvasKeyDown(");
+  const end = source.indexOf("  useEffect(()=>{const canvas=", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /if \(canvasEscapeAction\(drag !== null\) === "cancel-drag"\) \{[\s\S]*?return;\s*\}/);
+  assert.match(handler, /clearIdleCanvasSelection\(clearTrackSelection, \(\) => props\.onSelect\(\[\]\)\)/);
+  assert.equal(handler.match(/clearIdleCanvasSelection\(/g)?.length, 1);
 });
