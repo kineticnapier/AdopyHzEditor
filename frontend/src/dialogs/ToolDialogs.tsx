@@ -257,6 +257,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
   const appendOnce = useRef(createExclusiveAsyncAction());
   const [appending, setAppending] = useState(false);
   const [choosing, setChoosing] = useState(false);
+  const [outputting, setOutputting] = useState<"copy" | "save" | null>(null);
   const [opts, setOpts] = useState<QuickHzOptions>({
     bpm: 175,
     hz: 16,
@@ -272,7 +273,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
     [error, setError] = useState(""),
     [chart, setChart] = useState("");
   const optsKey = JSON.stringify(opts), resultCurrent = previewIsCurrent(result, resultKey, optsKey);
-  const busy = appending || choosing;
+  const busy = appending || choosing || outputting !== null;
   const actions = quickHzActionPolicy(busy, Boolean(chart), resultCurrent);
   useEffect(() => {
     let alive = true;
@@ -353,21 +354,37 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
   }
   async function copy() {
     if (!result?.output || !resultCurrent) return;
-    await runQuickHzOutputAction(
-      "コピー",
-      () => navigator.clipboard.writeText(result.output),
-      () => { setError(""); onStatus("Quick Hz出力をコピーしました"); },
-      setError,
-    );
+    // Share the chart action lock so a slow clipboard request cannot outlive
+    // this dialog or race with a chart chooser/append.
+    await appendOnce.current(async () => {
+      setOutputting("copy");
+      try {
+        await runQuickHzOutputAction(
+          "コピー",
+          () => navigator.clipboard.writeText(result.output),
+          () => { setError(""); onStatus("Quick Hz出力をコピーしました"); },
+          setError,
+        );
+      } finally {
+        setOutputting(null);
+      }
+    });
   }
   async function saveText() {
     if (!result?.output || !resultCurrent) return;
-    await runQuickHzOutputAction(
-      "テキスト保存",
-      () => api.save_quick_hz_text(result.output),
-      x => { setError(""); onStatus(x.status); },
-      setError,
-    );
+    await appendOnce.current(async () => {
+      setOutputting("save");
+      try {
+        await runQuickHzOutputAction(
+          "テキスト保存",
+          () => api.save_quick_hz_text(result.output),
+          x => { setError(""); onStatus(x.status); },
+          setError,
+        );
+      } finally {
+        setOutputting(null);
+      }
+    });
   }
   return (
     <Modal title="Quick Hz ツール" onClose={onClose} wide locked={busy}>
@@ -491,10 +508,10 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           <textarea value={resultCurrent ? result?.output ?? "" : ""} readOnly spellCheck={false} />
           <div className="preview-actions">
             <button onClick={() => void copy()} disabled={!actions.canOutput}>
-              コピー
+              {outputting === "copy" ? "コピー中…" : "コピー"}
             </button>
             <button onClick={() => void saveText()} disabled={!actions.canOutput}>
-              テキスト保存…
+              {outputting === "save" ? "保存中…" : "テキスト保存…"}
             </button>
           </div>
         </section>
