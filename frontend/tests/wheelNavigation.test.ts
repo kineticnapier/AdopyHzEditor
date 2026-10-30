@@ -70,7 +70,7 @@ test("Ctrl trackpad zoom scales with delta and preserves pointer time", () => {
   assert.ok(Math.abs(change.start + anchor.timeRatio * change.windowSeconds -
     (view.start + anchor.timeRatio * view.windowSeconds)) < 1e-10);
   const out = wheelViewChange(wheel(0, 60, { ctrlKey: true }), view);
-  assert.ok(Math.abs((out?.windowSeconds ?? NaN) - view.windowSeconds * Math.sqrt(1.18)) < 1e-10);
+  assert.ok(Math.abs((out?.windowSeconds ?? NaN) - view.windowSeconds / Math.sqrt(.85)) < 1e-10);
 });
 
 test("tiny Shift wheel deltas accumulate to one pitch step without a full-step jump", () => {
@@ -105,4 +105,33 @@ test("changing wheel modifiers or using horizontal pan clears fractional pitch c
   for (let i = 0; i < 20; i++) {
     assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), view, undefined, accumulator), null);
   }
+});
+
+test("equal opposite Ctrl wheel gestures restore zoom and anchored time", () => {
+  const anchor = { timeRatio: .8, pitchRatio: .25 };
+  for (const delta of [120, 60, 1, -120, -60, -1]) {
+    const first = wheelViewChange(wheel(0, delta, { ctrlKey: true }), view, anchor);
+    assert.ok(first?.windowSeconds !== undefined && first.start !== undefined);
+    const second = wheelViewChange(
+      wheel(0, -delta, { ctrlKey: true }),
+      { ...view, ...first },
+      anchor,
+    );
+    assert.ok(second?.windowSeconds !== undefined && second.start !== undefined);
+    assert.ok(Math.abs(second.windowSeconds - view.windowSeconds) < 1e-10);
+    assert.ok(Math.abs(second.start - view.start) < 1e-10);
+  }
+});
+
+test("many small alternating Ctrl wheel deltas do not accumulate zoom drift", () => {
+  let current = { ...view };
+  for (let i = 0; i < 120; i++) {
+    const forward = wheelViewChange(wheel(0, 1, { ctrlKey: true }), current);
+    assert.ok(forward?.windowSeconds !== undefined);
+    current = { ...current, ...forward };
+    const reverse = wheelViewChange(wheel(0, -1, { ctrlKey: true }), current);
+    assert.ok(reverse?.windowSeconds !== undefined);
+    current = { ...current, ...reverse };
+  }
+  assert.ok(Math.abs(current.windowSeconds - view.windowSeconds) < 1e-9);
 });
