@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { dispatchEditorShortcut, type ShortcutActions, type ShortcutEvent } from "../src/editor/shortcutDispatch.ts";
 
-type Modifiers = Partial<Pick<ShortcutEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "getModifierState">>;
+type Modifiers = Partial<Pick<ShortcutEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat" | "getModifierState">>;
 
 function setup(viewOverrides: Partial<ShortcutActions["view"]> = {}) {
   const calls: string[] = [];
@@ -97,6 +97,36 @@ test("Ctrl+Shift+S and Meta+S commit focused edits before saving", () => {
   assert.equal(press("s", { ctrlKey: true, shiftKey: true }, field), true);
   assert.equal(press("s", { metaKey: true }, field), true);
   assert.deepEqual(calls, ["commit-input", "saveAs", "commit-input", "save"]);
+});
+
+test("held file shortcuts are consumed without repeating save or dialogs", () => {
+  const { calls, press } = setup();
+  const input = {
+    closest: () => ({ blur: () => calls.push("blur") }),
+  } as unknown as EventTarget;
+  for (const [key, mods] of [
+    ["s", { ctrlKey: true, repeat: true }],
+    ["s", { ctrlKey: true, shiftKey: true, repeat: true }],
+    ["s", { metaKey: true, repeat: true }],
+    ["o", { ctrlKey: true, repeat: true }],
+    ["l", { ctrlKey: true, repeat: true }],
+    ["i", { ctrlKey: true, repeat: true }],
+    ["m", { ctrlKey: true, repeat: true }],
+    ["e", { ctrlKey: true, repeat: true }],
+    ["F1", { repeat: true }],
+  ] as const) assert.equal(press(key, mods, input), true, key);
+  assert.deepEqual(calls, []);
+  assert.equal(press("s", { ctrlKey: true }, input), true);
+  assert.deepEqual(calls, ["blur", "save"]);
+});
+
+test("key repeats still support navigation and undo without hijacking unassigned chords", () => {
+  const { calls, press } = setup();
+  assert.equal(press("ArrowRight", { repeat: true }), true);
+  assert.equal(press("ArrowUp", { ctrlKey: true, repeat: true }), true);
+  assert.equal(press("z", { ctrlKey: true, repeat: true }), true);
+  assert.equal(press("o", { ctrlKey: true, shiftKey: true, repeat: true }), false);
+  assert.deepEqual(calls, ["seek:1", 'view:{"pitchBottom":36}', "undo"]);
 });
 
 test("save shortcuts do not blur non-editing targets or fail without a target", () => {
