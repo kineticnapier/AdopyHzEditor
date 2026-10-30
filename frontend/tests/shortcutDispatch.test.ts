@@ -140,6 +140,25 @@ test("save shortcuts do not blur non-editing targets or fail without a target", 
 });
 
 
+test("Document-like keydown targets can save without a closest method", () => {
+  const { calls, press } = setup();
+  const targets = [null, {}, { nodeType: 9 }, { nodeType: 3 }];
+  for (const target of targets) {
+    assert.equal(press("s", { ctrlKey: true }, target as EventTarget | null), true);
+    assert.equal(press("s", { ctrlKey: true, shiftKey: true }, target as EventTarget | null), true);
+  }
+  assert.deepEqual(calls, targets.flatMap(() => ["save", "saveAs"]));
+});
+
+test("non-callable closest on a keydown target never blocks Meta+S", () => {
+  const { calls, press } = setup();
+  const targets = [{ closest: undefined }, { closest: null }, { closest: 5 }];
+  for (const target of targets) {
+    assert.equal(press("s", { metaKey: true }, target as unknown as EventTarget), true);
+  }
+  assert.deepEqual(calls, ["save", "save", "save"]);
+});
+
 test("AltGraph and unassigned Ctrl+Alt chords do not trigger editor actions", () => {
   const { calls, press } = setup();
   const input = {
