@@ -25,7 +25,10 @@ export type ShortcutEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | 
 /** Commit a focused editor field before saving, just as a toolbar click does. */
 function commitFocusedEditBeforeSave(event: ShortcutEvent): void {
   const target = event.target as HTMLElement | null | undefined;
-  const field = target?.closest?.("input,textarea,[contenteditable='true']") as HTMLElement | null | undefined;
+  // A window-level keydown may target Document or another non-Element object.
+  // Optional chaining does not protect against a present, non-callable closest.
+  if (typeof target?.closest !== "function") return;
+  const field = target.closest("input,textarea,[contenteditable='true']") as HTMLElement | null;
   field?.blur();
 }
 
