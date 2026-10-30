@@ -185,3 +185,40 @@ test("timeline pan crossing zero stops at the boundary and reverses normally", (
   assert.deepEqual(wheelViewChange(wheel(-120, 0), nearStart), { start: 0 });
   assert.deepEqual(wheelViewChange(wheel(0, 120), { ...nearStart, start: 0 }), { start: .96 });
 });
+
+
+test("timeline pan at the chart end does not dispatch a no-op or out-of-range start", () => {
+  const end = { ...view, start: 48 };
+  assert.equal(wheelViewChange(wheel(0, 120), end, undefined, undefined, 60), null);
+  assert.equal(wheelViewChange(wheel(120, 0), end, undefined, undefined, 60), null);
+  assert.deepEqual(wheelViewChange(wheel(0, -120), end, undefined, undefined, 60), { start: 47.04 });
+  const nearEnd = { ...view, start: 47.8 };
+  assert.deepEqual(wheelViewChange(wheel(0, 120), nearEnd, undefined, undefined, 60), { start: 48 });
+});
+
+test("Ctrl zoom clamps both the chart duration and anchored start at timeline edges", () => {
+  const anchor = { timeRatio: .5, pitchRatio: .5 };
+  const beginning = { ...view, start: 0 };
+  const fromBeginning = wheelViewChange(wheel(0, 120, { ctrlKey: true }), beginning, anchor, undefined, 60);
+  assert.equal(fromBeginning?.start, 0);
+  assert.ok((fromBeginning?.windowSeconds ?? 0) > view.windowSeconds);
+
+  const end = { ...view, start: 48 };
+  const fromEnd = wheelViewChange(wheel(0, 120, { ctrlKey: true }), end, anchor, undefined, 60);
+  assert.ok(fromEnd?.windowSeconds !== undefined && fromEnd.start !== undefined);
+  assert.ok(Math.abs(fromEnd.start - (60 - fromEnd.windowSeconds)) < 1e-9);
+
+  const withoutAnchor = wheelViewChange(wheel(0, 120, { ctrlKey: true }), end, undefined, undefined, 60);
+  assert.ok(withoutAnchor?.windowSeconds !== undefined && withoutAnchor.start !== undefined);
+  assert.ok(Math.abs(withoutAnchor.start - (60 - withoutAnchor.windowSeconds)) < 1e-9);
+});
+
+test("Ctrl zoom out on a full-duration view is a no-op, zoom in still works", () => {
+  const full = { ...view, start: 0, windowSeconds: 60 };
+  const anchor = { timeRatio: .7, pitchRatio: .5 };
+  assert.equal(wheelViewChange(wheel(0, 120, { ctrlKey: true }), full, anchor, undefined, 60), null);
+  const zoomIn = wheelViewChange(wheel(0, -120, { ctrlKey: true }), full, anchor, undefined, 60);
+  assert.ok(zoomIn?.windowSeconds !== undefined && zoomIn.start !== undefined);
+  assert.ok(zoomIn.windowSeconds < 60);
+  assert.ok(zoomIn.start >= 0 && zoomIn.start <= 60 - zoomIn.windowSeconds);
+});
