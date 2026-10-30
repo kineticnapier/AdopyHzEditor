@@ -135,3 +135,32 @@ test("many small alternating Ctrl wheel deltas do not accumulate zoom drift", ()
   }
   assert.ok(Math.abs(current.windowSeconds - view.windowSeconds) < 1e-9);
 });
+
+test("pitch wheel gestures at MIDI limits are ignored instead of writing unchanged view", () => {
+  const top = { ...view, pitchBottom: 128 - view.visibleNotes };
+  const bottom = { ...view, pitchBottom: 0 };
+  assert.equal(wheelViewChange(wheel(0, -120, { shiftKey: true }), top), null);
+  assert.equal(wheelViewChange(wheel(0, 120, { shiftKey: true }), bottom), null);
+  assert.equal(wheelViewChange(wheel(0, -120, { altKey: true }), { ...view, visibleNotes: 6 }), null);
+  assert.equal(wheelViewChange(wheel(0, 120, { altKey: true }), { ...view, visibleNotes: 128, pitchBottom: 0 }), null);
+});
+
+test("blocked fine pitch gestures clear their carry before reversing", () => {
+  const top = { ...view, pitchBottom: 128 - view.visibleNotes };
+  const shiftCarry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 40; i++)
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), top, undefined, shiftCarry), null);
+  assert.equal(shiftCarry.remainder, 0);
+  for (let i = 0; i < 39; i++)
+    assert.equal(wheelViewChange(wheel(0, 1, { shiftKey: true }), top, undefined, shiftCarry), null);
+  assert.deepEqual(wheelViewChange(wheel(0, 1, { shiftKey: true }), top, undefined, shiftCarry), { pitchBottom: top.pitchBottom - 1 });
+
+  const narrow = { ...view, visibleNotes: 6 };
+  const altCarry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 30; i++)
+    assert.equal(wheelViewChange(wheel(0, -1, { altKey: true }), narrow, undefined, altCarry), null);
+  assert.equal(altCarry.remainder, 0);
+  for (let i = 0; i < 29; i++)
+    assert.equal(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, altCarry), null);
+  assert.deepEqual(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, altCarry), { visibleNotes: 7, pitchBottom: narrow.pitchBottom });
+});

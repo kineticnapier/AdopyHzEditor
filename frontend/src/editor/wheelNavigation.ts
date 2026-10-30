@@ -63,14 +63,21 @@ export function wheelViewChange(
     if (steps === 0) return null;
     const maxBottom = Math.max(0, 128 - view.visibleNotes);
     const pitchBottom = Math.max(0, Math.min(maxBottom, view.pitchBottom + steps));
-    if (pitchAccumulator && pitchBottom === view.pitchBottom) pitchAccumulator.remainder = 0;
+    // A clamped gesture must not cancel playback follow or enqueue a redundant API write.
+    if (pitchBottom === view.pitchBottom) {
+      if (pitchAccumulator) pitchAccumulator.remainder = 0;
+      return null;
+    }
     return { pitchBottom };
   }
   if (event.altKey) {
     const steps = pitchWheelSteps(4 * units, "alt", pitchAccumulator);
     if (steps === 0) return null;
     const visibleNotes = Math.max(6, Math.min(128, view.visibleNotes + steps));
-    if (pitchAccumulator && visibleNotes === view.visibleNotes) pitchAccumulator.remainder = 0;
+    if (visibleNotes === view.visibleNotes) {
+      if (pitchAccumulator) pitchAccumulator.remainder = 0;
+      return null;
+    }
     if(!anchor){
       return {visibleNotes,pitchBottom:Math.max(0,Math.min(view.pitchBottom,128-visibleNotes))};
     }
