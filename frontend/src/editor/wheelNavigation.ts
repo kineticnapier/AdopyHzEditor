@@ -33,9 +33,15 @@ function pitchWheelSteps(
   return steps;
 }
 
-/** Do not dispatch a pan that is already blocked by the beginning of the timeline. */
-function panTime(view: ViewState, units: number): Partial<ViewState> | null {
-  const start = Math.max(0, view.start + units * view.windowSeconds * .08);
+/** Match Bridge.set_view's timeline bounds before dispatching an optimistic view. */
+function boundedTimeStart(start: number, windowSeconds: number, durationSeconds?: number): number {
+  const maxStart = durationSeconds === undefined || !Number.isFinite(durationSeconds)
+    ? Infinity : Math.max(0, durationSeconds - windowSeconds);
+  return Math.max(0, Math.min(maxStart, start));
+}
+
+function panTime(view: ViewState, units: number, durationSeconds?: number): Partial<ViewState> | null {
+  const start = boundedTimeStart(view.start + units * view.windowSeconds * .08, view.windowSeconds, durationSeconds);
   return start === view.start ? null : { start };
 }
 
@@ -45,6 +51,7 @@ export function wheelViewChange(
   view: ViewState,
   anchor?: {timeRatio:number;pitchRatio:number},
   pitchAccumulator?: WheelPitchAccumulator,
+  durationSeconds?: number,
 ): Partial<ViewState> | null {
   const { deltaX, deltaY } = event;
   const resetPitchAccumulator = () => {
@@ -60,7 +67,7 @@ export function wheelViewChange(
   if (Math.abs(deltaX) > Math.abs(deltaY)) {
     resetPitchAccumulator();
     const units = wheelTicks(deltaX, event.deltaMode);
-    return panTime(view, units);
+    return panTime(view, units, durationSeconds);
   }
 
   const units = wheelTicks(deltaY, event.deltaMode);
@@ -95,10 +102,17 @@ export function wheelViewChange(
   if (event.ctrlKey) {
     // High-resolution trackpads emit many small deltas: zoom proportionally, not once per event.
     // Use reciprocal zoom factors so an equal reverse gesture restores the viewport.
-    const windowSeconds=view.windowSeconds*Math.pow(.85,-units);
-    if(!anchor)return {windowSeconds};
-    const time=view.start+anchor.timeRatio*view.windowSeconds;
-    return {windowSeconds,start:time-anchor.timeRatio*windowSeconds};
+    const requestedWindowSeconds = view.windowSeconds * Math.pow(.85, -units);
+    const windowSeconds = durationSeconds === undefined || !Number.isFinite(durationSeconds)
+      ? requestedWindowSeconds
+      : Math.max(.2, Math.min(Math.max(.2, durationSeconds), requestedWindowSeconds));
+    if (!anchor && durationSeconds === undefined) return { windowSeconds };
+    const requestedStart = anchor
+      ? view.start + anchor.timeRatio * (view.windowSeconds - windowSeconds)
+      : view.start;
+    const start = boundedTimeStart(requestedStart, windowSeconds, durationSeconds);
+    return windowSeconds === view.windowSeconds && start === view.start
+      ? null : { windowSeconds, start };
   }
-  return panTime(view, units);
+  return panTime(view, units, durationSeconds);
 }
