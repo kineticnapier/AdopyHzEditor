@@ -10,6 +10,17 @@ export const dialogFocusableSelector = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+/** Only truly keyboard-reachable elements should participate in the dialog Tab trap.
+ * :disabled also covers inputs disabled by an ancestor <fieldset disabled>.
+ * An inert subtree is not keyboard-reachable even when it remains laid out.
+ */
+export function isDialogTabbable(item: HTMLElement): boolean {
+  return item.getClientRects().length > 0 &&
+    item.tabIndex >= 0 &&
+    !item.matches(":disabled") &&
+    !item.closest("[inert]");
+}
+
 /** Select the element that keeps Tab focus inside a dialog at its boundaries. */
 export function dialogTabDestination<T extends { focus(): void }>(
   items: readonly T[],
