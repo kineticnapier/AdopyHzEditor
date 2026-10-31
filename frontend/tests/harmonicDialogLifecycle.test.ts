@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { selectionScopedPreviewIsCurrent } from "../src/dialogs/previewFreshness.ts";
+import { harmonicDefaultsContextIsCurrent, selectionScopedPreviewIsCurrent } from "../src/dialogs/previewFreshness.ts";
 
 const source = readFileSync(
   new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url),
@@ -47,4 +47,24 @@ test("harmonic dialog hides old defaults before its selection effect can run", (
   assert.match(harmonic, /if \(!opts \|\| !selectionCurrent\)/);
   assert.match(harmonic, /setDefaultsSelectionKey\(selectionKey\)/);
   assert.match(harmonic, /selectionScopedPreviewIsCurrent\(preview, previewKey/);
+});
+
+test("same note IDs from another document cannot reuse harmonic defaults", () => {
+  const api = {};
+  const selected = [3, 5];
+  const loaded = { api, selected, attempt: 0 };
+  assert.equal(harmonicDefaultsContextIsCurrent(loaded, loaded), true);
+  assert.equal(harmonicDefaultsContextIsCurrent(loaded, { ...loaded, selected: [3, 5] }), false);
+  assert.equal(harmonicDefaultsContextIsCurrent(loaded, { ...loaded, api: {} }), false);
+  assert.equal(harmonicDefaultsContextIsCurrent(loaded, { ...loaded, attempt: 1 }), false);
+  assert.equal(harmonicDefaultsContextIsCurrent(null, loaded), false);
+});
+
+test("harmonic dialog blocks stale defaults, preview, insertion and delayed numeric blur", () => {
+  assert.match(harmonic, /harmonicDefaultsContextIsCurrent\(defaultsContext, \{ api, selected, attempt \}\)/);
+  assert.match(harmonic, /setDefaultsContext\(null\)/);
+  assert.match(harmonic, /setDefaultsContext\(\{ api, selected, attempt \}\)/);
+  assert.match(harmonic, /const previewCurrent = selectionCurrent &&/);
+  assert.match(harmonic, /if \(!opts \|\| !selectionCurrent\) return;/);
+  assert.match(harmonic, /if \(!insertingRef.current && selectionCurrent\) setOpts\(next\)/);
 });
