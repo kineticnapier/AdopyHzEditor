@@ -496,7 +496,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               </div>
             </div>
           )}
-          {error && <div className="dialog-error inline">{error}</div>}
+          {error && <div className="dialog-error inline" role="alert">{error}</div>}
           <div className="chart-tools">
             <button onClick={() => void chooseChart()} disabled={!actions.canChooseChart}>譜面を選択…</button>
             <span title={chart}>
@@ -519,7 +519,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           </div>
         </section>
         <section className="quick-hz-output">
-          <textarea value={resultCurrent ? result?.output ?? "" : ""} readOnly spellCheck={false} />
+          <textarea aria-label="Quick Hz出力プレビュー" value={resultCurrent ? result?.output ?? "" : ""} readOnly spellCheck={false} />
           <div className="preview-actions">
             <button onClick={() => void copy()} disabled={!actions.canOutput}>
               {outputting === "copy" ? "コピー中…" : "コピー"}
@@ -723,7 +723,7 @@ export function HarmonicDiagramDialog({
               onChange={(v) => updateOpts({ ...opts, offset: Math.round(v) })}
             />
           </Field>
-          {error && <div className="dialog-error inline">{error}</div>}
+          {error && <div className="dialog-error inline" role="alert">{error}</div>}
         </fieldset>
         <section className="harmonic-preview">
           {previewCurrent && preview ? (
