@@ -19,6 +19,17 @@ export function selectionScopedPreviewIsCurrent<T>(
     previewIsCurrent(preview, previewKey, optionsKey);
 }
 
+/** Harmonic defaults must not survive a document/API change with equal note IDs. */
+export function harmonicDefaultsContextIsCurrent(
+  loaded: { api: object; selected: readonly number[]; attempt: number } | null,
+  current: { api: object; selected: readonly number[]; attempt: number },
+): boolean {
+  return loaded !== null &&
+    loaded.api === current.api &&
+    loaded.selected === current.selected &&
+    loaded.attempt === current.attempt;
+}
+
 /** Defaults belong to the exact request context, not just equal note IDs. */
 export function exportDefaultsContextIsCurrent(
   loaded: { api: object; selected: readonly number[]; defaultSelectedOnly: boolean; loadAttempt: number } | null,
