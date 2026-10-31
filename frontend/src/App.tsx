@@ -10,7 +10,6 @@ import SettingsPanel from "./settings/SettingsPanel";
 import {
   BlankWorkspaceDialog,
   HarmonicDiagramDialog,
-  QuickHzDialog,
   UpdateDialog,
 } from "./dialogs/ToolDialogs";
 import { useDialogAccessibility } from "./dialogs/useDialogAccessibility";
@@ -104,7 +103,7 @@ const defaultPlayback: PlaybackState = {
   available: false,
   error: null,
 };
-type ToolDialog = "blank" | "quickHz" | "harmonic" | "update" | null;
+type ToolDialog = "blank" | "harmonic" | "update" | null;
 type PendingDestructiveAction = {
   label: string;
   run(): void | Promise<void>;
@@ -1273,7 +1272,6 @@ export default function App() {
       onSplit={() => void splitSelected()}
       onHarmonicDiagram={() => setToolDialog("harmonic")}
       onReanalyze={() => stateAction(() => toolsApi.reanalyze_audio())}
-      onQuickHz={() => setToolDialog("quickHz")}
       onUpdates={() => setToolDialog("update")}
       onHelp={() => setHelpSection("quick_start")}
     />
@@ -1424,13 +1422,6 @@ export default function App() {
           onApply={async (options) => {
             await performStateAction(() => toolsApi.apply_blank_workspace(options));
           }}
-        />
-      )}{" "}
-      {toolDialog === "quickHz" && toolsApi && (
-        <QuickHzDialog
-          api={toolsApi}
-          onClose={() => setToolDialog(null)}
-          onStatus={setStatus}
         />
       )}{" "}
       {toolDialog === "harmonic" && toolsApi && (
