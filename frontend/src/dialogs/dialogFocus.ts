@@ -15,10 +15,14 @@ export const dialogFocusableSelector = [
  * An inert subtree is not keyboard-reachable even when it remains laid out.
  */
 export function isDialogTabbable(item: HTMLElement): boolean {
-  return item.getClientRects().length > 0 &&
-    item.tabIndex >= 0 &&
-    !item.matches(":disabled") &&
-    !item.closest("[inert]");
+  if (!item.getClientRects().length ||
+      item.tabIndex < 0 ||
+      item.matches(":disabled") ||
+      item.closest("[inert]")) return false;
+  // visibility:hidden/collapse still has layout rectangles, but is not tabbable.
+  // Computed visibility includes inherited visibility from the dialog's ancestors.
+  const visibility = item.ownerDocument?.defaultView?.getComputedStyle(item).visibility;
+  return visibility === undefined || visibility === "visible";
 }
 
 /** Select the element that keeps Tab focus inside a dialog at its boundaries. */
