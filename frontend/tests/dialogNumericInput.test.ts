@@ -67,3 +67,13 @@ test("tool dialog load failures are announced as alerts", () => {
   assert.match(component, /<div className="dialog-error" role="alert">読込に失敗しました: \{error\}<\/div>/);
   assert.ok((source.match(/<LoadFailure\b/g) ?? []).length >= 2, "the shared error component is reused");
 });
+
+test("ADOFAI export defaults failure is announced and busy dialog state is exposed", () => {
+  const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.match(source, /<div className="dialog-error" role="alert">\s*設定の読込に失敗しました: \{error\}/);
+  const modalStart = source.indexOf("function Modal({");
+  assert.ok(modalStart >= 0, "ADOFAI export modal exists");
+  const modal = source.slice(modalStart);
+  assert.match(modal, /aria-modal="true"[\s\S]*?aria-labelledby=\{titleId\}[\s\S]*?aria-busy=\{locked\}/);
+  assert.match(source, /<Modal[\s\S]*?locked=\{working\}/);
+});
