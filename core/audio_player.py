@@ -80,7 +80,6 @@ class AudioPlayer:
         self.note_sample: np.ndarray | None = None
         self.preview_notes: list[PreviewSegment | tuple[int, int, float]] = []
         self._preview_ends: list[int] = []
-        self._preview_onsets: list[int] = []
 
         try:
             import sounddevice as sd  # noqa
@@ -201,7 +200,6 @@ class AudioPlayer:
         Curve notes are sampled into short fixed-pitch preview notes.
         """
         prepared: list[PreviewSegment] = []
-        onsets: list[int] = []
         sr = max(1, int(self.sr))
 
         for n in notes:
@@ -231,14 +229,11 @@ class AudioPlayer:
                     segment_index == 0,
                     segment_index == len(segments) - 1,
                 ))
-                if segment_index == 0:
-                    onsets.append(start_sample)
                 phase += 2.0 * np.pi * midi_to_hz(float(midi)) * (end_sample - start_sample) / sr
 
         prepared.sort(key=lambda x: x.start)
         with self.lock:
             self.preview_notes = prepared
-            self._preview_onsets = sorted(onsets)
             max_end = 0
             self._preview_ends = []
             for segment in prepared:
@@ -324,38 +319,66 @@ class AudioPlayer:
         if len(source_positions) == 0:
             return True
 
-        starts = self._preview_onsets
-        if not starts:
-            starts = [
-                int(segment[0])
-                for segment in self.preview_notes
-                if bool(getattr(segment, "fade_in", True))
-            ]
-        if not starts:
-            return True
-
         block_start = float(source_positions[0])
         block_end = float(source_positions[-1])
         sample_len = len(sample)
-        first = bisect_left(starts, block_start - sample_len - 1.0)
-        for onset in starts[first:]:
-            if onset > block_end:
+        sr = max(1, int(self.sr))
+
+        preview_notes = self.preview_notes
+        if len(self._preview_ends) == len(preview_notes):
+            first_active = bisect_right(self._preview_ends, block_start - sample_len - 1.0)
+        else:
+            first_active = 0
+
+        two_pi = 2.0 * np.pi
+        for index in range(first_active, len(preview_notes)):
+            segment = preview_notes[index]
+            ns, ne, midi = segment
+            if ns > block_end:
                 break
-            if onset + sample_len <= block_start:
+            if ne <= block_start - sample_len:
                 continue
 
-            out_s = int(np.searchsorted(source_positions, onset, side="left"))
-            out_e = int(np.searchsorted(source_positions, onset + sample_len, side="left"))
-            if out_e <= out_s:
+            freq = midi_to_hz(float(midi))
+            if freq <= 0:
                 continue
 
-            positions = source_positions[out_s:out_e] - float(onset)
-            i0 = np.floor(positions).astype(np.int64)
-            i0 = np.clip(i0, 0, sample_len - 1)
-            i1 = np.minimum(i0 + 1, sample_len - 1)
-            frac = (positions - i0).astype(np.float32)
-            sampled = sample[i0] * (1.0 - frac) + sample[i1] * frac
-            outdata[out_s:out_e, 0] += sampled * self.note_volume
+            base_phase = getattr(segment, "phase", None)
+            if base_phase is None:
+                base_phase = 0.0
+
+            # Each integer phase cycle is one ADOFAI hit. Keep the phase origin
+            # carried by PreviewSegment so Curve Note subdivisions do not reset
+            # or double-trigger at their boundaries.
+            phase_start = float(base_phase)
+            phase_end = phase_start + two_pi * freq * max(0.0, ne - ns) / sr
+            first_cycle = int(np.ceil((phase_start - 1e-12) / two_pi))
+            last_cycle = int(np.floor((phase_end - 1e-12) / two_pi))
+
+            for cycle in range(first_cycle, last_cycle + 1):
+                hit = float(ns) + (cycle * two_pi - phase_start) * sr / (two_pi * freq)
+                if hit < ns - 1e-7 or hit >= ne - 1e-7:
+                    continue
+                if hit + sample_len <= block_start or hit > block_end:
+                    continue
+
+                out_s = int(np.searchsorted(source_positions, hit, side="left"))
+                out_e = int(np.searchsorted(source_positions, hit + sample_len, side="left"))
+                if out_e <= out_s:
+                    continue
+
+                positions = source_positions[out_s:out_e] - hit
+                i0 = np.floor(positions).astype(np.int64)
+                valid = (i0 >= 0) & (i0 < sample_len)
+                if not np.any(valid):
+                    continue
+                i0 = np.clip(i0, 0, sample_len - 1)
+                i1 = np.minimum(i0 + 1, sample_len - 1)
+                frac = (positions - i0).astype(np.float32)
+                sampled = sample[i0] * (1.0 - frac) + sample[i1] * frac
+                if not np.all(valid):
+                    sampled = sampled * valid.astype(np.float32)
+                outdata[out_s:out_e, 0] += sampled * self.note_volume
         return True
 
     def _mix_preview_notes(self, outdata, source_positions: np.ndarray) -> None:
