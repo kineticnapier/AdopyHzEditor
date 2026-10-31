@@ -146,7 +146,7 @@ export default function AdoFAIExportDialogJa({
       <Modal title="ADOFAI出力" onClose={onClose}>
         {error ? (
           <>
-            <div className="dialog-error">
+            <div className="dialog-error" role="alert">
               設定の読込に失敗しました: {error}
             </div>
             <div className="dialog-footer">
@@ -720,6 +720,7 @@ function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-busy={locked}
       >
         <header className="modal-title">
           <strong id={titleId}>{title}</strong>
