@@ -2,7 +2,7 @@ name: Web UI check
 
 on:
   push:
-    branches: [main, "refactor/**", "work/issue-fix-batch"]
+    branches: [main, "refactor/**", "work/issue-fix-batch", "work/issue-fix-batch-v*"]
   pull_request:
     paths:
       - "frontend/**"
