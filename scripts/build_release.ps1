@@ -228,19 +228,6 @@ $Frontend = Join-Path $Root "frontend"
 Ensure-FrontendDependencies $Npm $Frontend
 Build-Frontend $Npm $Frontend
 
-$AssetExtractorProject = Join-Path $Root "tools\AdopyHzEditor.AssetExtractor\AdopyHzEditor.AssetExtractor.csproj"
-if (-not (Test-Path $AssetExtractorProject)) {
-    Fail "ADOFAI asset extractor project was not found: $AssetExtractorProject"
-}
-$AssetExtractorPublish = Join-Path $Root "build\asset-extractor"
-Remove-Item -Recurse -Force $AssetExtractorPublish -ErrorAction SilentlyContinue
-Write-Step "Building bundled ADOFAI kick extractor"
-Invoke-CommandChecked $Dotnet "publish" $AssetExtractorProject "-c" "Release" "-r" "win-x64" "--self-contained" "true" "-p:PublishSingleFile=true" "-p:DebugType=None" "-p:DebugSymbols=false" "-o" $AssetExtractorPublish
-$AssetExtractorExe = Join-Path $AssetExtractorPublish "AdopyHzEditor.AssetExtractor.exe"
-if (-not (Test-Path $AssetExtractorExe)) {
-    Fail "Asset extractor build completed but executable was not found: $AssetExtractorExe"
-}
-
 $FrontendDist = Join-Path $Frontend "dist"
 $FrontendIndex = Join-Path $FrontendDist "index.html"
 if (-not (Test-Path $FrontendIndex)) {
@@ -264,6 +251,19 @@ if ($Clean) {
     Write-Step "Cleaning PyInstaller build output"
     Remove-Item -Recurse -Force (Join-Path $Root "build") -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force (Join-Path $Root "dist") -ErrorAction SilentlyContinue
+}
+
+$AssetExtractorProject = Join-Path $Root "tools\AdopyHzEditor.AssetExtractor\AdopyHzEditor.AssetExtractor.csproj"
+if (-not (Test-Path $AssetExtractorProject)) {
+    Fail "ADOFAI asset extractor project was not found: $AssetExtractorProject"
+}
+$AssetExtractorPublish = Join-Path $Root "build\asset-extractor"
+Remove-Item -Recurse -Force $AssetExtractorPublish -ErrorAction SilentlyContinue
+Write-Step "Building bundled ADOFAI kick extractor"
+Invoke-CommandChecked $Dotnet "publish" $AssetExtractorProject "-c" "Release" "-r" "win-x64" "--self-contained" "true" "-p:PublishSingleFile=true" "-p:DebugType=None" "-p:DebugSymbols=false" "-o" $AssetExtractorPublish
+$AssetExtractorExe = Join-Path $AssetExtractorPublish "AdopyHzEditor.AssetExtractor.exe"
+if (-not (Test-Path $AssetExtractorExe)) {
+    Fail "Asset extractor build completed but executable was not found: $AssetExtractorExe"
 }
 
 Write-Step "Running PyInstaller for the current Web UI"
