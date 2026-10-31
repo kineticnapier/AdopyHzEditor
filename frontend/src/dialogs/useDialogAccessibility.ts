@@ -1,13 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import { dialogTabDestination } from "./dialogFocus";
-
-const focusableSelector = [
-  "button:not(:disabled)",
-  "input:not(:disabled)",
-  "select:not(:disabled)",
-  "textarea:not(:disabled)",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
+import { dialogFocusableSelector, dialogTabDestination } from "./dialogFocus";
 
 export function useDialogAccessibility(onClose: () => void) {
   const dialogRef = useRef<HTMLElement>(null), titleId = useId(), closeRef = useRef(onClose);
@@ -15,8 +7,8 @@ export function useDialogAccessibility(onClose: () => void) {
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
-      .filter(item => item.getClientRects().length > 0);
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(dialogFocusableSelector) ?? [])
+      .filter(item => item.getClientRects().length > 0 && item.tabIndex >= 0);
     const frame = window.requestAnimationFrame(() => {
       if (dialog?.isConnected) (focusable()[0] ?? dialog).focus();
     });
