@@ -14,7 +14,7 @@ import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { previewIsCurrent } from "./previewFreshness";
+import { previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 import { quickHzActionPolicy } from "./quickHzActionPolicy";
 type Common = {
@@ -562,9 +562,12 @@ export function HarmonicDiagramDialog({
   const [opts, setOpts] = useState<HarmonicDiagramOptions | null>(null),
     [preview, setPreview] = useState<HarmonicPreview | null>(null),
     [previewKey,setPreviewKey]=useState(""),
+    [defaultsSelectionKey, setDefaultsSelectionKey] = useState<string | null>(null),
     [error, setError] = useState(""),
     [attempt, setAttempt] = useState(0);
-  const previewCurrent = previewIsCurrent(preview, previewKey, JSON.stringify(opts));
+  const selectionKey = JSON.stringify(selected);
+  const selectionCurrent = defaultsSelectionKey === selectionKey;
+  const previewCurrent = selectionScopedPreviewIsCurrent(preview, previewKey, JSON.stringify(opts), defaultsSelectionKey, selectionKey);
   function updateOpts(next: HarmonicDiagramOptions) {
     // A numeric field can commit on blur while disabling the form.
     if (!insertingRef.current) setOpts(next);
@@ -574,12 +577,18 @@ export function HarmonicDiagramDialog({
     // Selection-dependent defaults are invalid as soon as the selection changes.
     // Do not allow inserting the previous selection's diagram while loading.
     setOpts(null);
+    setDefaultsSelectionKey(null);
     setPreview(null);
     setPreviewKey("");
     setError("");
-    void api.get_harmonic_diagram_defaults(selected).then(value => alive && setOpts(value)).catch(reason => alive && setError(String(reason)));
+    void api.get_harmonic_diagram_defaults(selected).then(value => {
+      if (alive) {
+        setOpts(value);
+        setDefaultsSelectionKey(selectionKey);
+      }
+    }).catch(reason => alive && setError(String(reason)));
     return () => { alive = false; };
-  }, [api, selected, attempt]);
+  }, [api, selectionKey, attempt]);
   useEffect(() => {
     if (!opts) return;
     let alive = true;
@@ -633,7 +642,7 @@ export function HarmonicDiagramDialog({
   }
   if (!opts && error)
     return <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}><LoadFailure error={error} onRetry={() => setAttempt(value => value + 1)} disabled={inserting} /></Modal>;
-  if (!opts)
+  if (!opts || !selectionCurrent)
     return (
       <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}>
         <div className="dialog-loading" role="status">{inserting ? "挿入処理中…" : "読み込み中…"}</div>
