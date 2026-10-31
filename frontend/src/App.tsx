@@ -1399,6 +1399,7 @@ export default function App() {
         <AdoFAIExportDialog
           api={api}
           selected={selected}
+          documentGeneration={documentGeneration.current}
           defaultSelectedOnly={adoExportSelectedOnly}
           onClose={() => setAdoExportOpen(false)}
           onStatus={setStatus}
@@ -1436,6 +1437,7 @@ export default function App() {
         <HarmonicDiagramDialog
           api={toolsApi}
           selected={selected}
+          documentGeneration={documentGeneration.current}
           onClose={() => setToolDialog(null)}
           onStatus={setStatus}
           onQueuedMutation={queueExternalMutation}
