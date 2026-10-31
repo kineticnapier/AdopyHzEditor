@@ -14,7 +14,7 @@ import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
+import { harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 import { quickHzActionPolicy } from "./quickHzActionPolicy";
 type Common = {
@@ -563,14 +563,16 @@ export function HarmonicDiagramDialog({
     [preview, setPreview] = useState<HarmonicPreview | null>(null),
     [previewKey,setPreviewKey]=useState(""),
     [defaultsSelectionKey, setDefaultsSelectionKey] = useState<string | null>(null),
+    [defaultsContext, setDefaultsContext] = useState<{ api: ToolBackendApi; selected: number[]; attempt: number } | null>(null),
     [error, setError] = useState(""),
     [attempt, setAttempt] = useState(0);
   const selectionKey = JSON.stringify(selected);
-  const selectionCurrent = defaultsSelectionKey === selectionKey;
-  const previewCurrent = selectionScopedPreviewIsCurrent(preview, previewKey, JSON.stringify(opts), defaultsSelectionKey, selectionKey);
+  const selectionCurrent = defaultsSelectionKey === selectionKey &&
+    harmonicDefaultsContextIsCurrent(defaultsContext, { api, selected, attempt });
+  const previewCurrent = selectionCurrent && selectionScopedPreviewIsCurrent(preview, previewKey, JSON.stringify(opts), defaultsSelectionKey, selectionKey);
   function updateOpts(next: HarmonicDiagramOptions) {
     // A numeric field can commit on blur while disabling the form.
-    if (!insertingRef.current) setOpts(next);
+    if (!insertingRef.current && selectionCurrent) setOpts(next);
   }
   useEffect(() => {
     let alive = true;
@@ -578,6 +580,7 @@ export function HarmonicDiagramDialog({
     // Do not allow inserting the previous selection's diagram while loading.
     setOpts(null);
     setDefaultsSelectionKey(null);
+    setDefaultsContext(null);
     setPreview(null);
     setPreviewKey("");
     setError("");
@@ -585,6 +588,7 @@ export function HarmonicDiagramDialog({
       if (alive) {
         setOpts(value);
         setDefaultsSelectionKey(selectionKey);
+        setDefaultsContext({ api, selected, attempt });
       }
     }).catch(reason => alive && setError(String(reason)));
     return () => { alive = false; };
@@ -619,7 +623,7 @@ export function HarmonicDiagramDialog({
     };
   }, [api, opts]);
   async function insert() {
-    if (!opts) return;
+    if (!opts || !selectionCurrent) return;
     if(!previewCurrent){setError("最新設定のプレビューを待っています");return}
     await insertOnce.current(async () => {
       insertingRef.current = true;
