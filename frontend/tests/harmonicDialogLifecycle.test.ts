@@ -10,7 +10,7 @@ const source = readFileSync(
 const harmonic = source.slice(source.indexOf("export function HarmonicDiagramDialog("), source.indexOf("export function UpdateDialog("));
 
 test("selection changes invalidate harmonic defaults and the previous preview before loading", () => {
-  const effect = harmonic.slice(harmonic.indexOf("useEffect(() => {"), harmonic.indexOf("}, [api, selectionKey, attempt]);"));
+  const effect = harmonic.slice(harmonic.indexOf("useEffect(() => {"), harmonic.indexOf("}, [api, selected, attempt]);"));
   const request = effect.indexOf("api.get_harmonic_diagram_defaults(selected)");
   assert.ok(request > 0, "defaults request must be present");
   for (const reset of ["setOpts(null)", "setDefaultsSelectionKey(null)", "setPreview(null)", 'setPreviewKey("")']) {
