@@ -10,7 +10,7 @@ const dialogFiles = [
 
 for (const file of dialogFiles) {
   test(`${file} preserves draft text until blur or Enter`, () => {
-    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    const source = readFileSync(new URL(file, import.meta.url), "utf8").replace(/\r\n/g, "\n");
     const start = source.indexOf("function Num({");
     assert.ok(start >= 0, "numeric field component exists");
     const end = source.indexOf("\n}\n", start);

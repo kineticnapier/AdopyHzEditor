@@ -7,7 +7,7 @@ import { createExclusiveAsyncAction } from "../src/dialogs/exclusiveAsyncAction.
 const dialogSource = readFileSync(
   new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 test("ADOFAI export settings are disabled during an operation", () => {
   const start = dialogSource.indexOf("<fieldset\n          disabled={working}");
