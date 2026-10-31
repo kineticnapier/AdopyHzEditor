@@ -14,7 +14,7 @@ import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { blankWorkspaceDefaultsContextIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
+import { blankWorkspaceDefaultsContextIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, quickHzChartIsCurrent, quickHzPreviewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 import { quickHzActionPolicy } from "./quickHzActionPolicy";
 type Common = {
@@ -290,6 +290,9 @@ export function BlankWorkspaceDialog({
 
 export function QuickHzDialog({ api, onClose, onStatus }: Common) {
   const appendOnce = useRef(createExclusiveAsyncAction());
+  // Check the backend again after file pickers and other awaited operations.
+  const latestApi = useRef(api);
+  latestApi.current = api;
   const [appending, setAppending] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [outputting, setOutputting] = useState<"copy" | "save" | null>(null);
@@ -305,13 +308,20 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
   });
   const [result, setResult] = useState<QuickHzResult | null>(null),
     [resultKey, setResultKey] = useState(""),
+    [resultApi, setResultApi] = useState<ToolBackendApi | null>(null),
     [error, setError] = useState(""),
-    [chart, setChart] = useState("");
-  const optsKey = JSON.stringify(opts), resultCurrent = previewIsCurrent(result, resultKey, optsKey);
+    [chart, setChart] = useState(""),
+    [chartApi, setChartApi] = useState<ToolBackendApi | null>(null);
+  const optsKey = JSON.stringify(opts);
+  const resultCurrent = quickHzPreviewIsCurrent(result, resultKey, optsKey, resultApi, api);
+  const chartCurrent = quickHzChartIsCurrent(chart, chartApi, api);
   const busy = appending || choosing || outputting !== null;
-  const actions = quickHzActionPolicy(busy, Boolean(chart), resultCurrent);
+  const actions = quickHzActionPolicy(busy, chartCurrent, resultCurrent);
   useEffect(() => {
     let alive = true;
+    setResult(null);
+    setResultKey("");
+    setResultApi(null);
     const requestedKey = optsKey;
     const id = window.setTimeout(
       () =>
@@ -321,6 +331,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
             if (alive) {
               setResult(x);
               setResultKey(requestedKey);
+              setResultApi(api);
               setError("");
             }
           })
@@ -345,9 +356,11 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
       setChoosing(true);
       try {
         const x = await api.choose_quick_hz_chart();
+        if (api !== latestApi.current) return;
         onStatus(x.status);
         if (x.ok && x.path) {
           setChart(x.path);
+          setChartApi(api);
           setOpts((o) => ({
             ...o,
             startFloor: x.tailFloor ?? o.startFloor,
@@ -358,15 +371,15 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           }));
         }
       } catch (e) {
-        setError(String(e));
+        if (api === latestApi.current) setError(String(e));
       } finally {
         setChoosing(false);
       }
     });
   }
   async function append() {
-    if (!chart) {
-      setError("譜面が選択されていません");
+    if (!chartCurrent) {
+      setError("現在の接続で譜面が選択されていません");
       return;
     }
     if (!resultCurrent) { setError("最新設定のプレビューを待っています"); return; }
@@ -374,6 +387,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
       setAppending(true);
       try {
         const x = await api.append_quick_hz_chart(chart, opts);
+        if (api !== latestApi.current) return;
         if (x.ok) {
           setError("");
           onStatus(x.status);
@@ -381,7 +395,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           setError(x.status);
         }
       } catch (e) {
-        setError(String(e));
+        if (api === latestApi.current) setError(String(e));
       } finally {
         setAppending(false);
       }
@@ -397,8 +411,13 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
         await runQuickHzOutputAction(
           "コピー",
           () => navigator.clipboard.writeText(result.output),
-          () => { setError(""); onStatus("Quick Hz出力をコピーしました"); },
-          setError,
+          () => {
+            if (api === latestApi.current) {
+              setError("");
+              onStatus("Quick Hz出力をコピーしました");
+            }
+          },
+          message => { if (api === latestApi.current) setError(message); },
         );
       } finally {
         setOutputting(null);
@@ -413,8 +432,13 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
         await runQuickHzOutputAction(
           "テキスト保存",
           () => api.save_quick_hz_text(result.output),
-          x => { setError(""); onStatus(x.status); },
-          setError,
+          x => {
+            if (api === latestApi.current) {
+              setError("");
+              onStatus(x.status);
+            }
+          },
+          message => { if (api === latestApi.current) setError(message); },
         );
       } finally {
         setOutputting(null);
@@ -522,8 +546,8 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           {error && <div className="dialog-error inline" role="alert">{error}</div>}
           <div className="chart-tools">
             <button onClick={() => void chooseChart()} disabled={!actions.canChooseChart}>譜面を選択…</button>
-            <span title={chart}>
-              {chart ? chart.split(/[\\/]/).pop() : "未選択"}
+            <span title={chartCurrent ? chart : ""}>
+              {chartCurrent ? chart.split(/[\\/]/).pop() : "未選択"}
             </span>
             <label>
               <input
