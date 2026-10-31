@@ -154,7 +154,7 @@ export default function AdoFAIExportDialogJa({
               設定の読込に失敗しました: {error}
             </div>
             <div className="dialog-footer">
-              <button onClick={onClose}>閉じる</button>
+              <button onClick={onClose} disabled={working}>閉じる</button>
               <button
                 className="primary"
                 disabled={working}
