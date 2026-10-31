@@ -50,3 +50,10 @@ test("Quick Hz range has a named group and separately named controls", () => {
   const numeric = source.slice(source.indexOf("function Num({"), source.indexOf("function LoadFailure("));
   assert.match(numeric, /type="number"\s+aria-label=\{label\}/);
 });
+
+test("Quick Hz output preview is named and tool errors are announced", () => {
+  const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
+  assert.match(source, /<textarea aria-label="Quick Hz出力プレビュー"[^>]*readOnly/);
+  const inlineErrors = source.match(/<div className="dialog-error inline" role="alert">\{error\}<\/div>/g);
+  assert.equal(inlineErrors?.length, 2, "both tool error panels announce failures");
+});
