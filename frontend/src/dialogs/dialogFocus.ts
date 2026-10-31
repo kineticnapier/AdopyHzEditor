@@ -25,6 +25,13 @@ export function isDialogTabbable(item: HTMLElement): boolean {
   return visibility === undefined || visibility === "visible";
 }
 
+/** Escape/Tab belong to the IME while a composition is in progress.
+ * Some Windows IMEs emit keyCode 229 even when isComposing is false.
+ */
+export function isDialogCompositionKey(event: Pick<KeyboardEvent, "isComposing" | "keyCode">): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
+
 /** Select the element that keeps Tab focus inside a dialog at its boundaries. */
 export function dialogTabDestination<T extends { focus(): void }>(
   items: readonly T[],
