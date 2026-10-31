@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from bisect import bisect_left, bisect_right
+from bisect import bisect_right
 from dataclasses import dataclass
 import threading
 import numpy as np
