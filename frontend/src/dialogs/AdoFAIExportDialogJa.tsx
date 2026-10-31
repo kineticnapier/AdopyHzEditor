@@ -41,8 +41,15 @@ export default function AdoFAIExportDialogJa({
   const previewRequests = useRef(new LatestRequestGate());
   const actionOnce = useRef(createExclusiveAsyncAction());
   const workingRef = useRef(false);
+  // Async actions must check the latest document/selection, not their old render.
+  const requestContext = { api, selected, defaultSelectedOnly, loadAttempt, documentGeneration };
+  const latestRequestContext = useRef(requestContext);
+  latestRequestContext.current = requestContext;
   // Compare during render: effects run after a new selection has already rendered.
-  const defaultsCurrent = exportDefaultsContextIsCurrent(loadedContext, { api, selected, defaultSelectedOnly, loadAttempt, documentGeneration });
+  const defaultsCurrent = exportDefaultsContextIsCurrent(loadedContext, requestContext);
+  function isCurrentAction(context: typeof loadedContext) {
+    return exportDefaultsContextIsCurrent(context, latestRequestContext.current);
+  }
   useEffect(() => {
     previewRequests.current.invalidate();
     setTile(null);
@@ -85,6 +92,7 @@ export default function AdoFAIExportDialogJa({
     );
   }
   async function run<T>(fn: () => Promise<T>) {
+    const context = loadedContext;
     return actionOnce.current(async () => {
       workingRef.current = true;
       setWorking(true);
@@ -92,7 +100,7 @@ export default function AdoFAIExportDialogJa({
       try {
         return await fn();
       } catch (e) {
-        setError(String(e));
+        if (isCurrentAction(context)) setError(String(e));
         return null;
       } finally {
         workingRef.current = false;
@@ -104,46 +112,51 @@ export default function AdoFAIExportDialogJa({
     ? { ...options, harmonyTuning: "equal temperament" as const }
     : null;
   async function exportLevel() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const r = await run(() => api.export_adofai_advanced(fixed, selected));
-    if (!r) return;
+    if (!r || !isCurrentAction(context)) return;
     onStatus(r.status);
     if (r.ok) onClose();
   }
   async function tilePreview() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const snapshot = { ...fixed }, selection = [...selected];
     const r = await run(async () => {
       const request = previewRequests.current.issue();
       const result = await api.preview_adofai_tiles(snapshot, selection);
       return { request, result };
     });
-    if (r && previewRequests.current.isCurrent(r.request)) {
+    if (r && isCurrentAction(context) && previewRequests.current.isCurrent(r.request)) {
       setTile(r.result);
       setDebug(null);
       setPreviewMode("tile");
     }
   }
   async function debugPreview() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const snapshot = { ...fixed }, selection = [...selected];
     const r = await run(async () => {
       const request = previewRequests.current.issue();
       const result = await api.preview_adofai_debug(snapshot, selection);
       return { request, result };
     });
-    if (r && previewRequests.current.isCurrent(r.request)) {
+    if (r && isCurrentAction(context) && previewRequests.current.isCurrent(r.request)) {
       setDebug(r.result);
       setTile(null);
       setPreviewMode("debug");
     }
   }
   async function chooseSongSource() {
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const r = await run(() => api.choose_adofai_song_source());
-    if (r?.ok && r.path) {
+    if (r?.ok && r.path && isCurrentAction(context)) {
       invalidatePreview();
       setOptions((o) =>
-        o
+        isCurrentAction(context) && o
           ? {
               ...o,
               useProjectSong: true,
