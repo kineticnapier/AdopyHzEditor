@@ -62,6 +62,16 @@ class BackendConsistencyRound2Tests(unittest.TestCase):
         self.assertEqual(bridge.settings["snapEnabled"], DEFAULT_EDITOR_SETTINGS["snapEnabled"])
         self.assertEqual(bridge.settings["volume"], DEFAULT_EDITOR_SETTINGS["volume"])
 
+    def test_canonical_preview_octave_takes_precedence_over_legacy_alias(self):
+        bridge = Bridge()
+        # A project upgraded in place may retain both old and new fields.
+        bridge._apply_project_settings({"preview_octave": 2, "note_octave": -1})
+        self.assertEqual(bridge.settings["previewOctave"], 2)
+
+        # Old projects with only the legacy field must still load correctly.
+        bridge._apply_project_settings({"note_octave": -1})
+        self.assertEqual(bridge.settings["previewOctave"], -1)
+
     def test_midi_import_undo_redo_restores_document_duration(self):
         bridge = Bridge()
         bridge.duration = 60.0
