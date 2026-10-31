@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import webview
+from core.adofai_assets import ensure_adofai_kick
 from core.audio_analysis import (
     Spectrogram,
     analysis_profile_options,
@@ -145,6 +146,8 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self._saved_checkpoint: tuple[Any, ...] | None = None
         self._allow_window_close = False
         self._window_close_pending = False
+        self._preview_asset_lock = threading.Lock()
+        self._preview_asset_thread: threading.Thread | None = None
 
         self.duration = 60.0
         self.midi_min = 12
@@ -509,15 +512,52 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
             self._dirty = True
             return dict(self.settings)
 
+    def _prepare_adofai_kick_async(self) -> None:
+        if self.player.note_sample is not None:
+            return
+
+        with self._preview_asset_lock:
+            existing = self._preview_asset_thread
+            if existing is not None and existing.is_alive():
+                return
+
+            def worker() -> None:
+                try:
+                    path = ensure_adofai_kick()
+                    decoded = decode_audio_file(path, sr=max(1, int(self.player.sr)))
+                    self.player.set_note_sample(decoded.samples)
+                    with self._lock:
+                        if self.settings.get("previewSound") == "adofai_kick":
+                            self._status = "ADOFAI Kick を準備しました"
+                except Exception as exc:
+                    LOGGER.exception("Failed to prepare ADOFAI kick preview")
+                    with self._lock:
+                        if self.settings.get("previewSound") == "adofai_kick":
+                            self._status = f"ADOFAI Kick の準備に失敗しました: {exc}"
+                finally:
+                    with self._preview_asset_lock:
+                        self._preview_asset_thread = None
+
+            thread = threading.Thread(
+                target=worker,
+                name="adopyhz-adofai-kick",
+                daemon=True,
+            )
+            self._preview_asset_thread = thread
+            thread.start()
+
     def _apply_player_settings(self) -> None:
         self.player.set_volume(float(self.settings["volume"]) / 100.0)
         self.player.set_speed(float(self.settings["speed"]))
+        preview_sound = str(self.settings["previewSound"])
         self.player.configure_preview(
             enabled=bool(self.settings["notePreview"]),
             volume=float(self.settings["previewVolume"]) / 100.0,
             octave=int(self.settings["previewOctave"]),
-            sound=str(self.settings["previewSound"]),
+            sound=preview_sound,
         )
+        if preview_sound == "adofai_kick":
+            self._prepare_adofai_kick_async()
         self.player.configure_metronome(
             enabled=bool(self.settings["metronomeEnabled"]),
             bpm=float(self.settings["bpm"]),
