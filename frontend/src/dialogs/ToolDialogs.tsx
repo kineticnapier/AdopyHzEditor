@@ -588,7 +588,7 @@ export function HarmonicDiagramDialog({
       }
     }).catch(reason => alive && setError(String(reason)));
     return () => { alive = false; };
-  }, [api, selectionKey, attempt]);
+  }, [api, selected, attempt]);
   useEffect(() => {
     if (!opts) return;
     let alive = true;
