@@ -10,7 +10,7 @@ const source = readFileSync(
 const harmonic = source.slice(source.indexOf("export function HarmonicDiagramDialog("), source.indexOf("export function UpdateDialog("));
 
 test("selection changes invalidate harmonic defaults and the previous preview before loading", () => {
-  const effect = harmonic.slice(harmonic.indexOf("useEffect(() => {"), harmonic.indexOf("}, [api, selected, attempt]);"));
+  const effect = harmonic.slice(harmonic.indexOf("useEffect(() => {"), harmonic.indexOf("}, [api, selected, attempt, documentGeneration]);"));
   const request = effect.indexOf("api.get_harmonic_diagram_defaults(selected)");
   assert.ok(request > 0, "defaults request must be present");
   for (const reset of ["setOpts(null)", "setDefaultsSelectionKey(null)", "setPreview(null)", 'setPreviewKey("")']) {
@@ -52,19 +52,26 @@ test("harmonic dialog hides old defaults before its selection effect can run", (
 test("same note IDs from another document cannot reuse harmonic defaults", () => {
   const api = {};
   const selected = [3, 5];
-  const loaded = { api, selected, attempt: 0 };
+  const loaded = { api, selected, attempt: 0, documentGeneration: 7 };
   assert.equal(harmonicDefaultsContextIsCurrent(loaded, loaded), true);
   assert.equal(harmonicDefaultsContextIsCurrent(loaded, { ...loaded, selected: [3, 5] }), false);
   assert.equal(harmonicDefaultsContextIsCurrent(loaded, { ...loaded, api: {} }), false);
   assert.equal(harmonicDefaultsContextIsCurrent(loaded, { ...loaded, attempt: 1 }), false);
+  assert.equal(harmonicDefaultsContextIsCurrent(loaded, { ...loaded, documentGeneration: 8 }), false);
   assert.equal(harmonicDefaultsContextIsCurrent(null, loaded), false);
 });
 
 test("harmonic dialog blocks stale defaults, preview, insertion and delayed numeric blur", () => {
-  assert.match(harmonic, /harmonicDefaultsContextIsCurrent\(defaultsContext, \{ api, selected, attempt \}\)/);
+  assert.match(harmonic, /harmonicDefaultsContextIsCurrent\(defaultsContext, \{ api, selected, attempt, documentGeneration \}\)/);
   assert.match(harmonic, /setDefaultsContext\(null\)/);
-  assert.match(harmonic, /setDefaultsContext\(\{ api, selected, attempt \}\)/);
+  assert.match(harmonic, /setDefaultsContext\(\{ api, selected, attempt, documentGeneration \}\)/);
   assert.match(harmonic, /const previewCurrent = selectionCurrent &&/);
   assert.match(harmonic, /if \(!opts \|\| !selectionCurrent\) return;/);
   assert.match(harmonic, /if \(!insertingRef.current && selectionCurrent\) setOpts\(next\)/);
+});
+
+test("harmonic dialog reloads on document changes even if selection reference stays stable", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /<HarmonicDiagramDialog[\s\S]*?documentGeneration=\{documentGeneration\.current\}/);
+  assert.match(harmonic, /\[api, selected, attempt, documentGeneration\]/);
 });
