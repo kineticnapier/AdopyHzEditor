@@ -10,6 +10,7 @@ import { useDialogAccessibility } from "./useDialogAccessibility";
 import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
+import { exportDefaultsContextIsCurrent } from "./previewFreshness";
 
 type Props = {
   api: BackendApi;
@@ -28,6 +29,7 @@ export default function AdoFAIExportDialogJa({
   onHelp,
 }: Props) {
   const [options, setOptions] = useState<AdoFAIExportOptions | null>(null),
+    [loadedContext, setLoadedContext] = useState<{ api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number } | null>(null),
     [working, setWorking] = useState(false),
     [error, setError] = useState(""),
     [tile, setTile] = useState<AdoFAITilePreview | null>(null),
@@ -37,6 +39,8 @@ export default function AdoFAIExportDialogJa({
   const previewRequests = useRef(new LatestRequestGate());
   const actionOnce = useRef(createExclusiveAsyncAction());
   const workingRef = useRef(false);
+  // Compare during render: effects run after a new selection has already rendered.
+  const defaultsCurrent = exportDefaultsContextIsCurrent(loadedContext, { api, selected, defaultSelectedOnly, loadAttempt });
   useEffect(() => {
     previewRequests.current.invalidate();
     setTile(null);
@@ -46,11 +50,15 @@ export default function AdoFAIExportDialogJa({
     // A changed selection invalidates the previous export options. Do not let
     // the user export with stale defaults while the new request is pending.
     setOptions(null);
+    setLoadedContext(null);
     let alive = true;
     void api
       .get_adofai_export_defaults(selected)
       .then((v) => {
-        if (alive) setOptions({ ...v, selectedOnly:defaultSelectedOnly&&selected.length>0, harmonyTuning: "equal temperament" });
+        if (alive) {
+          setLoadedContext({ api, selected, defaultSelectedOnly, loadAttempt });
+          setOptions({ ...v, selectedOnly:defaultSelectedOnly&&selected.length>0, harmonyTuning: "equal temperament" });
+        }
       })
       .catch((e) => alive && setError(String(e)));
     return () => {
@@ -68,7 +76,7 @@ export default function AdoFAIExportDialogJa({
     v: AdoFAIExportOptions[K],
   ) {
     // A focused numeric input may blur as the form becomes disabled.
-    if (workingRef.current) return;
+    if (workingRef.current || !defaultsCurrent) return;
     invalidatePreview();
     setOptions((o) =>
       o ? { ...o, [k]: v, harmonyTuning: "equal temperament" } : o,
@@ -90,7 +98,7 @@ export default function AdoFAIExportDialogJa({
       }
     });
   }
-  const fixed = options
+  const fixed = options && defaultsCurrent
     ? { ...options, harmonyTuning: "equal temperament" as const }
     : null;
   async function exportLevel() {
@@ -145,7 +153,7 @@ export default function AdoFAIExportDialogJa({
       onStatus(r.status);
     }
   }
-  if (!options)
+  if (!options || !defaultsCurrent)
     return (
       <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
         {error ? (
