@@ -266,7 +266,7 @@ export default function AdoFAIExportDialogJa({
             <div className="info-card">音律は平均律に固定されています。</div>
           </>
         )}
-        <Field label="音声">
+        <Field label="音声" group>
           <label className="inline-check">
             <input
               type="checkbox"
@@ -277,11 +277,12 @@ export default function AdoFAIExportDialogJa({
           </label>
         </Field>
         {options.useProjectSong && (
-          <Field label="音源先">
+          <Field label="音源先" group>
             <div className="number-with-suffix">
               <input
                 type="text"
                 value={options.songSourcePath || "未選択"}
+                aria-label="音源先"
                 readOnly
                 title={options.songSourcePath || "音源先が未選択です"}
               />
@@ -296,7 +297,7 @@ export default function AdoFAIExportDialogJa({
           </Field>
         )}
         {selected.length > 0 && (
-          <Field label="出力範囲">
+          <Field label="出力範囲" group>
             <label className="inline-check">
               <input
                 type="checkbox"
@@ -582,7 +583,7 @@ export default function AdoFAIExportDialogJa({
             )}
             {options.useProjectSong && (
               <>
-                <Field label="音声コピー">
+                <Field label="音声コピー" group>
                   <label className="inline-check">
                     <input
                       type="checkbox"
@@ -612,7 +613,7 @@ export default function AdoFAIExportDialogJa({
                     />
                   </Field>
                 )}
-                <Field label="songOffset">
+                <Field label="songOffset" group>
                   <label className="inline-check">
                     <input
                       type="checkbox"
@@ -731,7 +732,24 @@ function Modal({
     </div>
   );
 }
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  children,
+  group = false,
+}: {
+  label: string;
+  children: ReactNode;
+  group?: boolean;
+}) {
+  if (group) {
+    // Group controls without nesting labels or associating multiple controls with one label.
+    return (
+      <div className="dialog-field" role="group" aria-label={label}>
+        <span>{label}</span>
+        <div>{children}</div>
+      </div>
+    );
+  }
   return (
     <label className="dialog-field">
       <span>{label}</span>
