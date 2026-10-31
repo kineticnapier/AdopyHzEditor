@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { dialogTabDestination } from "../src/dialogs/dialogFocus.ts";
+import { dialogFocusableSelector, dialogTabDestination } from "../src/dialogs/dialogFocus.ts";
 
 const items = [{ focus() {} }, { focus() {} }, { focus() {} }];
 
@@ -26,4 +27,22 @@ test("focus that escaped the dialog is restored on Tab", () => {
 test("empty dialog has no target and hook can focus its container", () => {
   assert.equal(dialogTabDestination([], null, false), null);
   assert.equal(dialogTabDestination([], null, true), null);
+});
+
+test("dialog focus trap includes native summary and links in its tabbable query", () => {
+  const selectors = dialogFocusableSelector.split(",");
+  for (const selector of ["summary", "a[href]", "area[href]"]) {
+    assert.ok(selectors.includes(selector), `missing focusable ${selector}`);
+  }
+  const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
+  assert.match(hook, /querySelectorAll<HTMLElement>\(dialogFocusableSelector\)/);
+  assert.match(hook, /item\.tabIndex >= 0/);
+});
+
+test("Tab from the details summary can advance to the first advanced setting", () => {
+  const close = { focus() {} }, summary = { focus() {} }, advanced = { focus() {} };
+  const tabbable = [close, summary, advanced];
+  assert.equal(dialogTabDestination(tabbable, summary, false), null);
+  assert.equal(dialogTabDestination(tabbable, summary, true), null);
+  assert.equal(dialogTabDestination(tabbable, advanced, false), close);
 });
