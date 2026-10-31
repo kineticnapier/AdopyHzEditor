@@ -11,7 +11,7 @@ import numpy as np
 
 import core.adofai_assets as adofai_assets
 from core.audio_player import AudioPlayer
-from core.note_model import Note
+from core.note_model import Note, hz_to_midi
 
 
 class AdoFaiKickPreviewTests(unittest.TestCase):
@@ -90,6 +90,22 @@ class AdoFaiKickPreviewTests(unittest.TestCase):
         player._mix_preview_notes(output, positions)
 
         self.assertGreater(float(np.max(np.abs(output))), 0.1)
+
+    def test_10khz_preview_builds_dense_hit_train_and_fft_mixes_it(self):
+        player = self._player()
+        player.sr = 44100
+        player.set_note_sample(np.linspace(1.0, 0.0, 512, dtype=np.float32))
+        player.set_preview_notes([Note(0.0, 0.1, hz_to_midi(10000.0))])
+
+        self.assertEqual(len(player._preview_hit_samples), 1000)
+
+        positions = np.arange(0.0, 1024.0, dtype=np.float64)
+        output = np.zeros((len(positions), 1), dtype=np.float32)
+        player._mix_preview_notes(output, positions)
+
+        self.assertTrue(np.all(np.isfinite(output)))
+        self.assertGreater(float(np.max(np.abs(output))), 0.0)
+        self.assertTrue(player._note_sample_fft_cache)
 
 
 class AdoFaiAssetLocatorTests(unittest.TestCase):
