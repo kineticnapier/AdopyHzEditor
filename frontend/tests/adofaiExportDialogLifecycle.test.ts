@@ -16,7 +16,7 @@ test("selection refresh disables export until new defaults arrive", () => {
   assert.match(effect, /setOptions\(null\)/);
   assert.ok(effect.indexOf("setOptions(null)") < loadStart - effectStart);
   assert.match(source, /if \(!options \|\| !defaultsCurrent\)\s*return\s*\(/);
-  assert.match(source, /if \(alive\) setOptions\(/);
+  assert.match(source, /if \(alive\) \{\s*setLoadedContext\(/);
 });
 
 test("export and preview failures are announced to assistive technology", () => {
@@ -25,7 +25,7 @@ test("export and preview failures are announced to assistive technology", () => 
 });
 
 test("selection refresh cannot unlock a still-running export", () => {
-  const loadingStart = source.indexOf("if (!options)");
+  const loadingStart = source.indexOf("if (!options || !defaultsCurrent)");
   const loadedStart = source.indexOf("const isHarmony", loadingStart);
   assert.ok(loadingStart >= 0 && loadedStart > loadingStart);
   const loading = source.slice(loadingStart, loadedStart);
