@@ -147,7 +147,7 @@ function Num({
 function LoadFailure({ error, onRetry }: { error: string; onRetry(): void }) {
   return (
     <>
-      <div className="dialog-error">読込に失敗しました: {error}</div>
+      <div className="dialog-error" role="alert">読込に失敗しました: {error}</div>
       <div className="dialog-footer">
         <span />
         <button className="primary" onClick={onRetry}>
