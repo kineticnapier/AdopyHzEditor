@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import threading
 import numpy as np
@@ -77,8 +77,10 @@ class AudioPlayer:
         self.note_volume = 0.20
         self.note_octave_shift = 0
         self.note_instrument = "sine"
+        self.note_sample: np.ndarray | None = None
         self.preview_notes: list[PreviewSegment | tuple[int, int, float]] = []
         self._preview_ends: list[int] = []
+        self._preview_onsets: list[int] = []
 
         try:
             import sounddevice as sd  # noqa
@@ -160,9 +162,12 @@ class AudioPlayer:
             "organ_like": "organ",
             "square_wave": "square",
             "triangle_wave": "triangle",
+            "kick": "adofai_kick",
+            "adofai": "adofai_kick",
+            "adofai_kick": "adofai_kick",
         }
         key = aliases.get(key, key)
-        if key not in {"sine", "piano", "organ", "square", "triangle"}:
+        if key not in {"sine", "piano", "organ", "square", "triangle", "adofai_kick"}:
             key = "sine"
         return key
 
@@ -174,12 +179,29 @@ class AudioPlayer:
             if instrument is not None:
                 self.note_instrument = self._normalize_note_instrument(str(instrument))
 
+    def set_note_sample(self, audio: np.ndarray | None) -> None:
+        sample: np.ndarray | None
+        if audio is None:
+            sample = None
+        else:
+            data = np.asarray(audio, dtype=np.float32)
+            if data.ndim == 2:
+                data = np.mean(data, axis=1, dtype=np.float32)
+            elif data.ndim != 1:
+                data = np.ravel(data).astype(np.float32, copy=False)
+            sample = np.ascontiguousarray(data, dtype=np.float32)
+            if len(sample) == 0:
+                sample = None
+        with self.lock:
+            self.note_sample = sample
+
     def set_preview_notes(self, notes) -> None:
         """
         notes: objects with start, end, midi or tuples (start, end, midi)
         Curve notes are sampled into short fixed-pitch preview notes.
         """
         prepared: list[PreviewSegment] = []
+        onsets: list[int] = []
         sr = max(1, int(self.sr))
 
         for n in notes:
@@ -209,11 +231,14 @@ class AudioPlayer:
                     segment_index == 0,
                     segment_index == len(segments) - 1,
                 ))
+                if segment_index == 0:
+                    onsets.append(start_sample)
                 phase += 2.0 * np.pi * midi_to_hz(float(midi)) * (end_sample - start_sample) / sr
 
         prepared.sort(key=lambda x: x.start)
         with self.lock:
             self.preview_notes = prepared
+            self._preview_onsets = sorted(onsets)
             max_end = 0
             self._preview_ends = []
             for segment in prepared:
@@ -292,11 +317,56 @@ class AudioPlayer:
             sampled = click[i0] * (1.0 - frac) + click[i1] * frac
             outdata[out_s:out_e, :] += sampled * self.metronome_volume
 
+    def _mix_preview_sample(self, outdata, source_positions: np.ndarray) -> bool:
+        sample = self.note_sample
+        if sample is None or len(sample) == 0:
+            return False
+        if len(source_positions) == 0:
+            return True
+
+        starts = self._preview_onsets
+        if not starts:
+            starts = [
+                int(segment[0])
+                for segment in self.preview_notes
+                if bool(getattr(segment, "fade_in", True))
+            ]
+        if not starts:
+            return True
+
+        block_start = float(source_positions[0])
+        block_end = float(source_positions[-1])
+        sample_len = len(sample)
+        first = bisect_left(starts, block_start - sample_len - 1.0)
+        for onset in starts[first:]:
+            if onset > block_end:
+                break
+            if onset + sample_len <= block_start:
+                continue
+
+            out_s = int(np.searchsorted(source_positions, onset, side="left"))
+            out_e = int(np.searchsorted(source_positions, onset + sample_len, side="left"))
+            if out_e <= out_s:
+                continue
+
+            positions = source_positions[out_s:out_e] - float(onset)
+            i0 = np.floor(positions).astype(np.int64)
+            i0 = np.clip(i0, 0, sample_len - 1)
+            i1 = np.minimum(i0 + 1, sample_len - 1)
+            frac = (positions - i0).astype(np.float32)
+            sampled = sample[i0] * (1.0 - frac) + sample[i1] * frac
+            outdata[out_s:out_e, 0] += sampled * self.note_volume
+        return True
+
     def _mix_preview_notes(self, outdata, source_positions: np.ndarray) -> None:
         if not self.note_sound_enabled or self.note_volume <= 0 or not self.preview_notes:
             return
         if len(source_positions) == 0:
             return
+
+        if str(getattr(self, "note_instrument", "sine")) == "adofai_kick":
+            if self._mix_preview_sample(outdata, source_positions):
+                return
 
         block_start = float(source_positions[0])
         block_end = float(source_positions[-1])
