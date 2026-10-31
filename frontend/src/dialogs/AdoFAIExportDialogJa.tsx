@@ -12,6 +12,8 @@ import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { exportDefaultsContextIsCurrent } from "./previewFreshness";
 
+type ExportContext = { api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number };
+
 type Props = {
   api: BackendApi;
   selected: number[];
@@ -33,7 +35,7 @@ export default function AdoFAIExportDialogJa({
   const [options, setOptions] = useState<AdoFAIExportOptions | null>(null),
     [loadedContext, setLoadedContext] = useState<{ api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number } | null>(null),
     [working, setWorking] = useState(false),
-    [error, setError] = useState(""),
+    [error, setError] = useState<{ message: string; context: ExportContext } | null>(null),
     [tile, setTile] = useState<AdoFAITilePreview | null>(null),
     [debug, setDebug] = useState<AdoFAIDebugPreview | null>(null),
     [previewMode, setPreviewMode] = useState<"none" | "tile" | "debug">("none");
@@ -47,6 +49,9 @@ export default function AdoFAIExportDialogJa({
   latestRequestContext.current = requestContext;
   // Compare during render: effects run after a new selection has already rendered.
   const defaultsCurrent = exportDefaultsContextIsCurrent(loadedContext, requestContext);
+  // A failure from a previous selection/document must not appear in the new form.
+  const currentError = exportDefaultsContextIsCurrent(error?.context ?? null, requestContext)
+    ? error!.message : "";
   function isCurrentAction(context: typeof loadedContext) {
     return exportDefaultsContextIsCurrent(context, latestRequestContext.current);
   }
@@ -55,7 +60,7 @@ export default function AdoFAIExportDialogJa({
     setTile(null);
     setDebug(null);
     setPreviewMode("none");
-    setError("");
+    setError(null);
     // A changed selection invalidates the previous export options. Do not let
     // the user export with stale defaults while the new request is pending.
     setOptions(null);
@@ -69,7 +74,9 @@ export default function AdoFAIExportDialogJa({
           setOptions({ ...v, selectedOnly:defaultSelectedOnly&&selected.length>0, harmonyTuning: "equal temperament" });
         }
       })
-      .catch((e) => alive && setError(String(e)));
+      .catch((e) => {
+        if (alive) setError({ message: String(e), context: { api, selected, defaultSelectedOnly, loadAttempt, documentGeneration } });
+      });
     return () => {
       alive = false;
     };
@@ -96,11 +103,11 @@ export default function AdoFAIExportDialogJa({
     return actionOnce.current(async () => {
       workingRef.current = true;
       setWorking(true);
-      setError("");
+      setError(null);
       try {
         return await fn();
       } catch (e) {
-        if (isCurrentAction(context)) setError(String(e));
+        if (context && isCurrentAction(context)) setError({ message: String(e), context });
         return null;
       } finally {
         workingRef.current = false;
@@ -171,10 +178,10 @@ export default function AdoFAIExportDialogJa({
   if (!options || !defaultsCurrent)
     return (
       <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
-        {error ? (
+        {currentError ? (
           <>
             <div className="dialog-error" role="alert">
-              設定の読込に失敗しました: {error}
+              設定の読込に失敗しました: {currentError}
             </div>
             <div className="dialog-footer">
               <button onClick={onClose} disabled={working}>閉じる</button>
@@ -688,7 +695,7 @@ export default function AdoFAIExportDialogJa({
           </div>
         </details>
         </fieldset>
-        {error && <div className="dialog-error" role="alert">{error}</div>}
+        {currentError && <div className="dialog-error" role="alert">{currentError}</div>}
         {previewMode === "tile" && tile && <TilePreview preview={tile} />}{" "}
         {previewMode === "debug" && debug && <DebugPreview preview={debug} />}
       </div>
