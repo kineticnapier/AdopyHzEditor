@@ -57,3 +57,13 @@ test("Quick Hz output preview is named and tool errors are announced", () => {
   const inlineErrors = source.match(/<div className="dialog-error inline" role="alert">\{error\}<\/div>/g);
   assert.equal(inlineErrors?.length, 2, "both tool error panels announce failures");
 });
+
+test("tool dialog load failures are announced as alerts", () => {
+  const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function LoadFailure(");
+  const end = source.indexOf("\nexport function BlankWorkspaceDialog(", start);
+  assert.ok(start >= 0 && end > start, "shared load failure component exists");
+  const component = source.slice(start, end);
+  assert.match(component, /<div className="dialog-error" role="alert">読込に失敗しました: \{error\}<\/div>/);
+  assert.ok((source.match(/<LoadFailure\b/g) ?? []).length >= 2, "the shared error component is reused");
+});
