@@ -182,7 +182,8 @@ test("state actions, blank workspace and pending save use the same queue", () =>
   assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*guardedAction/);
   assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
   assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return api\.save_project_dialog\(\)/);
-  assert.match(dialogs, /await onApply\(value\)/);
+  assert.match(dialogs, /const snapshot = \{ \.\.\.value \}/);
+  assert.match(dialogs, /await onApply\(snapshot\)/);
 });
 
 test("pending settings finish before document state is requested or applied", async () => {
