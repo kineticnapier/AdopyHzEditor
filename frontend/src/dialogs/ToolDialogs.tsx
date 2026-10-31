@@ -546,11 +546,13 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
 export function HarmonicDiagramDialog({
   api,
   selected,
+  documentGeneration,
   onClose,
   onStatus,
   onQueuedMutation,
 }: Common & {
   selected: number[];
+  documentGeneration: number;
   onQueuedMutation(
     call: () => Promise<NoteMutationResult>,
     selection?: (result: NoteMutationResult) => number[] | undefined,
@@ -563,12 +565,12 @@ export function HarmonicDiagramDialog({
     [preview, setPreview] = useState<HarmonicPreview | null>(null),
     [previewKey,setPreviewKey]=useState(""),
     [defaultsSelectionKey, setDefaultsSelectionKey] = useState<string | null>(null),
-    [defaultsContext, setDefaultsContext] = useState<{ api: ToolBackendApi; selected: number[]; attempt: number } | null>(null),
+    [defaultsContext, setDefaultsContext] = useState<{ api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number } | null>(null),
     [error, setError] = useState(""),
     [attempt, setAttempt] = useState(0);
   const selectionKey = JSON.stringify(selected);
   const selectionCurrent = defaultsSelectionKey === selectionKey &&
-    harmonicDefaultsContextIsCurrent(defaultsContext, { api, selected, attempt });
+    harmonicDefaultsContextIsCurrent(defaultsContext, { api, selected, attempt, documentGeneration });
   const previewCurrent = selectionCurrent && selectionScopedPreviewIsCurrent(preview, previewKey, JSON.stringify(opts), defaultsSelectionKey, selectionKey);
   function updateOpts(next: HarmonicDiagramOptions) {
     // A numeric field can commit on blur while disabling the form.
@@ -588,11 +590,11 @@ export function HarmonicDiagramDialog({
       if (alive) {
         setOpts(value);
         setDefaultsSelectionKey(selectionKey);
-        setDefaultsContext({ api, selected, attempt });
+        setDefaultsContext({ api, selected, attempt, documentGeneration });
       }
     }).catch(reason => alive && setError(String(reason)));
     return () => { alive = false; };
-  }, [api, selected, attempt]);
+  }, [api, selected, attempt, documentGeneration]);
   useEffect(() => {
     if (!opts) return;
     let alive = true;
