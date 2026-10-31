@@ -63,3 +63,48 @@ test("ADOFAI export reloads after document replacement with the same selection",
   assert.match(app, /<AdoFAIExportDialog[\s\S]*?documentGeneration=\{documentGeneration\.current\}/);
   assert.match(source, /\[api, selected, defaultSelectedOnly, loadAttempt, documentGeneration\]/);
 });
+
+test("late song-source chooser results cannot belong to a replacement document", async () => {
+  const api = {};
+  const selected = [1];
+  const original = { api, selected, defaultSelectedOnly: true, loadAttempt: 0, documentGeneration: 5 };
+  let latest = original;
+  let complete!: (path: string) => void;
+  const chooser = new Promise<string>((resolve) => { complete = resolve; });
+  const accepted = chooser.then((path) =>
+    exportDefaultsContextIsCurrent(original, latest) ? path : null,
+  );
+  // retainValidSelection can keep the same array even after document replacement.
+  latest = { ...original, documentGeneration: 6 };
+  complete("old-document.ogg");
+  assert.equal(await accepted, null);
+
+  // The same completion is valid if the request context has not changed.
+  assert.equal(exportDefaultsContextIsCurrent(original, original), true);
+  assert.equal(exportDefaultsContextIsCurrent(original, { ...original, selected: [1] }), false);
+});
+
+test("ADOFAI export actions recheck their original context after awaiting", () => {
+  assert.match(source, /const latestRequestContext = useRef\(requestContext\)/);
+  assert.match(source, /latestRequestContext\.current = requestContext/);
+  assert.match(source, /function isCurrentAction\(context: typeof loadedContext\)/);
+  const actions = [
+    ["exportLevel", "tilePreview"],
+    ["tilePreview", "debugPreview"],
+    ["debugPreview", "chooseSongSource"],
+    ["chooseSongSource", "if (!options || !defaultsCurrent)"],
+  ];
+  for (const [start, end] of actions) {
+    const section = source.slice(
+      source.indexOf(`async function ${start}()`),
+      source.indexOf(end.startsWith("if (") ? end : `async function ${end}()`),
+    );
+    assert.match(section, /const context = loadedContext/);
+    assert.match(section, /if \(!fixed \|\| !context\) return/);
+    assert.match(section, /isCurrentAction\(context\)/);
+  }
+  const chooser = source.slice(source.indexOf("async function chooseSongSource()"));
+  assert.match(chooser, /setOptions\(\(o\) =>\s*isCurrentAction\(context\) && o/);
+  const run = source.slice(source.indexOf("async function run<"), source.indexOf("const fixed ="));
+  assert.match(run, /if \(isCurrentAction\(context\)\) setError\(String\(e\)\)/);
+});
