@@ -43,6 +43,9 @@ export default function AdoFAIExportDialogJa({
     setDebug(null);
     setPreviewMode("none");
     setError("");
+    // A changed selection invalidates the previous export options. Do not let
+    // the user export with stale defaults while the new request is pending.
+    setOptions(null);
     let alive = true;
     void api
       .get_adofai_export_defaults(selected)
@@ -661,7 +664,7 @@ export default function AdoFAIExportDialogJa({
           </div>
         </details>
         </fieldset>
-        {error && <div className="dialog-error">{error}</div>}
+        {error && <div className="dialog-error" role="alert">{error}</div>}
         {previewMode === "tile" && tile && <TilePreview preview={tile} />}{" "}
         {previewMode === "debug" && debug && <DebugPreview preview={debug} />}
       </div>
