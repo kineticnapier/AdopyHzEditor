@@ -147,7 +147,7 @@ export default function AdoFAIExportDialogJa({
   }
   if (!options)
     return (
-      <Modal title="ADOFAI出力" onClose={onClose}>
+      <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
         {error ? (
           <>
             <div className="dialog-error" role="alert">
@@ -157,6 +157,7 @@ export default function AdoFAIExportDialogJa({
               <button onClick={onClose}>閉じる</button>
               <button
                 className="primary"
+                disabled={working}
                 onClick={() => setLoadAttempt((v) => v + 1)}
               >
                 再試行
@@ -164,7 +165,7 @@ export default function AdoFAIExportDialogJa({
             </div>
           </>
         ) : (
-          <div className="dialog-loading">設定を読み込んでいます…</div>
+          <div className="dialog-loading" role="status">{working ? "出力処理中…" : "設定を読み込んでいます…"}</div>
         )}
       </Modal>
     );
