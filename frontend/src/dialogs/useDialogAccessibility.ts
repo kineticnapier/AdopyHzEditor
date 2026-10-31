@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import { dialogFocusableSelector, dialogTabDestination } from "./dialogFocus";
+import { dialogFocusableSelector, dialogTabDestination, isDialogTabbable } from "./dialogFocus";
 
 export function useDialogAccessibility(onClose: () => void) {
   const dialogRef = useRef<HTMLElement>(null), titleId = useId(), closeRef = useRef(onClose);
@@ -8,7 +8,7 @@ export function useDialogAccessibility(onClose: () => void) {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(dialogFocusableSelector) ?? [])
-      .filter(item => item.getClientRects().length > 0 && item.tabIndex >= 0);
+      .filter(isDialogTabbable);
     const frame = window.requestAnimationFrame(() => {
       if (dialog?.isConnected) (focusable()[0] ?? dialog).focus();
     });
