@@ -27,6 +27,20 @@ for (const file of dialogFiles) {
   });
 }
 
+test("numeric dialog inputs leave composition keys to the IME", () => {
+  for (const file of dialogFiles) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    assert.match(source, /import \{ isDialogCompositionKey \} from "\.\/dialogFocus";/);
+    const start = source.indexOf("function Num({");
+    const end = source.indexOf("\n}\n", start);
+    assert.ok(start >= 0 && end > start, "numeric component exists");
+    const component = source.slice(start, end + 2);
+    // The local handler runs before the window-level dialog focus handler.
+    assert.match(component, /onKeyDown=\{\(event\) => \{[\s\S]*?if \(isDialogCompositionKey\(event\.nativeEvent\)\) return;[\s\S]*?if \(event\.key === "Enter"\)/);
+    assert.match(component, /else if \(event\.key === "Escape"\)/);
+  }
+});
+
 test("tool dialogs commit signed decimals and restore cancelled/blank edits", () => {
   assert.equal(commitNumericEdit("-123.5", 0, -3600000, 3600000, false), -123.5);
   assert.equal(commitNumericEdit("0.125", 16, 0.001, 100000, false), 0.125);
