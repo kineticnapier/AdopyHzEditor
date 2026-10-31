@@ -63,7 +63,16 @@ function Modal({
     </div>
   );
 }
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children, group = false }: { label: string; children: ReactNode; group?: boolean }) {
+  if (group) {
+    // A label must not contain multiple controls or another label.
+    return (
+      <div className="dialog-field" role="group" aria-label={label}>
+        <span>{label}</span>
+        <div>{children}</div>
+      </div>
+    );
+  }
   return (
     <label className="dialog-field">
       <span>{label}</span>
@@ -72,6 +81,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 function Num({
+  label,
   value,
   min,
   max,
@@ -79,6 +89,7 @@ function Num({
   disabled,
   onChange,
 }: {
+  label?: string;
   value: number;
   min: number;
   max: number;
@@ -110,6 +121,7 @@ function Num({
   return (
       <input
         type="number"
+        aria-label={label}
         value={text}
         min={min}
         max={max}
@@ -418,7 +430,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               onChange={(v) => setOpts({ ...opts, startFloor: Math.round(v) })}
             />
           </Field>
-          <Field label="生成範囲">
+          <Field label="生成範囲" group>
             <div className="compact-row">
               <label>
                 <input
@@ -433,6 +445,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               </label>
               {opts.useEndFloor ? (
                 <Num
+                  label="終了床"
                   disabled={!actions.canEdit}
                   value={opts.endFloor}
                   min={0}
@@ -443,6 +456,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
                 />
               ) : (
                 <Num
+                  label="生成数"
                   disabled={!actions.canEdit}
                   value={opts.count}
                   min={1}
