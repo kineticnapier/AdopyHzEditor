@@ -7,6 +7,7 @@ import type {
 } from "./bridge";
 import { LatestRequestGate } from "../api/requestCoordinator";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 
@@ -42,6 +43,9 @@ export default function AdoFAIExportDialogJa({
     setDebug(null);
     setPreviewMode("none");
     setError("");
+    // A changed selection invalidates the previous export options. Do not let
+    // the user export with stale defaults while the new request is pending.
+    setOptions(null);
     let alive = true;
     void api
       .get_adofai_export_defaults(selected)
@@ -143,16 +147,17 @@ export default function AdoFAIExportDialogJa({
   }
   if (!options)
     return (
-      <Modal title="ADOFAI出力" onClose={onClose}>
+      <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
         {error ? (
           <>
-            <div className="dialog-error">
+            <div className="dialog-error" role="alert">
               設定の読込に失敗しました: {error}
             </div>
             <div className="dialog-footer">
-              <button onClick={onClose}>閉じる</button>
+              <button onClick={onClose} disabled={working}>閉じる</button>
               <button
                 className="primary"
+                disabled={working}
                 onClick={() => setLoadAttempt((v) => v + 1)}
               >
                 再試行
@@ -160,7 +165,7 @@ export default function AdoFAIExportDialogJa({
             </div>
           </>
         ) : (
-          <div className="dialog-loading">設定を読み込んでいます…</div>
+          <div className="dialog-loading" role="status">{working ? "出力処理中…" : "設定を読み込んでいます…"}</div>
         )}
       </Modal>
     );
@@ -660,7 +665,7 @@ export default function AdoFAIExportDialogJa({
           </div>
         </details>
         </fieldset>
-        {error && <div className="dialog-error">{error}</div>}
+        {error && <div className="dialog-error" role="alert">{error}</div>}
         {previewMode === "tile" && tile && <TilePreview preview={tile} />}{" "}
         {previewMode === "debug" && debug && <DebugPreview preview={debug} />}
       </div>
@@ -720,6 +725,7 @@ function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-busy={locked}
       >
         <header className="modal-title">
           <strong id={titleId}>{title}</strong>
@@ -817,6 +823,8 @@ function Num({
         onChange={(event) => setText(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
+          // IME owns Enter/Escape while a composition is active.
+          if (isDialogCompositionKey(event.nativeEvent)) return;
           if (event.key === "Enter") event.currentTarget.blur();
           else if (event.key === "Escape") {
             event.preventDefault();

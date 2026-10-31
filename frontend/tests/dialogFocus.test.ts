@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { dialogTabDestination } from "../src/dialogs/dialogFocus.ts";
+import { dialogFocusableSelector, dialogTabDestination, isDialogCompositionKey, isDialogTabbable } from "../src/dialogs/dialogFocus.ts";
 
 const items = [{ focus() {} }, { focus() {} }, { focus() {} }];
 
@@ -26,4 +27,77 @@ test("focus that escaped the dialog is restored on Tab", () => {
 test("empty dialog has no target and hook can focus its container", () => {
   assert.equal(dialogTabDestination([], null, false), null);
   assert.equal(dialogTabDestination([], null, true), null);
+});
+
+test("dialog focus trap includes native summary and links in its tabbable query", () => {
+  const selectors = dialogFocusableSelector.split(",");
+  for (const selector of ["summary", "a[href]", "area[href]"]) {
+    assert.ok(selectors.includes(selector), `missing focusable ${selector}`);
+  }
+  const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
+  assert.match(hook, /querySelectorAll<HTMLElement>\(dialogFocusableSelector\)/);
+  assert.match(hook, /\.filter\(isDialogTabbable\)/);
+});
+
+test("Tab from the details summary can advance to the first advanced setting", () => {
+  const close = { focus() {} }, summary = { focus() {} }, advanced = { focus() {} };
+  const tabbable = [close, summary, advanced];
+  assert.equal(dialogTabDestination(tabbable, summary, false), null);
+  assert.equal(dialogTabDestination(tabbable, summary, true), null);
+  assert.equal(dialogTabDestination(tabbable, advanced, false), close);
+});
+
+function fakeDialogControl(options: {
+  disabled?: boolean;
+  inert?: boolean;
+  hidden?: boolean;
+  visibility?: "visible" | "hidden" | "collapse";
+  tabIndex?: number;
+} = {}): HTMLElement {
+  return {
+    getClientRects: () => options.hidden ? [] : [{}],
+    ownerDocument: { defaultView: { getComputedStyle: () => ({ visibility: options.visibility ?? "visible" }) } },
+    tabIndex: options.tabIndex ?? 0,
+    matches: (selector: string) => {
+      assert.equal(selector, ":disabled");
+      return !!options.disabled;
+    },
+    closest: (selector: string) => {
+      assert.equal(selector, "[inert]");
+      return options.inert ? {} : null;
+    },
+  } as unknown as HTMLElement;
+}
+
+test("dialog Tab trap skips controls disabled by their parent fieldset", () => {
+  // HTML :disabled matches controls disabled by <fieldset disabled>, even
+  // when the child input has no disabled attribute of its own.
+  assert.equal(isDialogTabbable(fakeDialogControl()), true);
+  assert.equal(isDialogTabbable(fakeDialogControl({ disabled: true })), false);
+});
+
+test("dialog Tab trap skips inert, hidden, and negative-tabIndex controls", () => {
+  assert.equal(isDialogTabbable(fakeDialogControl({ inert: true })), false);
+  assert.equal(isDialogTabbable(fakeDialogControl({ hidden: true })), false);
+  assert.equal(isDialogTabbable(fakeDialogControl({ tabIndex: -1 })), false);
+});
+
+
+test("dialog Tab trap excludes visibility-hidden controls even with layout rectangles", () => {
+  assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "hidden" })), false);
+  assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "collapse" })), false);
+  assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "visible" })), true);
+});
+
+
+test("dialog Escape and Tab do not interrupt IME conversion", () => {
+  // During Japanese conversion Escape cancels a candidate, not the dialog.
+  assert.equal(isDialogCompositionKey({ isComposing: true, keyCode: 27 }), true);
+  assert.equal(isDialogCompositionKey({ isComposing: true, keyCode: 9 }), true);
+  // Windows IME compatibility: composition can be signalled only by keyCode 229.
+  assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 229 }), true);
+  assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 27 }), false);
+  assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 9 }), false);
+  const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
+  assert.match(hook, /event\.defaultPrevented \|\| isDialogCompositionKey\(event\)/);
 });

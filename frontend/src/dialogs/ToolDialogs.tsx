@@ -9,6 +9,7 @@ import type {
   ToolBackendApi,
 } from "./toolsBridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
@@ -131,6 +132,8 @@ function Num({
         onChange={(event) => setText(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
+          // IME owns Enter/Escape while a composition is active.
+          if (isDialogCompositionKey(event.nativeEvent)) return;
           if (event.key === "Enter") event.currentTarget.blur();
           else if (event.key === "Escape") {
             event.preventDefault();
@@ -144,13 +147,13 @@ function Num({
       />
   );
 }
-function LoadFailure({ error, onRetry }: { error: string; onRetry(): void }) {
+function LoadFailure({ error, onRetry, disabled = false }: { error: string; onRetry(): void; disabled?: boolean }) {
   return (
     <>
-      <div className="dialog-error">読込に失敗しました: {error}</div>
+      <div className="dialog-error" role="alert">読込に失敗しました: {error}</div>
       <div className="dialog-footer">
         <span />
-        <button className="primary" onClick={onRetry}>
+        <button className="primary" onClick={onRetry} disabled={disabled}>
           再試行
         </button>
       </div>
@@ -496,7 +499,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               </div>
             </div>
           )}
-          {error && <div className="dialog-error inline">{error}</div>}
+          {error && <div className="dialog-error inline" role="alert">{error}</div>}
           <div className="chart-tools">
             <button onClick={() => void chooseChart()} disabled={!actions.canChooseChart}>譜面を選択…</button>
             <span title={chart}>
@@ -519,7 +522,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           </div>
         </section>
         <section className="quick-hz-output">
-          <textarea value={resultCurrent ? result?.output ?? "" : ""} readOnly spellCheck={false} />
+          <textarea aria-label="Quick Hz出力プレビュー" value={resultCurrent ? result?.output ?? "" : ""} readOnly spellCheck={false} />
           <div className="preview-actions">
             <button onClick={() => void copy()} disabled={!actions.canOutput}>
               {outputting === "copy" ? "コピー中…" : "コピー"}
@@ -568,6 +571,11 @@ export function HarmonicDiagramDialog({
   }
   useEffect(() => {
     let alive = true;
+    // Selection-dependent defaults are invalid as soon as the selection changes.
+    // Do not allow inserting the previous selection's diagram while loading.
+    setOpts(null);
+    setPreview(null);
+    setPreviewKey("");
     setError("");
     void api.get_harmonic_diagram_defaults(selected).then(value => alive && setOpts(value)).catch(reason => alive && setError(String(reason)));
     return () => { alive = false; };
@@ -624,11 +632,11 @@ export function HarmonicDiagramDialog({
     });
   }
   if (!opts && error)
-    return <Modal title="倍音ダイアグラム" onClose={onClose}><LoadFailure error={error} onRetry={() => setAttempt(value => value + 1)} /></Modal>;
+    return <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}><LoadFailure error={error} onRetry={() => setAttempt(value => value + 1)} disabled={inserting} /></Modal>;
   if (!opts)
     return (
-      <Modal title="倍音ダイアグラム" onClose={onClose}>
-        <div className="dialog-loading">読み込み中…</div>
+      <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}>
+        <div className="dialog-loading" role="status">{inserting ? "挿入処理中…" : "読み込み中…"}</div>
       </Modal>
     );
   return (
@@ -723,7 +731,7 @@ export function HarmonicDiagramDialog({
               onChange={(v) => updateOpts({ ...opts, offset: Math.round(v) })}
             />
           </Field>
-          {error && <div className="dialog-error inline">{error}</div>}
+          {error && <div className="dialog-error inline" role="alert">{error}</div>}
         </fieldset>
         <section className="harmonic-preview">
           {previewCurrent && preview ? (
