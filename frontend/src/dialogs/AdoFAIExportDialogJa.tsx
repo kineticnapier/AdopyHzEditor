@@ -15,6 +15,7 @@ import { exportDefaultsContextIsCurrent } from "./previewFreshness";
 type Props = {
   api: BackendApi;
   selected: number[];
+  documentGeneration: number;
   defaultSelectedOnly?: boolean;
   onClose(): void;
   onStatus(text: string): void;
@@ -23,13 +24,14 @@ type Props = {
 export default function AdoFAIExportDialogJa({
   api,
   selected,
+  documentGeneration,
   defaultSelectedOnly = false,
   onClose,
   onStatus,
   onHelp,
 }: Props) {
   const [options, setOptions] = useState<AdoFAIExportOptions | null>(null),
-    [loadedContext, setLoadedContext] = useState<{ api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number } | null>(null),
+    [loadedContext, setLoadedContext] = useState<{ api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number } | null>(null),
     [working, setWorking] = useState(false),
     [error, setError] = useState(""),
     [tile, setTile] = useState<AdoFAITilePreview | null>(null),
@@ -40,7 +42,7 @@ export default function AdoFAIExportDialogJa({
   const actionOnce = useRef(createExclusiveAsyncAction());
   const workingRef = useRef(false);
   // Compare during render: effects run after a new selection has already rendered.
-  const defaultsCurrent = exportDefaultsContextIsCurrent(loadedContext, { api, selected, defaultSelectedOnly, loadAttempt });
+  const defaultsCurrent = exportDefaultsContextIsCurrent(loadedContext, { api, selected, defaultSelectedOnly, loadAttempt, documentGeneration });
   useEffect(() => {
     previewRequests.current.invalidate();
     setTile(null);
@@ -56,7 +58,7 @@ export default function AdoFAIExportDialogJa({
       .get_adofai_export_defaults(selected)
       .then((v) => {
         if (alive) {
-          setLoadedContext({ api, selected, defaultSelectedOnly, loadAttempt });
+          setLoadedContext({ api, selected, defaultSelectedOnly, loadAttempt, documentGeneration });
           setOptions({ ...v, selectedOnly:defaultSelectedOnly&&selected.length>0, harmonyTuning: "equal temperament" });
         }
       })
@@ -64,7 +66,7 @@ export default function AdoFAIExportDialogJa({
     return () => {
       alive = false;
     };
-  }, [api, selected, defaultSelectedOnly, loadAttempt]);
+  }, [api, selected, defaultSelectedOnly, loadAttempt, documentGeneration]);
   function invalidatePreview() {
     previewRequests.current.invalidate();
     setTile(null);
