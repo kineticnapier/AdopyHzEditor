@@ -20,8 +20,8 @@ test("selection refresh disables export until new defaults arrive", () => {
 });
 
 test("export and preview failures are announced to assistive technology", () => {
-  assert.match(source, /\{error && <div className="dialog-error" role="alert">\{error\}<\/div>\}/);
-  assert.match(source, /setError\(String\(e\)\)/);
+  assert.match(source, /\{currentError && <div className="dialog-error" role="alert">\{currentError\}<\/div>\}/);
+  assert.match(source, /setError\(\{ message: String\(e\), context/);
 });
 
 test("selection refresh cannot unlock a still-running export", () => {
@@ -106,5 +106,23 @@ test("ADOFAI export actions recheck their original context after awaiting", () =
   const chooser = source.slice(source.indexOf("async function chooseSongSource()"));
   assert.match(chooser, /setOptions\(\(o\) =>\s*isCurrentAction\(context\) && o/);
   const run = source.slice(source.indexOf("async function run<"), source.indexOf("const fixed ="));
-  assert.match(run, /if \(isCurrentAction\(context\)\) setError\(String\(e\)\)/);
+  assert.match(run, /if \(context && isCurrentAction\(context\)\) setError\(\{ message: String\(e\), context \}\)/);
+});
+
+
+test("ADOFAI export errors are scoped to the originating request before effects", () => {
+  const api = {};
+  const selected = [3];
+  const original = { api, selected, defaultSelectedOnly: false, loadAttempt: 0, documentGeneration: 1 };
+  const visibleError = (current: typeof original) =>
+    exportDefaultsContextIsCurrent(original, current) ? "old request failed" : "";
+  assert.equal(visibleError(original), "old request failed");
+  assert.equal(visibleError({ ...original, selected: [3] }), "");
+  assert.equal(visibleError({ ...original, documentGeneration: 2 }), "");
+  assert.equal(visibleError({ ...original, api: {} }), "");
+  assert.equal(visibleError({ ...original, loadAttempt: 1 }), "");
+  assert.match(source, /const currentError = exportDefaultsContextIsCurrent\(error\?\.context \?\? null, requestContext\)/);
+  assert.match(source, /\{currentError \? \(/);
+  assert.match(source, /\{currentError && <div className="dialog-error" role="alert">\{currentError\}<\/div>\}/);
+  assert.match(source, /if \(alive\) setError\(\{ message: String\(e\), context: \{ api, selected, defaultSelectedOnly, loadAttempt, documentGeneration \} \}\)/);
 });
