@@ -23,7 +23,7 @@ test("selection refresh does not unlock a pending harmonic insertion", () => {
   const loading = harmonic.slice(harmonic.indexOf("if (!opts && error)"), harmonic.indexOf("return (\n    <Modal title=\"倍音ダイアグラム\" onClose={onClose} wide"));
   assert.match(loading, /<Modal title="倍音ダイアグラム" onClose=\{onClose\} locked=\{inserting\}>/g);
   assert.equal((loading.match(/locked=\{inserting\}/g) ?? []).length, 2);
-  assert.match(loading, /<LoadFailure[^>]*disabled=\{inserting\}/);
+  assert.match(loading, /<LoadFailure[^\n]*disabled=\{inserting\}/);
   assert.match(loading, /className="dialog-loading" role="status"/);
   assert.match(loading, /inserting \? "挿入処理中…"/);
   assert.match(source, /function LoadFailure\(\{ error, onRetry, disabled = false \}/);
