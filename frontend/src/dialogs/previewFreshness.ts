@@ -51,3 +51,23 @@ export function blankWorkspaceDefaultsContextIsCurrent(
 ): boolean {
   return loaded !== null && loaded.api === current.api && loaded.attempt === current.attempt;
 }
+
+/** A Quick Hz preview must come from the current backend, not only matching options. */
+export function quickHzPreviewIsCurrent<T>(
+  preview: T | null,
+  previewKey: string,
+  optionsKey: string,
+  previewApi: object | null,
+  currentApi: object,
+): preview is T {
+  return previewApi === currentApi && previewIsCurrent(preview, previewKey, optionsKey);
+}
+
+/** A chart chosen through another backend must not be used for appending. */
+export function quickHzChartIsCurrent(
+  chart: string,
+  chartApi: object | null,
+  currentApi: object,
+): boolean {
+  return chart.length > 0 && chartApi === currentApi;
+}
