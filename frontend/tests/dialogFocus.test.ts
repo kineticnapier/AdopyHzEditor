@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { dialogFocusableSelector, dialogTabDestination, isDialogTabbable } from "../src/dialogs/dialogFocus.ts";
+import { dialogFocusableSelector, dialogTabDestination, isDialogCompositionKey, isDialogTabbable } from "../src/dialogs/dialogFocus.ts";
 
 const items = [{ focus() {} }, { focus() {} }, { focus() {} }];
 
@@ -87,4 +87,17 @@ test("dialog Tab trap excludes visibility-hidden controls even with layout recta
   assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "hidden" })), false);
   assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "collapse" })), false);
   assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "visible" })), true);
+});
+
+
+test("dialog Escape and Tab do not interrupt IME conversion", () => {
+  // During Japanese conversion Escape cancels a candidate, not the dialog.
+  assert.equal(isDialogCompositionKey({ isComposing: true, keyCode: 27 }), true);
+  assert.equal(isDialogCompositionKey({ isComposing: true, keyCode: 9 }), true);
+  // Windows IME compatibility: composition can be signalled only by keyCode 229.
+  assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 229 }), true);
+  assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 27 }), false);
+  assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 9 }), false);
+  const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
+  assert.match(hook, /event\.defaultPrevented \|\| isDialogCompositionKey\(event\)/);
 });
