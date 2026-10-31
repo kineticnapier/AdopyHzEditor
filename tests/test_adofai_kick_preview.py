@@ -11,7 +11,7 @@ import numpy as np
 
 import core.adofai_assets as adofai_assets
 from core.audio_player import AudioPlayer
-from core.note_model import Note
+from core.note_model import Note, hz_to_midi
 
 
 class AdoFaiKickPreviewTests(unittest.TestCase):
@@ -28,42 +28,58 @@ class AdoFaiKickPreviewTests(unittest.TestCase):
         self.assertEqual(player._normalize_note_instrument("ADOFAI Kick"), "adofai_kick")
         self.assertEqual(player._normalize_note_instrument("kick"), "adofai_kick")
 
-    def test_kick_sample_plays_from_note_onset_past_short_note_end(self):
+    def test_kick_repeats_at_every_fixed_note_phase_cycle(self):
         player = self._player()
-        player.set_note_sample(np.ones(80, dtype=np.float32))
-        player.set_preview_notes([Note(0.100, 0.120, 69.0)])
+        player.sr = 4400
+        player.set_note_sample(np.array([1.0, 0.0], dtype=np.float32))
+        player.set_preview_notes([Note(0.100, 0.150, 69.0)])
 
-        positions = np.arange(90.0, 190.0, dtype=np.float64)
+        positions = np.arange(430.0, 670.0, dtype=np.float64)
+        output = np.zeros((len(positions), 1), dtype=np.float32)
+        player._mix_preview_notes(output, positions)
+
+        nonzero = np.flatnonzero(np.abs(output[:, 0]) > 1e-6)
+        expected = [10 + 10 * i for i in range(22)]
+        self.assertEqual(nonzero.tolist(), expected)
+
+    def test_kick_tail_is_not_clipped_to_note_end(self):
+        player = self._player()
+        player.sr = 4400
+        player.set_note_sample(np.ones(80, dtype=np.float32))
+        player.set_preview_notes([Note(0.100, 0.105, 69.0)])
+
+        positions = np.arange(430.0, 550.0, dtype=np.float64)
         output = np.zeros((len(positions), 1), dtype=np.float32)
         player._mix_preview_notes(output, positions)
 
         self.assertTrue(np.allclose(output[:10], 0.0))
         self.assertGreater(float(output[10, 0]), 0.9)
-        self.assertGreater(float(output[70, 0]), 0.9)
+        self.assertGreater(float(output[80, 0]), 0.9)
 
-    def test_curve_segments_do_not_retrigger_kick(self):
+    def test_curve_segmentation_keeps_one_continuous_hit_train(self):
         player = self._player()
+        player.sr = 4400
         player.set_note_sample(np.array([1.0, 0.0], dtype=np.float32))
         player.set_preview_notes([
             Note(
                 0.100,
-                0.300,
+                0.150,
                 69.0,
                 kind="curve",
-                midi_end=76.0,
-                ctrl1_midi=70.0,
-                ctrl2_midi=75.0,
+                midi_end=69.0,
+                ctrl1_midi=69.0,
+                ctrl2_midi=69.0,
             )
         ])
         self.assertGreater(len(player.preview_notes), 2)
-        self.assertEqual(player._preview_onsets, [100])
 
-        positions = np.arange(90.0, 310.0, dtype=np.float64)
+        positions = np.arange(430.0, 670.0, dtype=np.float64)
         output = np.zeros((len(positions), 1), dtype=np.float32)
         player._mix_preview_notes(output, positions)
 
         nonzero = np.flatnonzero(np.abs(output[:, 0]) > 1e-6)
-        self.assertEqual(nonzero.tolist(), [10])
+        expected = [10 + 10 * i for i in range(22)]
+        self.assertEqual(nonzero.tolist(), expected)
 
     def test_missing_kick_sample_falls_back_to_synth_preview(self):
         player = self._player()
@@ -74,6 +90,22 @@ class AdoFaiKickPreviewTests(unittest.TestCase):
         player._mix_preview_notes(output, positions)
 
         self.assertGreater(float(np.max(np.abs(output))), 0.1)
+
+    def test_10khz_preview_builds_dense_hit_train_and_fft_mixes_it(self):
+        player = self._player()
+        player.sr = 44100
+        player.set_note_sample(np.linspace(1.0, 0.0, 512, dtype=np.float32))
+        player.set_preview_notes([Note(0.0, 0.1, hz_to_midi(10000.0))])
+
+        self.assertEqual(len(player._preview_hit_samples), 1000)
+
+        positions = np.arange(0.0, 1024.0, dtype=np.float64)
+        output = np.zeros((len(positions), 1), dtype=np.float32)
+        player._mix_preview_notes(output, positions)
+
+        self.assertTrue(np.all(np.isfinite(output)))
+        self.assertGreater(float(np.max(np.abs(output))), 0.0)
+        self.assertTrue(player._note_sample_fft_cache)
 
 
 class AdoFaiAssetLocatorTests(unittest.TestCase):
