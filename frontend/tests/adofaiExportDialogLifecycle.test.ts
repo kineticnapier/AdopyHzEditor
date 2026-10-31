@@ -30,6 +30,7 @@ test("selection refresh cannot unlock a still-running export", () => {
   const loading = source.slice(loadingStart, loadedStart);
   // The loading branch must preserve the same lock as the normal export form.
   assert.match(loading, /<Modal title="ADOFAI出力" onClose=\{onClose\} locked=\{working\}>/);
+  assert.match(loading, /<button onClick=\{onClose\} disabled=\{working\}>閉じる<\/button>/);
   assert.match(loading, /className="primary"\s+disabled=\{working\}\s+onClick=\{\(\) => setLoadAttempt/);
   assert.match(loading, /className="dialog-loading" role="status"/);
   assert.match(loading, /working \? "出力処理中…"/);
