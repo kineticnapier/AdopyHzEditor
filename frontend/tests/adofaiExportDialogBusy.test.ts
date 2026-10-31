@@ -75,3 +75,28 @@ test("a failed export action permits a subsequent attempt", async () => {
   }), "retry ok");
   assert.equal(calls, 2);
 });
+
+test("ADOFAI export groups checkbox settings without nested labels", () => {
+  assert.match(
+    dialogSource,
+    /if \(group\) \{[\s\S]*?<div className="dialog-field" role="group" aria-label=\{label\}>/,
+  );
+  for (const label of ["音声", "出力範囲", "音声コピー", "songOffset"]) {
+    assert.ok(
+      dialogSource.includes(`<Field label="${label}" group>`),
+      `${label} must use a group instead of wrapping a nested label`,
+    );
+  }
+  // The numeric songOffset field still has a single implicit label.
+  assert.match(dialogSource, /<Field label="songOffset">\s*<Num/);
+});
+
+test("ADOFAI export song-source input has its own accessible name", () => {
+  const start = dialogSource.indexOf('<Field label="音源先" group>');
+  const end = dialogSource.indexOf("</Field>", start);
+  assert.ok(start >= 0 && end > start);
+  const songSource = dialogSource.slice(start, end);
+  assert.match(songSource, /value=\{options\.songSourcePath \|\| "未選択"\}/);
+  assert.match(songSource, /aria-label="音源先"/);
+  assert.match(songSource, /<button/);
+});
