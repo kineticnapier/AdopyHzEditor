@@ -14,7 +14,7 @@ import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
+import { blankWorkspaceDefaultsContextIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 import { quickHzActionPolicy } from "./quickHzActionPolicy";
 type Common = {
@@ -169,26 +169,49 @@ export function BlankWorkspaceDialog({
 }: Common & { onApply(options: BlankWorkspaceOptions): Promise<void> }) {
   const applyOnce = useRef(createExclusiveAsyncAction());
   const [value, setValue] = useState<BlankWorkspaceOptions | null>(null),
-    [loadError, setLoadError] = useState(""),
+    [loadedContext, setLoadedContext] = useState<{ api: ToolBackendApi; attempt: number } | null>(null),
+    [loadError, setLoadError] = useState<{ message: string; api: ToolBackendApi; attempt: number } | null>(null),
     [attempt, setAttempt] = useState(0),
     [applying, setApplying] = useState(false);
+  // An API replacement or retry must hide the previous defaults during render,
+  // before React runs the cleanup/reset effect.
+  const requestContext = { api, attempt };
+  const defaultsCurrent = blankWorkspaceDefaultsContextIsCurrent(loadedContext, requestContext);
+  const currentLoadError = blankWorkspaceDefaultsContextIsCurrent(loadError, requestContext)
+    ? loadError!.message : "";
   useEffect(() => {
     let alive = true;
-    setLoadError("");
+    setValue(null);
+    setLoadedContext(null);
+    setLoadError(null);
     void api
       .get_blank_workspace_defaults()
-      .then((x) => alive && setValue(x))
-      .catch((e) => alive && setLoadError(String(e)));
+      .then((x) => {
+        if (!alive) return;
+        setValue(x);
+        setLoadedContext({ api, attempt });
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setValue(null);
+        setLoadedContext(null);
+        setLoadError({ message: String(e), api, attempt });
+      });
     return () => {
       alive = false;
     };
   }, [api, attempt]);
+  function patchValue(changes: Partial<BlankWorkspaceOptions>) {
+    if (!defaultsCurrent || applying) return;
+    setValue((current) => current ? { ...current, ...changes } : current);
+  }
   async function apply() {
-    if (!value) return;
+    if (!value || !defaultsCurrent || applying) return;
+    const snapshot = { ...value };
     await applyOnce.current(async () => {
       setApplying(true);
       try {
-        await onApply(value);
+        await onApply(snapshot);
         onStatus("空のワークスペースに切り替えました");
         onClose();
       } catch (e) {
@@ -200,15 +223,16 @@ export function BlankWorkspaceDialog({
   }
   return (
     <Modal title="空のワークスペース" onClose={onClose} locked={applying}>
-      {loadError ? (
+      {currentLoadError ? (
         <LoadFailure
-          error={loadError}
+          error={currentLoadError}
           onRetry={() => setAttempt((v) => v + 1)}
+          disabled={applying}
         />
       ) : (
         <>
           <div className="dialog-body export-dialog-body">
-            {value ? (
+            {value && defaultsCurrent ? (
               <>
                 <div className="info-card">
                   音声を外して黒い編集領域に切り替えます。既存ノートは保持されます。
@@ -220,7 +244,7 @@ export function BlankWorkspaceDialog({
                     min={1}
                     max={36000}
                     step={1}
-                    onChange={(v) => setValue({ ...value, duration: v })}
+                    onChange={(v) => patchValue({ duration: v })}
                   />
                   <span>秒</span>
                 </Field>
@@ -230,9 +254,7 @@ export function BlankWorkspaceDialog({
                     disabled={applying}
                     min={0}
                     max={127}
-                    onChange={(v) =>
-                      setValue({ ...value, midiMin: Math.round(v) })
-                    }
+                    onChange={(v) => patchValue({ midiMin: Math.round(v) })}
                   />
                 </Field>
                 <Field label="最高MIDI">
@@ -241,14 +263,12 @@ export function BlankWorkspaceDialog({
                     disabled={applying}
                     min={0}
                     max={127}
-                    onChange={(v) =>
-                      setValue({ ...value, midiMax: Math.round(v) })
-                    }
+                    onChange={(v) => patchValue({ midiMax: Math.round(v) })}
                   />
                 </Field>
               </>
             ) : (
-              <div className="dialog-loading">読み込み中…</div>
+              <div className="dialog-loading" role="status">読み込み中…</div>
             )}
           </div>
           <div className="dialog-footer">
@@ -257,7 +277,7 @@ export function BlankWorkspaceDialog({
             <button
               className="primary"
               onClick={() => void apply()}
-              disabled={!value || applying}
+              disabled={!value || !defaultsCurrent || applying}
             >
               適用
             </button>
