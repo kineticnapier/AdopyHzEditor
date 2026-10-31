@@ -18,3 +18,15 @@ export function selectionScopedPreviewIsCurrent<T>(
   return defaultsSelectionKey === currentSelectionKey &&
     previewIsCurrent(preview, previewKey, optionsKey);
 }
+
+/** Defaults belong to the exact request context, not just equal note IDs. */
+export function exportDefaultsContextIsCurrent(
+  loaded: { api: object; selected: readonly number[]; defaultSelectedOnly: boolean; loadAttempt: number } | null,
+  current: { api: object; selected: readonly number[]; defaultSelectedOnly: boolean; loadAttempt: number },
+): boolean {
+  return loaded !== null &&
+    loaded.api === current.api &&
+    loaded.selected === current.selected &&
+    loaded.defaultSelectedOnly === current.defaultSelectedOnly &&
+    loaded.loadAttempt === current.loadAttempt;
+}
