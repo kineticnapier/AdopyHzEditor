@@ -253,19 +253,6 @@ if ($Clean) {
     Remove-Item -Recurse -Force (Join-Path $Root "dist") -ErrorAction SilentlyContinue
 }
 
-$AssetExtractorProject = Join-Path $Root "tools\AdopyHzEditor.AssetExtractor\AdopyHzEditor.AssetExtractor.csproj"
-if (-not (Test-Path $AssetExtractorProject)) {
-    Fail "ADOFAI asset extractor project was not found: $AssetExtractorProject"
-}
-$AssetExtractorPublish = Join-Path $Root "build\asset-extractor"
-Remove-Item -Recurse -Force $AssetExtractorPublish -ErrorAction SilentlyContinue
-Write-Step "Building bundled ADOFAI kick extractor"
-Invoke-CommandChecked $Dotnet "publish" $AssetExtractorProject "-c" "Release" "-r" "win-x64" "--self-contained" "true" "-p:PublishSingleFile=true" "-p:DebugType=None" "-p:DebugSymbols=false" "-o" $AssetExtractorPublish
-$AssetExtractorExe = Join-Path $AssetExtractorPublish "AdopyHzEditor.AssetExtractor.exe"
-if (-not (Test-Path $AssetExtractorExe)) {
-    Fail "Asset extractor build completed but executable was not found: $AssetExtractorExe"
-}
-
 Write-Step "Running PyInstaller for the current Web UI"
 $addFrontend = "$FrontendDist;frontend\dist"
 $addLocales = "$(Join-Path $Root 'locales');locales"
@@ -299,6 +286,19 @@ if ($Clean) {
     $pyiArgs += "--clean"
 }
 Invoke-CommandChecked $Python "-m" "PyInstaller" @pyiArgs
+
+$AssetExtractorProject = Join-Path $Root "tools\AdopyHzEditor.AssetExtractor\AdopyHzEditor.AssetExtractor.csproj"
+if (-not (Test-Path $AssetExtractorProject)) {
+    Fail "ADOFAI asset extractor project was not found: $AssetExtractorProject"
+}
+$AssetExtractorPublish = Join-Path $Root "build\asset-extractor"
+Remove-Item -Recurse -Force $AssetExtractorPublish -ErrorAction SilentlyContinue
+Write-Step "Building bundled ADOFAI kick extractor"
+Invoke-CommandChecked $Dotnet "publish" $AssetExtractorProject "-c" "Release" "-r" "win-x64" "--self-contained" "true" "-p:PublishSingleFile=true" "-p:DebugType=None" "-p:DebugSymbols=false" "-o" $AssetExtractorPublish
+$AssetExtractorExe = Join-Path $AssetExtractorPublish "AdopyHzEditor.AssetExtractor.exe"
+if (-not (Test-Path $AssetExtractorExe)) {
+    Fail "Asset extractor build completed but executable was not found: $AssetExtractorExe"
+}
 
 $DistApp = Join-Path $Root "dist\AdopyHzEditor"
 $Exe = Join-Path $DistApp "AdopyHzEditor.exe"
