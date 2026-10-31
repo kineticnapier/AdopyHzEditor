@@ -43,3 +43,11 @@ export function exportDefaultsContextIsCurrent(
     loaded.loadAttempt === current.loadAttempt &&
     loaded.documentGeneration === current.documentGeneration;
 }
+
+/** Blank workspace defaults must belong to the current API and retry. */
+export function blankWorkspaceDefaultsContextIsCurrent(
+  loaded: { api: object; attempt: number } | null,
+  current: { api: object; attempt: number },
+): boolean {
+  return loaded !== null && loaded.api === current.api && loaded.attempt === current.attempt;
+}
