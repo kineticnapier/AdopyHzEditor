@@ -208,6 +208,10 @@ $Npm = Find-CommandPath @("npm.cmd", "npm.exe", "npm")
 if (-not $Npm) {
     Fail "npm was not found. Install Node.js 22+ first."
 }
+$Dotnet = Find-CommandPath @("dotnet.exe", "dotnet")
+if (-not $Dotnet) {
+    Fail "dotnet was not found. Install .NET 8 SDK first."
+}
 
 $Python = Ensure-VenvPython $Root $Uv
 Write-Host "Python: $Python"
@@ -223,6 +227,19 @@ Ensure-PythonDependencies $Python $Uv $Root
 $Frontend = Join-Path $Root "frontend"
 Ensure-FrontendDependencies $Npm $Frontend
 Build-Frontend $Npm $Frontend
+
+$AssetExtractorProject = Join-Path $Root "tools\AdopyHzEditor.AssetExtractor\AdopyHzEditor.AssetExtractor.csproj"
+if (-not (Test-Path $AssetExtractorProject)) {
+    Fail "ADOFAI asset extractor project was not found: $AssetExtractorProject"
+}
+$AssetExtractorPublish = Join-Path $Root "build\asset-extractor"
+Remove-Item -Recurse -Force $AssetExtractorPublish -ErrorAction SilentlyContinue
+Write-Step "Building bundled ADOFAI kick extractor"
+Invoke-CommandChecked $Dotnet "publish" $AssetExtractorProject "-c" "Release" "-r" "win-x64" "--self-contained" "true" "-p:PublishSingleFile=true" "-p:DebugType=None" "-p:DebugSymbols=false" "-o" $AssetExtractorPublish
+$AssetExtractorExe = Join-Path $AssetExtractorPublish "AdopyHzEditor.AssetExtractor.exe"
+if (-not (Test-Path $AssetExtractorExe)) {
+    Fail "Asset extractor build completed but executable was not found: $AssetExtractorExe"
+}
 
 $FrontendDist = Join-Path $Frontend "dist"
 $FrontendIndex = Join-Path $FrontendDist "index.html"
@@ -302,7 +319,15 @@ if (Test-Path $pythonnetRuntime) {
     Fail "Packaged build unexpectedly contains pythonnet runtime DLL: $pythonnetRuntime"
 }
 
+$AssetExtractorDist = Join-Path $DistApp "AssetExtractor"
+New-Item -ItemType Directory -Force -Path $AssetExtractorDist | Out-Null
+Copy-Item -Force $AssetExtractorExe (Join-Path $AssetExtractorDist "AdopyHzEditor.AssetExtractor.exe")
+if (-not (Test-Path (Join-Path $AssetExtractorDist "AdopyHzEditor.AssetExtractor.exe"))) {
+    Fail "Bundled ADOFAI asset extractor was not copied into the package."
+}
+
 Write-Ok "Current Web UI exe built with Qt/PySide6 backend: $Exe"
+Write-Ok "Bundled ADOFAI kick extractor: $(Join-Path $AssetExtractorDist 'AdopyHzEditor.AssetExtractor.exe')"
 
 if (-not $NoZip) {
     Write-Step "Creating release zip"
