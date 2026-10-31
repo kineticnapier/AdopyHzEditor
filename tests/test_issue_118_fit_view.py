@@ -22,6 +22,33 @@ class FitViewRegressionTests(unittest.TestCase):
         self.assertLessEqual(view["pitchBottom"], 40)
         self.assertGreaterEqual(view["pitchBottom"] + view["visibleNotes"], 96)
 
+    def test_fit_view_near_top_midi_keeps_padding_inside_valid_range(self):
+        bridge = Bridge()
+        bridge.duration = 10.0
+        bridge.notes = [Note(1.0, 2.0, 127.0).normalized()]
+
+        view = bridge.fit_view()
+
+        self.assertGreaterEqual(view["pitchBottom"], 0)
+        self.assertGreaterEqual(view["visibleNotes"], 6)
+        self.assertLessEqual(view["pitchBottom"] + view["visibleNotes"], 128)
+        self.assertLessEqual(view["pitchBottom"], 127)
+        self.assertGreater(view["pitchBottom"] + view["visibleNotes"], 127)
+
+    def test_fit_view_full_midi_span_does_not_overflow(self):
+        bridge = Bridge()
+        bridge.duration = 10.0
+        bridge.notes = [
+            Note(1.0, 2.0, 0.0).normalized(),
+            Note(3.0, 4.0, 127.0).normalized(),
+        ]
+
+        view = bridge.fit_view()
+
+        self.assertEqual(view["pitchBottom"], 0)
+        self.assertEqual(view["visibleNotes"], 128)
+        self.assertEqual(view["pitchBottom"] + view["visibleNotes"], 128)
+
     def test_fit_view_without_notes_remains_valid(self):
         bridge = Bridge()
         bridge.duration = 5.0

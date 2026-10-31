@@ -1128,7 +1128,9 @@ def build_adofai_debug_rows(
                     "auto_angle": "varies",
                     "final_angle_scaled": "" if scaled_final == "" else round(float(scaled_final), 6),
                     "final_angle_effective": "" if effective_final == "" else round(float(effective_final), 6),
-                    "effective_bpm": round(effective_bpm, 6),
+                    # A continuous glide has no single effective BPM; the final
+                    # visual correction is reported separately in final_bpm.
+                    "effective_bpm": "varies",
                     "final_bpm": "" if final_bpm == "" else round(float(final_bpm), 6),
                     "tiles_est": emitted,
                     "final_visual_used": bool(final_visual_used),
@@ -1154,7 +1156,7 @@ def build_adofai_debug_rows(
                 effective_final = ""
                 if frac > 1e-6 and (limit <= 0 or emitted < limit):
                     effective_final = final_visual_angle(
-                        mode=effective_final_angle_mode,
+                        mode=final_angle_mode,
                         prev_abs=prev_abs,
                         scaled_final_angle=angle * frac,
                         custom_final_angle=final_custom_angle,

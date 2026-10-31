@@ -1,21 +1,23 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { dispatchEditorShortcut, type ShortcutActions, type ShortcutEvent } from "../src/editor/shortcutDispatch.ts";
 
-type Modifiers = Partial<Pick<ShortcutEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey">>;
+type Modifiers = Partial<Pick<ShortcutEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat" | "getModifierState">>;
 
-function setup() {
+function setup(viewOverrides: Partial<ShortcutActions["view"]> = {}) {
   const calls: string[] = [];
   const log = (name: string) => () => { calls.push(name); };
   const a: ShortcutActions = {
     notes: [], selected: [0], playbackTime: 37,
-    view: { mode: "spec", start: 0, windowSeconds: 12, pitchBottom: 24, visibleNotes: 60 },
+    view: { mode: "spec", start: 0, windowSeconds: 12, pitchBottom: 24, visibleNotes: 60, ...viewOverrides },
     nudgeSeconds: .25,
     openAudio: log("open"), saveProject: log("save"), saveProjectAs: log("saveAs"),
     loadProject: log("load"), importMidi: log("import"), exportMidi: log("export"),
     openAdoExport: log("adoExport"), openHelp: log("help"), setStatus: () => {},
     undo: log("undo"), redo: log("redo"), duplicate: log("duplicate"),
     quantize: log("quantize"), select: indices => calls.push("select:" + indices.join(",")),
+    clearTracks: log("clearTracks"),
     copy: log("copy"), cut: log("cut"), paste: log("paste"), applyTargetAngle: log("angle"),
     move: (_indices, dx, dy) => calls.push(`move:${dx},${dy}`),
     stop: log("stop"), play: log("play"), deleteSelected: log("delete"),
@@ -24,11 +26,11 @@ function setup() {
     seekTo: time => calls.push("seekTo:" + time),
     updateView: changes => calls.push("view:" + JSON.stringify(changes)),
   };
-  const press = (key: string, mods: Modifiers = {}) => {
+  const press = (key: string, mods: Modifiers = {}, target?: EventTarget | null) => {
     let prevented = false;
     dispatchEditorShortcut({
       key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
-      preventDefault() { prevented = true; }, ...mods,
+      target, preventDefault() { prevented = true; }, ...mods,
     }, a);
     return prevented;
   };
@@ -72,4 +74,187 @@ test("assigned Ctrl and Shift combinations still work", () => {
   assert.equal(press(" ", {}), true);
   assert.equal(press("ArrowRight", { shiftKey: true }), true);
   assert.deepEqual(calls, ["save", "saveAs", 'view:{"pitchBottom":36}', "move:-0.25,0", "stop", "play", "seek:5"]);
+});
+
+
+test("Ctrl+S commits the focused number input before invoking save", () => {
+  const { calls, press } = setup();
+  const input = {
+    closest(selector: string) {
+      assert.match(selector, /input/);
+      return { blur() { calls.push("commit-input"); } };
+    },
+  } as unknown as EventTarget;
+  assert.equal(press("s", { ctrlKey: true }, input), true);
+  assert.deepEqual(calls, ["commit-input", "save"]);
+});
+
+test("Ctrl+Shift+S and Meta+S commit focused edits before saving", () => {
+  const { calls, press } = setup();
+  const field = {
+    closest() { return { blur() { calls.push("commit-input"); } }; },
+  } as unknown as EventTarget;
+  assert.equal(press("s", { ctrlKey: true, shiftKey: true }, field), true);
+  assert.equal(press("s", { metaKey: true }, field), true);
+  assert.deepEqual(calls, ["commit-input", "saveAs", "commit-input", "save"]);
+});
+
+test("held file shortcuts are consumed without repeating save or dialogs", () => {
+  const { calls, press } = setup();
+  const input = {
+    closest: () => ({ blur: () => calls.push("blur") }),
+  } as unknown as EventTarget;
+  for (const [key, mods] of [
+    ["s", { ctrlKey: true, repeat: true }],
+    ["s", { ctrlKey: true, shiftKey: true, repeat: true }],
+    ["s", { metaKey: true, repeat: true }],
+    ["o", { ctrlKey: true, repeat: true }],
+    ["l", { ctrlKey: true, repeat: true }],
+    ["i", { ctrlKey: true, repeat: true }],
+    ["m", { ctrlKey: true, repeat: true }],
+    ["e", { ctrlKey: true, repeat: true }],
+    ["F1", { repeat: true }],
+  ] as const) assert.equal(press(key, mods, input), true, key);
+  assert.deepEqual(calls, []);
+  assert.equal(press("s", { ctrlKey: true }, input), true);
+  assert.deepEqual(calls, ["blur", "save"]);
+});
+
+test("key repeats still support navigation and undo without hijacking unassigned chords", () => {
+  const { calls, press } = setup();
+  assert.equal(press("ArrowRight", { repeat: true }), true);
+  assert.equal(press("ArrowUp", { ctrlKey: true, repeat: true }), true);
+  assert.equal(press("z", { ctrlKey: true, repeat: true }), true);
+  assert.equal(press("o", { ctrlKey: true, shiftKey: true, repeat: true }), false);
+  assert.deepEqual(calls, ["seek:1", 'view:{"pitchBottom":36}', "undo"]);
+});
+
+test("save shortcuts do not blur non-editing targets or fail without a target", () => {
+  const { calls, press } = setup();
+  const button = {
+    closest() { return null; },
+  } as unknown as EventTarget;
+  assert.equal(press("s", { ctrlKey: true }, button), true);
+  assert.equal(press("s", { ctrlKey: true, shiftKey: true }), true);
+  assert.deepEqual(calls, ["save", "saveAs"]);
+});
+
+
+test("Document-like keydown targets can save without a closest method", () => {
+  const { calls, press } = setup();
+  const targets = [null, {}, { nodeType: 9 }, { nodeType: 3 }];
+  for (const target of targets) {
+    assert.equal(press("s", { ctrlKey: true }, target as EventTarget | null), true);
+    assert.equal(press("s", { ctrlKey: true, shiftKey: true }, target as EventTarget | null), true);
+  }
+  assert.deepEqual(calls, targets.flatMap(() => ["save", "saveAs"]));
+});
+
+test("non-callable closest on a keydown target never blocks Meta+S", () => {
+  const { calls, press } = setup();
+  const targets = [{ closest: undefined }, { closest: null }, { closest: 5 }];
+  for (const target of targets) {
+    assert.equal(press("s", { metaKey: true }, target as unknown as EventTarget), true);
+  }
+  assert.deepEqual(calls, ["save", "save", "save"]);
+});
+
+test("AltGraph and unassigned Ctrl+Alt chords do not trigger editor actions", () => {
+  const { calls, press } = setup();
+  const input = {
+    closest: () => ({ blur: () => calls.push("blur") }),
+  } as unknown as EventTarget;
+  assert.equal(press("s", { ctrlKey: true, altKey: true }, input), false);
+  assert.equal(press("s", { ctrlKey: true, altKey: true, shiftKey: true }, input), false);
+  assert.equal(press("o", { ctrlKey: true, altKey: true }), false);
+  const altGraph = { ctrlKey: true, altKey: true, getModifierState: (name: string) => name === "AltGraph" };
+  assert.equal(press("s", altGraph, input), false);
+  assert.equal(press("a", altGraph), false);
+  assert.deepEqual(calls, []);
+  assert.equal(press("a", { ctrlKey: true, altKey: true }), true);
+  assert.deepEqual(calls, ["angle"]);
+});
+
+test("unassigned Ctrl+Shift and Meta+Shift chords do not run editor actions", () => {
+  const { calls, press } = setup();
+  for (const key of ["i", "m", "e", "o", "l", "a", "c", "x", "v", "d", "y", " "]) {
+    assert.equal(press(key, { ctrlKey: true, shiftKey: true }), false, `Ctrl+Shift+${key}`);
+    assert.equal(press(key, { metaKey: true, shiftKey: true }), false, `Meta+Shift+${key}`);
+  }
+  assert.equal(press("a", { ctrlKey: true, altKey: true, shiftKey: true }), false);
+  assert.deepEqual(calls, []);
+});
+
+test("explicit Ctrl+Shift actions and Ctrl+Alt+A still work", () => {
+  const { calls, press } = setup();
+  assert.equal(press("s", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("z", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("ArrowLeft", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("ArrowRight", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("ArrowUp", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("ArrowDown", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("a", { ctrlKey: true, altKey: true }), true);
+  assert.deepEqual(calls, [
+    "saveAs", "redo", "move:-0.25,0", "move:0.25,0",
+    "move:0,1", "move:0,-1", "angle",
+  ]);
+});
+
+test("keyboard pitch scrolling never moves the view outside MIDI 0..127", () => {
+  const upper = setup({ pitchBottom: 65, visibleNotes: 60 });
+  assert.equal(upper.press("w"), true);
+  assert.equal(upper.press("ArrowUp"), true);
+  assert.equal(upper.press("ArrowUp", { ctrlKey: true }), true);
+  assert.deepEqual(upper.calls, [
+    'view:{"pitchBottom":68}',
+    'view:{"pitchBottom":66}',
+    'view:{"pitchBottom":68}',
+  ]);
+  const lower = setup({ pitchBottom: 0, visibleNotes: 128 });
+  assert.equal(lower.press("s"), true);
+  assert.equal(lower.press("ArrowDown"), true);
+  assert.deepEqual(lower.calls, []);
+});
+
+test("keyboard pitch keys at MIDI boundaries do not request unchanged views", () => {
+  const upper = setup({ pitchBottom: 68, visibleNotes: 60 });
+  for (const [key, mods] of [
+    ["w", {}], ["ArrowUp", {}], ["ArrowUp", { ctrlKey: true }],
+  ] as const) assert.equal(upper.press(key, mods), true);
+  assert.deepEqual(upper.calls, []);
+  assert.equal(upper.press("s"), true);
+  assert.deepEqual(upper.calls, ['view:{"pitchBottom":56}']);
+
+  const lower = setup({ pitchBottom: 0, visibleNotes: 60 });
+  for (const [key, mods] of [
+    ["s", {}], ["ArrowDown", {}], ["ArrowDown", { ctrlKey: true }],
+  ] as const) assert.equal(lower.press(key, mods), true);
+  assert.deepEqual(lower.calls, []);
+  assert.equal(lower.press("w"), true);
+  assert.deepEqual(lower.calls, ['view:{"pitchBottom":12}']);
+
+  const full = setup({ pitchBottom: 0, visibleNotes: 128 });
+  assert.equal(full.press("w"), true);
+  assert.equal(full.press("s"), true);
+  assert.deepEqual(full.calls, []);
+});
+
+test("global Escape clears Frequency Tracks before Notes", () => {
+  const { calls, press } = setup();
+  assert.equal(press("Escape"), true);
+  assert.deepEqual(calls, ["clearTracks", "select:"]);
+});
+
+test("modified Escape does not clear either selection", () => {
+  const { calls, press } = setup();
+  assert.equal(press("Escape", { ctrlKey: true }), false);
+  assert.equal(press("Escape", { altKey: true }), false);
+  assert.equal(press("Escape", { metaKey: true }), false);
+  assert.deepEqual(calls, []);
+});
+
+test("global Track clearing is wired through the request-invalidating App handler", () => {
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(source, /clearTracks:\s*\(\)\s*=>\s*changeTrackSelection\(\{\s*ids:\s*\[\],\s*range:\s*null,\s*useRange:\s*false\s*\}\)/);
+  assert.match(source, /function changeTrackSelection\([\s\S]*?trackSelectionRequests\.current\.invalidate\(\)/);
 });

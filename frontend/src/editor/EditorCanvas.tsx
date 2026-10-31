@@ -3,7 +3,10 @@ import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, Note
 import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramTimeCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
-import { wheelViewChange } from "./wheelNavigation";
+import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
+import { pitchBottomToRevealNote } from "./pitchViewport";
+import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
+import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -31,7 +34,7 @@ type Props = {
   onCursorMove?(time: number, midi: number): void;
   onTrackHover?(track: TrackHoverInfo|null): void;
   onTrackSelectionChange(selection:TrackSelectionState):void;
-  onFindTracks(range: TrackSelectionRange): Promise<number[]>;
+  onFindTracks(range: TrackSelectionRange): Promise<number[] | null>;
 };
 
 type DragMode = "create" | "curve" | "region" | "track-region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
@@ -115,6 +118,21 @@ export default function EditorCanvas(props: Props) {
   const [size, setSize] = useState({ width: 800, height: 500 });
   const [drag, setDrag] = useState<DragState | null>(null);
   const [keyboardNote, setKeyboardNote] = useState<number | null>(null);
+  const keyboardSelectionRef = useRef<number[] | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const wheelPitchAccumulatorRef = useRef<WheelPitchAccumulator>({ modifier: null, remainder: 0 });
+  const lastSelectionRef = useRef(props.selected);
+  const lastNotesRef = useRef(props.notes);
+  useEffect(() => {
+    const expected = keyboardSelectionRef.current;
+    keyboardSelectionRef.current = null;
+    const previous = lastSelectionRef.current;
+    const notesChanged = lastNotesRef.current !== props.notes;
+    lastSelectionRef.current = props.selected;
+    lastNotesRef.current = props.notes;
+    setKeyboardNote(focused =>
+      reconcileKeyboardNote(focused, previous, expected, props.selected, props.notes.length, notesChanged));
+  }, [props.selected, props.notes]);
   const selectedSet=useMemo(()=>new Set(props.selected),[props.selected]);
   const noteTimeIndex=useMemo(()=>buildNoteTimeIndex(props.notes),[props.notes]);
   const keyboardOrder=noteTimeIndex.order;
@@ -326,8 +344,12 @@ export default function EditorCanvas(props: Props) {
   }
   function clearTrackSelection(){props.onTrackSelectionChange({ids:[],range:null,useRange:false});}
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
-    if(event.button!==0)return;
+    if(event.button!==0 || !canStartCanvasGesture(activePointerIdRef.current))return;
+    event.currentTarget.focus({ preventScroll: true });
+    keyboardSelectionRef.current = null;
+    setKeyboardNote(null);
     event.currentTarget.setPointerCapture(event.pointerId);
+    activePointerIdRef.current = event.pointerId;
     const p=eventPosition(event);
     if(event.ctrlKey&&event.altKey&&props.selected.length){
       clearTrackSelection();
@@ -336,6 +358,7 @@ export default function EditorCanvas(props: Props) {
     }
     const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
     if(hit!==null){
+      setKeyboardNote(hit);
       clearTrackSelection();
       let next=props.selected;
       if(event.ctrlKey){next=props.selected.includes(hit)?props.selected.filter(x=>x!==hit):[...props.selected,hit];props.onSelect(next);return;}
@@ -360,6 +383,7 @@ export default function EditorCanvas(props: Props) {
     setDrag({mode:event.ctrlKey?"region":event.altKey?"curve":"create",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:[]});
   }
   function onPointerMove(event:ReactPointerEvent<HTMLCanvasElement>){
+    if(activePointerIdRef.current!==null && !isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
     const p=eventPosition(event);
     if(drag){setDrag({...drag,nowTime:p.time,nowMidi:p.midi});return;}
     const now=performance.now();
@@ -370,12 +394,15 @@ export default function EditorCanvas(props: Props) {
     event.currentTarget.style.cursor=hit!==null&&!event.altKey&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":track?"pointer":"crosshair";
   }
   async function onPointerUp(event:ReactPointerEvent<HTMLCanvasElement>){
+    if(!isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
+    activePointerIdRef.current = null;
     if(!drag)return;
     const p=eventPosition(event),cur={...drag,nowTime:p.time,nowMidi:p.midi};setDrag(null);
     if(cur.mode==="track-region"){
       const range=normalizeTrackRange(cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi);
       if(range.endTime-range.startTime>=.001){
         const ids=await props.onFindTracks(range);
+        if(ids===null)return; // Ignore a stale document or superseded selection.
         props.onTrackSelectionChange({ids:mergeTrackSelection(props.trackSelection.ids,ids,Boolean(cur.trackAdditive)),range,useRange:ids.length>0});
         props.onSelect([]);
       }
@@ -403,7 +430,9 @@ export default function EditorCanvas(props: Props) {
     }else await props.onAdd(a,b,(cur.startMidi+cur.nowMidi)/2,"note",cur.nowMidi);
   }
   function cancelDrag(event:ReactPointerEvent<HTMLCanvasElement>){
-    if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);
+    if(!isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
+    activePointerIdRef.current = null;
+    releaseCanvasPointerCapture(event.currentTarget, event.pointerId);
     setDrag(null);
   }
   async function onContextMenu(event:ReactMouseEvent<HTMLCanvasElement>){
@@ -414,26 +443,35 @@ export default function EditorCanvas(props: Props) {
   function onCanvasKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
+      if (canvasEscapeAction(drag !== null) === "cancel-drag") {
+        setDrag(null);
+        releaseCanvasPointerCapture(event.currentTarget, activePointerIdRef.current);
+        activePointerIdRef.current = null;
+        return;
+      }
+      keyboardSelectionRef.current = [];
       setKeyboardNote(null);
-      props.onSelect([]);
+      clearIdleCanvasSelection(clearTrackSelection, () => props.onSelect([]));
       return;
     }
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (!isNoteNavigationKey(event)) return;
     if (!keyboardOrder.length) return;
     event.preventDefault();
     const delta = event.key === "ArrowRight" ? 1 : -1;
     const next = adjacentNoteIndex(keyboardOrder, keyboardNote ?? props.selected.at(-1) ?? null, delta);
     if (next === null) return;
+    const nextSelection = event.shiftKey ? Array.from(new Set([...props.selected, next])).sort((a, b) => a - b) : [next];
+    keyboardSelectionRef.current = nextSelection;
     setKeyboardNote(next);
-    props.onSelect(event.shiftKey ? Array.from(new Set([...props.selected, next])).sort((a, b) => a - b) : [next]);
+    props.onSelect(nextSelection);
     const note = props.notes[next], changes: Partial<ViewState> = {};
     if (note.start < props.view.start || note.end > props.view.start + props.view.windowSeconds)
       changes.start = Math.max(0, note.start - props.view.windowSeconds * .15);
-    if (note.midi < props.view.pitchBottom || note.midi > props.view.pitchBottom + props.view.visibleNotes)
-      changes.pitchBottom = Math.max(0, Math.min(127 - props.view.visibleNotes, note.midi - props.view.visibleNotes / 2));
+    const nextPitchBottom = pitchBottomToRevealNote(props.view, note.midi);
+    if (nextPitchBottom !== null) changes.pitchBottom = nextPitchBottom;
     if (Object.keys(changes).length) void props.onView(changes);
   }
-  useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const handler=(event:WheelEvent)=>{event.preventDefault();const rect=canvas.getBoundingClientRect(),changes=wheelViewChange(event,props.view,{timeRatio:Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),pitchRatio:Math.max(0,Math.min(1,(rect.bottom-event.clientY)/Math.max(1,rect.height)))});if(changes)void props.onView(changes)};canvas.addEventListener("wheel",handler,{passive:false});return()=>canvas.removeEventListener("wheel",handler)},[props.onView,props.view]);
+  useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const handler=(event:WheelEvent)=>{event.preventDefault();const rect=canvas.getBoundingClientRect(),changes=wheelViewChange(event,props.view,{timeRatio:Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),pitchRatio:Math.max(0,Math.min(1,(rect.bottom-event.clientY)/Math.max(1,rect.height)))},wheelPitchAccumulatorRef.current,props.playback.duration);if(changes)void props.onView(changes)};canvas.addEventListener("wheel",handler,{passive:false});return()=>canvas.removeEventListener("wheel",handler)},[props.onView,props.view,props.playback.duration]);
   return <div className="canvas-wrap" ref={containerRef}>
     <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>

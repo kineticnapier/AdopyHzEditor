@@ -7,6 +7,8 @@ import type {
 } from "./bridge";
 import { LatestRequestGate } from "../api/requestCoordinator";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { commitNumericEdit } from "../settings/numericInputModel";
+import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 
 type Props = {
   api: BackendApi;
@@ -32,6 +34,8 @@ export default function AdoFAIExportDialogJa({
     [previewMode, setPreviewMode] = useState<"none" | "tile" | "debug">("none");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const previewRequests = useRef(new LatestRequestGate());
+  const actionOnce = useRef(createExclusiveAsyncAction());
+  const workingRef = useRef(false);
   useEffect(() => {
     previewRequests.current.invalidate();
     setTile(null);
@@ -59,22 +63,28 @@ export default function AdoFAIExportDialogJa({
     k: K,
     v: AdoFAIExportOptions[K],
   ) {
+    // A focused numeric input may blur as the form becomes disabled.
+    if (workingRef.current) return;
     invalidatePreview();
     setOptions((o) =>
       o ? { ...o, [k]: v, harmonyTuning: "equal temperament" } : o,
     );
   }
   async function run<T>(fn: () => Promise<T>) {
-    setWorking(true);
-    setError("");
-    try {
-      return await fn();
-    } catch (e) {
-      setError(String(e));
-      return null;
-    } finally {
-      setWorking(false);
-    }
+    return actionOnce.current(async () => {
+      workingRef.current = true;
+      setWorking(true);
+      setError("");
+      try {
+        return await fn();
+      } catch (e) {
+        setError(String(e));
+        return null;
+      } finally {
+        workingRef.current = false;
+        setWorking(false);
+      }
+    });
   }
   const fixed = options
     ? { ...options, harmonyTuning: "equal temperament" as const }
@@ -88,24 +98,28 @@ export default function AdoFAIExportDialogJa({
   }
   async function tilePreview() {
     if (!fixed) return;
-    const request = previewRequests.current.issue(),
-      snapshot = { ...fixed },
-      selection = [...selected];
-    const r = await run(() => api.preview_adofai_tiles(snapshot, selection));
-    if (r && previewRequests.current.isCurrent(request)) {
-      setTile(r);
+    const snapshot = { ...fixed }, selection = [...selected];
+    const r = await run(async () => {
+      const request = previewRequests.current.issue();
+      const result = await api.preview_adofai_tiles(snapshot, selection);
+      return { request, result };
+    });
+    if (r && previewRequests.current.isCurrent(r.request)) {
+      setTile(r.result);
       setDebug(null);
       setPreviewMode("tile");
     }
   }
   async function debugPreview() {
     if (!fixed) return;
-    const request = previewRequests.current.issue(),
-      snapshot = { ...fixed },
-      selection = [...selected];
-    const r = await run(() => api.preview_adofai_debug(snapshot, selection));
-    if (r && previewRequests.current.isCurrent(request)) {
-      setDebug(r);
+    const snapshot = { ...fixed }, selection = [...selected];
+    const r = await run(async () => {
+      const request = previewRequests.current.issue();
+      const result = await api.preview_adofai_debug(snapshot, selection);
+      return { request, result };
+    });
+    if (r && previewRequests.current.isCurrent(r.request)) {
+      setDebug(r.result);
       setTile(null);
       setPreviewMode("debug");
     }
@@ -161,6 +175,11 @@ export default function AdoFAIExportDialogJa({
       wide={previewMode !== "none"}
     >
       <div className="dialog-body export-dialog-body compact-export">
+        <fieldset
+          disabled={working}
+          aria-label="ADOFAI出力設定"
+          style={{ display: "grid", gap: 8, border: 0, margin: 0, padding: 0, minWidth: 0 }}
+        >
         <Field label="方式">
           <Select
             value={options.method}
@@ -247,7 +266,7 @@ export default function AdoFAIExportDialogJa({
             <div className="info-card">音律は平均律に固定されています。</div>
           </>
         )}
-        <Field label="音声">
+        <Field label="音声" group>
           <label className="inline-check">
             <input
               type="checkbox"
@@ -258,11 +277,12 @@ export default function AdoFAIExportDialogJa({
           </label>
         </Field>
         {options.useProjectSong && (
-          <Field label="音源先">
+          <Field label="音源先" group>
             <div className="number-with-suffix">
               <input
                 type="text"
                 value={options.songSourcePath || "未選択"}
+                aria-label="音源先"
                 readOnly
                 title={options.songSourcePath || "音源先が未選択です"}
               />
@@ -277,7 +297,7 @@ export default function AdoFAIExportDialogJa({
           </Field>
         )}
         {selected.length > 0 && (
-          <Field label="出力範囲">
+          <Field label="出力範囲" group>
             <label className="inline-check">
               <input
                 type="checkbox"
@@ -563,7 +583,7 @@ export default function AdoFAIExportDialogJa({
             )}
             {options.useProjectSong && (
               <>
-                <Field label="音声コピー">
+                <Field label="音声コピー" group>
                   <label className="inline-check">
                     <input
                       type="checkbox"
@@ -593,7 +613,7 @@ export default function AdoFAIExportDialogJa({
                     />
                   </Field>
                 )}
-                <Field label="songOffset">
+                <Field label="songOffset" group>
                   <label className="inline-check">
                     <input
                       type="checkbox"
@@ -639,6 +659,7 @@ export default function AdoFAIExportDialogJa({
             </Field>
           </div>
         </details>
+        </fieldset>
         {error && <div className="dialog-error">{error}</div>}
         {previewMode === "tile" && tile && <TilePreview preview={tile} />}{" "}
         {previewMode === "debug" && debug && <DebugPreview preview={debug} />}
@@ -711,7 +732,24 @@ function Modal({
     </div>
   );
 }
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  children,
+  group = false,
+}: {
+  label: string;
+  children: ReactNode;
+  group?: boolean;
+}) {
+  if (group) {
+    // Group controls without nesting labels or associating multiple controls with one label.
+    return (
+      <div className="dialog-field" role="group" aria-label={label}>
+        <span>{label}</span>
+        <div>{children}</div>
+      </div>
+    );
+  }
   return (
     <label className="dialog-field">
       <span>{label}</span>
@@ -753,17 +791,41 @@ function Num({
   suffix?: string;
   onChange(v: number): void;
 }) {
+  const fallback = Number.isFinite(value) ? value : 0;
+  const [text, setText] = useState(String(fallback));
+  const [editing, setEditing] = useState(false);
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    if (!editing) setText(String(fallback));
+  }, [editing, fallback]);
+  function commit() {
+    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current);
+    cancelledRef.current = false;
+    setEditing(false);
+    setText(String(next));
+    if (next !== fallback) onChange(next);
+  }
   return (
     <div className="number-with-suffix">
       <input
         type="number"
-        value={Number.isFinite(value) ? value : 0}
+        value={text}
         min={min}
         max={max}
         step={step}
-        onChange={(e) => {
-          const v = Number(e.target.value);
-          if (Number.isFinite(v)) onChange(v);
+        onFocus={() => { cancelledRef.current = false; setEditing(true); }}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          else if (event.key === "Escape") {
+            event.preventDefault();
+            // Cancel this edit without closing the surrounding modal.
+            event.stopPropagation();
+            cancelledRef.current = true;
+            setText(String(fallback));
+            event.currentTarget.blur();
+          }
         }}
       />
       {suffix && <span>{suffix}</span>}

@@ -40,10 +40,253 @@ test("horizontal gestures with modifiers never trigger vertical zoom or pitch sc
 
 test("dominant axis determines diagonal trackpad gesture", () => {
   assert.ok((wheelViewChange(wheel(-80, 10), view)?.start ?? Infinity) < view.start);
-  assert.deepEqual(wheelViewChange(wheel(-10, 80), view), { start: 20.96 });
+  assert.deepEqual(wheelViewChange(wheel(-10, 80), view), { start: 20.64 });
 });
 
 test("zero movement is ignored and line-mode horizontal scrolling is supported", () => {
   assert.equal(wheelViewChange(wheel(0, 0), view), null);
   assert.deepEqual(wheelViewChange(wheel(3, 0, { deltaMode: 1 }), view), { start: 20.96 });
+});
+
+
+test("small pixel deltas pan proportionally instead of a full wheel step", () => {
+  const onePixel = wheelViewChange(wheel(0, 1), view);
+  const oneTick = wheelViewChange(wheel(0, 120), view);
+  assert.ok(onePixel?.start !== undefined && oneTick?.start !== undefined);
+  assert.ok(Math.abs((onePixel.start - view.start) * 120 - (oneTick.start - view.start)) < 1e-10);
+  assert.ok(Math.abs((wheelViewChange(wheel(0, -1), view)?.start ?? NaN) - (view.start - .008)) < 1e-10);
+});
+
+test("vertical line and page deltas normalize to one nominal tick", () => {
+  assert.deepEqual(wheelViewChange(wheel(0, 3, { deltaMode: 1 }), view), { start: 20.96 });
+  assert.deepEqual(wheelViewChange(wheel(0, -1, { deltaMode: 2 }), view), { start: 19.04 });
+});
+
+test("Ctrl trackpad zoom scales with delta and preserves pointer time", () => {
+  const anchor = { timeRatio: .75, pitchRatio: .5 };
+  const change = wheelViewChange(wheel(0, -60, { ctrlKey: true }), view, anchor);
+  assert.ok(change?.windowSeconds !== undefined && change.start !== undefined);
+  assert.ok(Math.abs(change.windowSeconds - view.windowSeconds * Math.sqrt(.85)) < 1e-10);
+  assert.ok(Math.abs(change.start + anchor.timeRatio * change.windowSeconds -
+    (view.start + anchor.timeRatio * view.windowSeconds)) < 1e-10);
+  const out = wheelViewChange(wheel(0, 60, { ctrlKey: true }), view);
+  assert.ok(Math.abs((out?.windowSeconds ?? NaN) - view.windowSeconds / Math.sqrt(.85)) < 1e-10);
+});
+
+test("tiny Shift wheel deltas accumulate to one pitch step without a full-step jump", () => {
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  let current = { ...view };
+  for (let i = 0; i < 39; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), current, undefined, accumulator), null);
+  }
+  const change = wheelViewChange(wheel(0, -1, { shiftKey: true }), current, undefined, accumulator);
+  assert.deepEqual(change, { pitchBottom: 41 });
+  current = { ...current, ...change };
+  assert.equal(wheelViewChange(wheel(0, 1, { shiftKey: true }), current, undefined, accumulator), null);
+});
+
+test("tiny Alt wheel deltas accumulate to one visible-note step", () => {
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 29; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { altKey: true }), view, undefined, accumulator), null);
+  }
+  assert.deepEqual(wheelViewChange(wheel(0, -1, { altKey: true }), view, undefined, accumulator),
+    { visibleNotes: 47, pitchBottom: 40 });
+});
+
+test("changing wheel modifiers or using horizontal pan clears fractional pitch carry", () => {
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 20; i++) wheelViewChange(wheel(0, -1, { shiftKey: true }), view, undefined, accumulator);
+  assert.equal(wheelViewChange(wheel(0, -1, { altKey: true }), view, undefined, accumulator), null);
+  for (let i = 0; i < 20; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), view, undefined, accumulator), null);
+  }
+  assert.ok(wheelViewChange(wheel(120, 0), view, undefined, accumulator)?.start !== undefined);
+  for (let i = 0; i < 20; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), view, undefined, accumulator), null);
+  }
+});
+
+test("equal opposite Ctrl wheel gestures restore zoom and anchored time", () => {
+  const anchor = { timeRatio: .8, pitchRatio: .25 };
+  for (const delta of [120, 60, 1, -120, -60, -1]) {
+    const first = wheelViewChange(wheel(0, delta, { ctrlKey: true }), view, anchor);
+    assert.ok(first?.windowSeconds !== undefined && first.start !== undefined);
+    const second = wheelViewChange(
+      wheel(0, -delta, { ctrlKey: true }),
+      { ...view, ...first },
+      anchor,
+    );
+    assert.ok(second?.windowSeconds !== undefined && second.start !== undefined);
+    assert.ok(Math.abs(second.windowSeconds - view.windowSeconds) < 1e-10);
+    assert.ok(Math.abs(second.start - view.start) < 1e-10);
+  }
+});
+
+test("many small alternating Ctrl wheel deltas do not accumulate zoom drift", () => {
+  let current = { ...view };
+  for (let i = 0; i < 120; i++) {
+    const forward = wheelViewChange(wheel(0, 1, { ctrlKey: true }), current);
+    assert.ok(forward?.windowSeconds !== undefined);
+    current = { ...current, ...forward };
+    const reverse = wheelViewChange(wheel(0, -1, { ctrlKey: true }), current);
+    assert.ok(reverse?.windowSeconds !== undefined);
+    current = { ...current, ...reverse };
+  }
+  assert.ok(Math.abs(current.windowSeconds - view.windowSeconds) < 1e-9);
+});
+
+test("pitch wheel gestures at MIDI limits are ignored instead of writing unchanged view", () => {
+  const top = { ...view, pitchBottom: 128 - view.visibleNotes };
+  const bottom = { ...view, pitchBottom: 0 };
+  assert.equal(wheelViewChange(wheel(0, -120, { shiftKey: true }), top), null);
+  assert.equal(wheelViewChange(wheel(0, 120, { shiftKey: true }), bottom), null);
+  assert.equal(wheelViewChange(wheel(0, -120, { altKey: true }), { ...view, visibleNotes: 6 }), null);
+  assert.equal(wheelViewChange(wheel(0, 120, { altKey: true }), { ...view, visibleNotes: 128, pitchBottom: 0 }), null);
+});
+
+test("blocked fine pitch gestures clear their carry before reversing", () => {
+  const top = { ...view, pitchBottom: 128 - view.visibleNotes };
+  const shiftCarry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 40; i++)
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), top, undefined, shiftCarry), null);
+  assert.equal(shiftCarry.remainder, 0);
+  for (let i = 0; i < 39; i++)
+    assert.equal(wheelViewChange(wheel(0, 1, { shiftKey: true }), top, undefined, shiftCarry), null);
+  assert.deepEqual(wheelViewChange(wheel(0, 1, { shiftKey: true }), top, undefined, shiftCarry), { pitchBottom: top.pitchBottom - 1 });
+
+  const narrow = { ...view, visibleNotes: 6 };
+  const altCarry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 30; i++)
+    assert.equal(wheelViewChange(wheel(0, -1, { altKey: true }), narrow, undefined, altCarry), null);
+  assert.equal(altCarry.remainder, 0);
+  for (let i = 0; i < 29; i++)
+    assert.equal(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, altCarry), null);
+  assert.deepEqual(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, altCarry), { visibleNotes: 7, pitchBottom: narrow.pitchBottom });
+});
+
+test("timeline pan at zero is ignored rather than dispatching a negative or unchanged start", () => {
+  const beginning = { ...view, start: 0 };
+  for (const event of [
+    wheel(0, -120),
+    wheel(-120, 0),
+    wheel(-1, 0, { shiftKey: true }),
+    wheel(0, -1, { deltaMode: 1 }),
+  ]) {
+    assert.equal(wheelViewChange(event, beginning), null);
+  }
+  assert.deepEqual(wheelViewChange(wheel(0, 120), beginning), { start: .96 });
+  assert.deepEqual(wheelViewChange(wheel(120, 0), beginning), { start: .96 });
+});
+
+test("timeline pan crossing zero stops at the boundary and reverses normally", () => {
+  const nearStart = { ...view, start: .1 };
+  assert.deepEqual(wheelViewChange(wheel(0, -120), nearStart), { start: 0 });
+  assert.deepEqual(wheelViewChange(wheel(-120, 0), nearStart), { start: 0 });
+  assert.deepEqual(wheelViewChange(wheel(0, 120), { ...nearStart, start: 0 }), { start: .96 });
+});
+
+
+test("timeline pan at the chart end does not dispatch a no-op or out-of-range start", () => {
+  const end = { ...view, start: 48 };
+  assert.equal(wheelViewChange(wheel(0, 120), end, undefined, undefined, 60), null);
+  assert.equal(wheelViewChange(wheel(120, 0), end, undefined, undefined, 60), null);
+  assert.deepEqual(wheelViewChange(wheel(0, -120), end, undefined, undefined, 60), { start: 47.04 });
+  const nearEnd = { ...view, start: 47.8 };
+  assert.deepEqual(wheelViewChange(wheel(0, 120), nearEnd, undefined, undefined, 60), { start: 48 });
+});
+
+test("Ctrl zoom clamps both the chart duration and anchored start at timeline edges", () => {
+  const anchor = { timeRatio: .5, pitchRatio: .5 };
+  const beginning = { ...view, start: 0 };
+  const fromBeginning = wheelViewChange(wheel(0, 120, { ctrlKey: true }), beginning, anchor, undefined, 60);
+  assert.equal(fromBeginning?.start, 0);
+  assert.ok((fromBeginning?.windowSeconds ?? 0) > view.windowSeconds);
+
+  const end = { ...view, start: 48 };
+  const fromEnd = wheelViewChange(wheel(0, 120, { ctrlKey: true }), end, anchor, undefined, 60);
+  assert.ok(fromEnd?.windowSeconds !== undefined && fromEnd.start !== undefined);
+  assert.ok(Math.abs(fromEnd.start - (60 - fromEnd.windowSeconds)) < 1e-9);
+
+  const withoutAnchor = wheelViewChange(wheel(0, 120, { ctrlKey: true }), end, undefined, undefined, 60);
+  assert.ok(withoutAnchor?.windowSeconds !== undefined && withoutAnchor.start !== undefined);
+  assert.ok(Math.abs(withoutAnchor.start - (60 - withoutAnchor.windowSeconds)) < 1e-9);
+});
+
+test("Ctrl zoom out on a full-duration view is a no-op, zoom in still works", () => {
+  const full = { ...view, start: 0, windowSeconds: 60 };
+  const anchor = { timeRatio: .7, pitchRatio: .5 };
+  assert.equal(wheelViewChange(wheel(0, 120, { ctrlKey: true }), full, anchor, undefined, 60), null);
+  const zoomIn = wheelViewChange(wheel(0, -120, { ctrlKey: true }), full, anchor, undefined, 60);
+  assert.ok(zoomIn?.windowSeconds !== undefined && zoomIn.start !== undefined);
+  assert.ok(zoomIn.windowSeconds < 60);
+  assert.ok(zoomIn.start >= 0 && zoomIn.start <= 60 - zoomIn.windowSeconds);
+});
+
+test("outward sub-step Shift gestures at the upper edge do not delay reversal", () => {
+  const top = { ...view, pitchBottom: 128 - view.visibleNotes };
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 20; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { shiftKey: true }), top, undefined, accumulator), null);
+  }
+  assert.equal(accumulator.remainder, 0);
+  for (let i = 0; i < 39; i++) {
+    assert.equal(wheelViewChange(wheel(0, 1, { shiftKey: true }), top, undefined, accumulator), null);
+  }
+  assert.deepEqual(wheelViewChange(wheel(0, 1, { shiftKey: true }), top, undefined, accumulator),
+    { pitchBottom: top.pitchBottom - 1 });
+});
+
+test("outward sub-step Alt gestures at minimum span do not delay reversal", () => {
+  const narrow = { ...view, visibleNotes: 6 };
+  const accumulator = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (let i = 0; i < 15; i++) {
+    assert.equal(wheelViewChange(wheel(0, -1, { altKey: true }), narrow, undefined, accumulator), null);
+  }
+  assert.equal(accumulator.remainder, 0);
+  for (let i = 0; i < 29; i++) {
+    assert.equal(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, accumulator), null);
+  }
+  assert.deepEqual(wheelViewChange(wheel(0, 1, { altKey: true }), narrow, undefined, accumulator),
+    { visibleNotes: 7, pitchBottom: narrow.pitchBottom });
+});
+
+test("Shift wheel clears fractional carry when arriving at upper MIDI edge", () => {
+  const nearTop = { ...view, pitchBottom: 128 - view.visibleNotes - 1 };
+  const carry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  const outward = wheelViewChange(wheel(0, -60, { shiftKey: true }), nearTop, undefined, carry);
+  assert.deepEqual(outward, { pitchBottom: 128 - view.visibleNotes });
+  assert.equal(carry.remainder, 0);
+  assert.deepEqual(wheelViewChange(wheel(0, 40, { shiftKey: true }), { ...nearTop, ...outward }, undefined, carry),
+    { pitchBottom: nearTop.pitchBottom });
+});
+
+test("Shift wheel clears fractional carry when arriving at lower MIDI edge", () => {
+  const nearBottom = { ...view, pitchBottom: 1 };
+  const carry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  const outward = wheelViewChange(wheel(0, 60, { shiftKey: true }), nearBottom, undefined, carry);
+  assert.deepEqual(outward, { pitchBottom: 0 });
+  assert.equal(carry.remainder, 0);
+  assert.deepEqual(wheelViewChange(wheel(0, -40, { shiftKey: true }), { ...nearBottom, ...outward }, undefined, carry),
+    { pitchBottom: 1 });
+});
+
+test("Alt wheel clears fractional carry when arriving at maximum visible notes", () => {
+  const nearWide = { ...view, pitchBottom: 0, visibleNotes: 127 };
+  const carry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  const outward = wheelViewChange(wheel(0, 45, { altKey: true }), nearWide, undefined, carry);
+  assert.deepEqual(outward, { visibleNotes: 128, pitchBottom: 0 });
+  assert.equal(carry.remainder, 0);
+  assert.deepEqual(wheelViewChange(wheel(0, -30, { altKey: true }), { ...nearWide, ...outward }, undefined, carry),
+    { visibleNotes: 127, pitchBottom: 0 });
+});
+
+test("Alt wheel clears fractional carry when arriving at minimum visible notes", () => {
+  const nearNarrow = { ...view, visibleNotes: 7 };
+  const carry = { modifier: null, remainder: 0 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  const outward = wheelViewChange(wheel(0, -45, { altKey: true }), nearNarrow, undefined, carry);
+  assert.deepEqual(outward, { visibleNotes: 6, pitchBottom: nearNarrow.pitchBottom });
+  assert.equal(carry.remainder, 0);
+  assert.deepEqual(wheelViewChange(wheel(0, 30, { altKey: true }), { ...nearNarrow, ...outward }, undefined, carry),
+    { visibleNotes: 7, pitchBottom: nearNarrow.pitchBottom });
 });

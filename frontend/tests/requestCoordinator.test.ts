@@ -322,7 +322,9 @@ test("view request applies only the current successful response", async () => {
 test("wheel and fit view share the recoverable request path", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /await enqueueRecoverableViewTask\(\s*viewQueue\.current,/);
-  assert.match(app, /applyViewAction\(\(\) => api\.set_view\(changes\), "表示範囲の変更"\)/);
+  assert.match(app, /const pitchNormalized = clampPitchViewChange\(view, changes\)/);
+  assert.match(app, /const normalized = clampTimeViewChange\(view, pitchNormalized, playback\.duration\)/);
+  assert.match(app, /applyViewAction\(\(\) => api\.set_view\(normalized\), "表示範囲の変更"\)/);
   assert.match(app, /applyViewAction\(\(\) => api\.fit_view\(\), "全体表示"\)/);
   assert.match(app, /viewQueue\.current\.enqueue\(\(\) => api\.get_state\(\)\)/);
   assert.match(app, /generation === documentGeneration\.current/);
@@ -415,7 +417,13 @@ test("document replacement waits for a started viewport write", async () => {
 
 test("document transition invalidates viewport work and blocks new view changes", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(app, /stateTransitionPending\.current \+= 1;\s*\/\/ Invalidate pending viewport writes[^\n]*\n\s*viewRequests\.current\.invalidate\(\)/);
+  const transitionStart = app.indexOf("stateTransitionPending.current += 1;");
+  const viewportInvalidation = app.indexOf("viewRequests.current.invalidate();", transitionStart);
+  const queueBarrier = app.indexOf("const guardedAction = async () => {", transitionStart);
+  assert.ok(transitionStart >= 0, "document transition must mark itself pending");
+  assert.ok(viewportInvalidation > transitionStart, "viewport requests must be invalidated");
+  assert.ok(queueBarrier > viewportInvalidation, "invalidation must precede the queue barrier");
+  assert.ok(app.slice(transitionStart, viewportInvalidation).includes("peakRequest.current.invalidate();"), "transition must also invalidate peak requests");
   assert.match(app, /const guardedAction = async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return action\(\);/);
   assert.match(app, /async function updateView\(changes: Partial<ViewState>\) \{\s*if \(stateTransitionPending\.current > 0\)/);
   assert.match(app, /async function fitView\(\) \{\s*if \(stateTransitionPending\.current > 0\)/);

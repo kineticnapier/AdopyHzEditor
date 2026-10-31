@@ -570,6 +570,12 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
             else:
                 self.view["start"] = 0.0
                 self.view["windowSeconds"] = min(12.0, max(0.2, self.duration))
+            # Fit must preserve the same MIDI viewport bounds as set_view().
+            # Near MIDI 127, padding can otherwise extend the canvas past 128.
+            self.view["pitchBottom"] = min(
+                int(self.view["pitchBottom"]),
+                max(0, 128 - int(self.view["visibleNotes"])),
+            )
             return dict(self.view)
 
     # ------------------------------------------------------------------

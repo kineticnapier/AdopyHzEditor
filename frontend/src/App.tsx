@@ -15,6 +15,8 @@ import {
 } from "./dialogs/ToolDialogs";
 import { useDialogAccessibility } from "./dialogs/useDialogAccessibility";
 import Timeline from "./editor/Timeline";
+import { clampTimeViewChange } from "./editor/timelineNavigation";
+import { clampPitchViewChange, hasEffectiveViewChange } from "./editor/pitchViewport";
 import TopToolbar from "./components/TopToolbar";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
 import {
@@ -26,6 +28,7 @@ import {
   spectrumRegionKey,
 } from "./editor/directSpectrum";
 import type { TrackSelectionRange } from "./editor/trackSelection";
+import { resolveTrackLookup } from "./editor/trackLookup";
 import { midiLabel, midiToHz } from "./editor/musicMath";
 import { formatCursorPeakLabel } from "./editor/cursorStatus";
 import { shouldShowCanvasEmptyHint } from "./editor/emptyState";
@@ -195,7 +198,7 @@ export default function App() {
   } | null>(null);
   const [pendingDestructive, setPendingDestructive] =
     useState<PendingDestructiveAction | null>(null);
-  const peakRequest = useRef(0);
+  const peakRequest = useRef(new LatestRequestGate());
   const spectrumRequests = useRef(new LatestRequestGate());
   const settingsRequests = useRef(new LatestRequestGate());
   const pendingSettings = useRef<Partial<EditorSettings>>({});
@@ -205,6 +208,7 @@ export default function App() {
   const viewQueue = useRef(new SerialTaskQueue());
   const viewRequests = useRef(new LatestRequestGate());
   const playbackRequests = useRef(new LatestRequestGate());
+  const trackSelectionRequests = useRef(new LatestRequestGate());
   const deletingSelection = useRef("");
   const documentGeneration = useRef(0);
   const analysisIdentity = useRef("");
@@ -266,8 +270,11 @@ export default function App() {
 
   function applyState(state: AppState) {
     documentGeneration.current += 1;
+    peakRequest.current.invalidate();
+    setCursorReadout(null);
     // Ignore playback replies issued for the previous document.
     playbackRequests.current.invalidate();
+    trackSelectionRequests.current.invalidate();
     const identity = `${state.audio.path ?? ""}\0${state.analysis.source ?? "cqt"}\0${state.analysis.available}`;
     if (identity !== analysisIdentity.current) {
       analysisIdentity.current = identity;
@@ -609,6 +616,9 @@ export default function App() {
       changes.analysisSource !== undefined &&
       changes.analysisSource !== settings.analysisSource;
     if (sourceChanged) {
+      peakRequest.current.invalidate();
+      setCursorReadout(null);
+      trackSelectionRequests.current.invalidate();
       setAnalysisAvailable(false);
       setSpectrum(null);
       setDirectSpectrum(null);
@@ -688,14 +698,20 @@ export default function App() {
       setStatus("プロジェクト処理中は表示範囲を変更できません");
       return;
     }
-    if (Object.keys(changes).some((key) => key !== "mode"))
+    // Match Bridge.set_view time and MIDI bounds before optimistic rendering.
+    const pitchNormalized = clampPitchViewChange(view, changes);
+    const normalized = clampTimeViewChange(view, pitchNormalized, playback.duration);
+    // A clamped or repeated input must not cancel follow or enqueue set_view.
+    if (!hasEffectiveViewChange(view, normalized)) return;
+    if (Object.keys(normalized).some((key) => key !== "mode"))
       setFollowPlayback(false);
-    if (changes.mode === "notes") {
+    if (normalized.mode === "notes") {
+      trackSelectionRequests.current.invalidate();
       setTrackSelection({ ids: [], range: null, useRange: false });
       setHoveredTrack(null);
     }
-    setView((v) => ({ ...v, ...changes }));
-    if (api) await applyViewAction(() => api.set_view(changes), "表示範囲の変更");
+    setView((v) => ({ ...v, ...normalized }));
+    if (api) await applyViewAction(() => api.set_view(normalized), "表示範囲の変更");
   }
   async function fitView() {
     if (stateTransitionPending.current > 0) {
@@ -711,6 +727,9 @@ export default function App() {
   ): Promise<AppState> {
     if (!api) throw new Error("バックエンドに接続されていません");
     stateTransitionPending.current += 1;
+    // A pending CQT peak belongs to the previous document or analysis state.
+    peakRequest.current.invalidate();
+    setCursorReadout(null);
     // Invalidate pending viewport writes before reserving the document queue.
     viewRequests.current.invalidate();
     setBusy(true);
@@ -1044,13 +1063,19 @@ export default function App() {
       );
   }
   async function cursorMoved(time: number, midi: number) {
+    // Issue before the early return: moving into a non-CQT view also
+    // invalidates any pending response from the previous cursor position.
+    const request = peakRequest.current.issue();
+    const generation = documentGeneration.current;
     setCursorReadout({ time, midi });
-    if (!api || !analysisAvailable || analysisSource === "vorbis_direct")
+    if (!api || !analysisAvailable || analysisSource === "vorbis_direct" ||
+        stateTransitionPending.current > 0)
       return;
-    const request = ++peakRequest.current;
     try {
       const peak = await api.get_cursor_peak(time, midi, 5);
-      if (request !== peakRequest.current) return;
+      if (!peakRequest.current.isCurrent(request) ||
+          generation !== documentGeneration.current ||
+          stateTransitionPending.current > 0) return;
       const label = formatCursorPeakLabel(peak);
       if (label !== null)
         setCursorReadout({ time: peak.time ?? time, midi, peak: label });
@@ -1058,21 +1083,30 @@ export default function App() {
       /* Cursor diagnostics must not interrupt editing. */
     }
   }
-  async function findTracks(range: TrackSelectionRange) {
-    if (!api) return [];
-    try {
-      const result = await api.find_frequency_tracks(
+  function changeTrackSelection(selection: TrackSelectionState) {
+    // Inspector edits must supersede an in-flight canvas range lookup too.
+    trackSelectionRequests.current.invalidate();
+    setTrackSelection(selection);
+    if (selection.ids.length) setPanelOpen(true);
+  }
+  async function findTracks(range: TrackSelectionRange): Promise<number[] | null> {
+    if (!api || stateTransitionPending.current > 0) return null;
+    const generation = documentGeneration.current;
+    const request = trackSelectionRequests.current.issue();
+    const isCurrent = () =>
+      generation === documentGeneration.current &&
+      stateTransitionPending.current === 0 &&
+      trackSelectionRequests.current.isCurrent(request);
+    return resolveTrackLookup(
+      () => api.find_frequency_tracks(
         range.startTime,
         range.endTime,
         range.minMidi,
         range.maxMidi,
-      );
-      setStatus(result.status);
-      return result.trackIds;
-    } catch (e) {
-      setStatus(String(e));
-      return [];
-    }
+      ),
+      isCurrent,
+      setStatus,
+    );
   }
   async function convertTracks(
     trackIds: number[],
@@ -1181,6 +1215,7 @@ export default function App() {
     duplicate: () => void duplicate(),
     quantize: () => void quantize(),
     select: setSelected,
+    clearTracks: () => changeTrackSelection({ ids: [], range: null, useRange: false }),
     copy: () => void copySelected(),
     cut: () => void cutSelected(),
     paste: () => void pasteAtPlayback(),
@@ -1285,10 +1320,7 @@ export default function App() {
               onView={updateView}
               onCursorMove={(time, midi) => void cursorMoved(time, midi)}
               onTrackHover={setHoveredTrack}
-              onTrackSelectionChange={(selection) => {
-                setTrackSelection(selection);
-                if (selection.ids.length) setPanelOpen(true);
-              }}
+              onTrackSelectionChange={changeTrackSelection}
               onFindTracks={findTracks}
             />
             {shouldShowCanvasEmptyHint(audioName, notes.length) && (
@@ -1352,7 +1384,7 @@ export default function App() {
             onStateAction={runStateAction}
             onQueuedMutation={queueExternalMutation}
             onStatus={setStatus}
-            onTrackSelectionChange={setTrackSelection}
+            onTrackSelectionChange={changeTrackSelection}
             onConvertTracks={convertSelectedTracks}
           />
         )}
