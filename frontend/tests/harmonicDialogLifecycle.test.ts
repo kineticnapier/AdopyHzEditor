@@ -42,9 +42,9 @@ test("harmonic preview stays stale after a selection change even when options ma
 });
 
 test("harmonic dialog hides old defaults before its selection effect can run", () => {
-  assert.match(harmonic, /const selectionKey = JSON\\.stringify\\(selected\\)/);
+  assert.match(harmonic, /const selectionKey = JSON\.stringify\(selected\)/);
   assert.match(harmonic, /const selectionCurrent = defaultsSelectionKey === selectionKey/);
-  assert.match(harmonic, /if \\(!opts \\|\\| !selectionCurrent\\)/);
-  assert.match(harmonic, /setDefaultsSelectionKey\\(selectionKey\\)/);
-  assert.match(harmonic, /selectionScopedPreviewIsCurrent\\(preview, previewKey/);
+  assert.match(harmonic, /if \(!opts \|\| !selectionCurrent\)/);
+  assert.match(harmonic, /setDefaultsSelectionKey\(selectionKey\)/);
+  assert.match(harmonic, /selectionScopedPreviewIsCurrent\(preview, previewKey/);
 });
