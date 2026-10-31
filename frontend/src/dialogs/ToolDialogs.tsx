@@ -9,6 +9,7 @@ import type {
   ToolBackendApi,
 } from "./toolsBridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
@@ -131,6 +132,8 @@ function Num({
         onChange={(event) => setText(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
+          // IME owns Enter/Escape while a composition is active.
+          if (isDialogCompositionKey(event.nativeEvent)) return;
           if (event.key === "Enter") event.currentTarget.blur();
           else if (event.key === "Escape") {
             event.preventDefault();
