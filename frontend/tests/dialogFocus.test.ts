@@ -51,10 +51,12 @@ function fakeDialogControl(options: {
   disabled?: boolean;
   inert?: boolean;
   hidden?: boolean;
+  visibility?: "visible" | "hidden" | "collapse";
   tabIndex?: number;
 } = {}): HTMLElement {
   return {
     getClientRects: () => options.hidden ? [] : [{}],
+    ownerDocument: { defaultView: { getComputedStyle: () => ({ visibility: options.visibility ?? "visible" }) } },
     tabIndex: options.tabIndex ?? 0,
     matches: (selector: string) => {
       assert.equal(selector, ":disabled");
@@ -78,4 +80,11 @@ test("dialog Tab trap skips inert, hidden, and negative-tabIndex controls", () =
   assert.equal(isDialogTabbable(fakeDialogControl({ inert: true })), false);
   assert.equal(isDialogTabbable(fakeDialogControl({ hidden: true })), false);
   assert.equal(isDialogTabbable(fakeDialogControl({ tabIndex: -1 })), false);
+});
+
+
+test("dialog Tab trap excludes visibility-hidden controls even with layout rectangles", () => {
+  assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "hidden" })), false);
+  assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "collapse" })), false);
+  assert.equal(isDialogTabbable(fakeDialogControl({ visibility: "visible" })), true);
 });
