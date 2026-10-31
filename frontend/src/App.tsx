@@ -881,7 +881,9 @@ export default function App() {
         () => generation === documentGeneration.current,
       ),
       () => undefined,
-      (message) => setStatus(`ノート編集に失敗しました: ${message}`),
+      (message) => {
+        if (generation === documentGeneration.current) setStatus(`ノート編集に失敗しました: ${message}`);
+      },
     );
   }
   function queueExternalMutation(
