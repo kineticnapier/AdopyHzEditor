@@ -14,6 +14,7 @@ from core.note_model import Note
 from exporters.midi import export_midi
 from importers.midi import import_midi
 from web.backend import Bridge
+import web.tools as web_tools
 from web_ui import Bridge as WebUIBridge
 
 
