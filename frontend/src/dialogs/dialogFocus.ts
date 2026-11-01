@@ -48,3 +48,14 @@ export function dialogTabDestination<T extends { focus(): void }>(
     ? items[0]
     : null;
 }
+
+/** Only the frontmost modal should respond to Escape or trap Tab.
+ * Multiple dialogs can coexist briefly during state transitions.
+ */
+export function isTopmostDialog(dialog: HTMLElement | null): boolean {
+  if (!dialog?.isConnected) return false;
+  const dialogs = dialog.ownerDocument.querySelectorAll<HTMLElement>(
+    '[role="dialog"][aria-modal="true"]',
+  );
+  return dialogs.length > 0 && dialogs[dialogs.length - 1] === dialog;
+}
