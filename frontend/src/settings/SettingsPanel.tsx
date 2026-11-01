@@ -12,6 +12,7 @@ import type {
 } from "../editor/EditorCanvas";
 import { midiLabel, midiToHz } from "../editor/musicMath";
 import { commitNumericEdit } from "./numericInputModel";
+import { isDialogCompositionKey } from "../dialogs/dialogFocus";
 
 type Page = "inspector" | "settings";
 type Props = {
@@ -906,6 +907,13 @@ function NumberInput({
     if (!editing) setText(String(fallback));
   }, [editing, fallback]);
   function commit() {
+    // A disabled field may blur after its controlling setting changes.
+    if (disabled) {
+      cancelledRef.current = false;
+      setEditing(false);
+      setText(String(fallback));
+      return;
+    }
     const next = commitNumericEdit(
       text,
       fallback,
@@ -934,9 +942,12 @@ function NumberInput({
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
+          // Enter/Escape are owned by the IME until composition ends.
+          if (isDialogCompositionKey(e.nativeEvent)) return;
           if (e.key === "Enter") e.currentTarget.blur();
           else if (e.key === "Escape") {
             e.preventDefault();
+            e.stopPropagation();
             cancelledRef.current = true;
             setText(String(fallback));
             e.currentTarget.blur();
