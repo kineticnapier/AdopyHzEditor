@@ -11,7 +11,7 @@ import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { blankWorkspaceDefaultsContextIsCurrent, documentActionIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
+import { blankWorkspaceDefaultsContextIsCurrent, blankWorkspaceMidiRangeIsValid, documentActionIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 type Common = {
   api: ToolBackendApi;
@@ -176,6 +176,7 @@ export function BlankWorkspaceDialog({
   const latestRequestContext = useRef(requestContext);
   latestRequestContext.current = requestContext;
   const defaultsCurrent = blankWorkspaceDefaultsContextIsCurrent(loadedContext, requestContext);
+  const midiRangeValid = blankWorkspaceMidiRangeIsValid(value);
   const currentLoadError = blankWorkspaceDefaultsContextIsCurrent(loadError, requestContext)
     ? loadError!.message : "";
   useEffect(() => {
@@ -205,7 +206,7 @@ export function BlankWorkspaceDialog({
     setValue((current) => current ? { ...current, ...changes } : current);
   }
   async function apply() {
-    if (!value || !defaultsCurrent || applying) return;
+    if (!value || !defaultsCurrent || applying || !midiRangeValid) return;
     const snapshot = { ...value };
     await applyOnce.current(async () => {
       setApplying(true);
@@ -266,6 +267,11 @@ export function BlankWorkspaceDialog({
                     onChange={(v) => patchValue({ midiMax: Math.round(v) })}
                   />
                 </Field>
+                {!midiRangeValid && (
+                  <div className="dialog-error inline" role="alert">
+                    最低MIDIは最高MIDIより小さくしてください。
+                  </div>
+                )}
               </>
             ) : (
               <div className="dialog-loading" role="status">読み込み中…</div>
@@ -277,7 +283,7 @@ export function BlankWorkspaceDialog({
             <button
               className="primary"
               onClick={() => void apply()}
-              disabled={!value || !defaultsCurrent || applying}
+              disabled={!value || !defaultsCurrent || applying || !midiRangeValid}
             >
               適用
             </button>
