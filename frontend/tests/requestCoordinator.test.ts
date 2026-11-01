@@ -117,8 +117,40 @@ test("in-flight old-document responses never update the new document", async () 
   await Promise.resolve();
   documentGeneration += 1;
   release(5);
-  assert.equal(await inFlight, 5);
+  assert.equal(await inFlight, undefined);
   assert.deepEqual(applied, []);
+});
+
+test("in-flight obsolete mutation cannot notify or close a dialog", async () => {
+  const queue = new SerialTaskQueue();
+  let resolve!: (value: number) => void;
+  let generation = 0;
+  const events: string[] = [];
+  const pending = enqueueAppliedTask(
+    queue,
+    () => new Promise<number>((done) => { resolve = done; }),
+    () => { events.push("applied"); },
+    () => generation === 0,
+  );
+  await Promise.resolve();
+  generation += 1;
+  resolve(5);
+  const result = await pending;
+  if (result !== undefined) {
+    events.push("status");
+    events.push("dialog-closed");
+  }
+  assert.equal(result, undefined);
+  assert.deepEqual(events, []);
+});
+
+test("old-document mutation errors cannot overwrite the new document status", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const start = app.indexOf("  async function queuedMutation(");
+  const end = app.indexOf("  function queueExternalMutation(", start);
+  assert.ok(start >= 0 && end > start);
+  const block = app.slice(start, end);
+  assert.match(block, /if \(generation === documentGeneration\.current\) setStatus\(`ノート編集に失敗しました: \$\{message\}`\)/);
 });
 
 test("current-document mutations still execute and apply", async () => {
@@ -182,7 +214,8 @@ test("state actions, blank workspace and pending save use the same queue", () =>
   assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*guardedAction/);
   assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
   assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return api\.save_project_dialog\(\)/);
-  assert.match(dialogs, /await onApply\(value\)/);
+  assert.match(dialogs, /const snapshot = \{ \.\.\.value \}/);
+  assert.match(dialogs, /await onApply\(snapshot\)/);
 });
 
 test("pending settings finish before document state is requested or applied", async () => {

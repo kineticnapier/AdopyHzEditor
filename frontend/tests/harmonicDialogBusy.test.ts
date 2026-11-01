@@ -31,7 +31,7 @@ test("harmonic insertion disables every editable setting without hiding the prev
 
 test("harmonic changes are rejected synchronously while the insertion is pending", () => {
   assert.match(harmonic, /const insertingRef = useRef\(false\);/);
-  assert.match(harmonic, /function updateOpts\(next: HarmonicDiagramOptions\) \{[\s\S]*?if \(!insertingRef\.current\) setOpts\(next\);/);
+  assert.match(harmonic, /function updateOpts\(next: HarmonicDiagramOptions\) \{[\s\S]*?if \(!insertingRef\.current && selectionCurrent\) setOpts\(next\);/);
   const insert = harmonic.slice(harmonic.indexOf("async function insert()"), harmonic.indexOf("if (!opts && error)"));
   assert.match(insert, /await insertOnce\.current\(async \(\) => \{\s*insertingRef\.current = true;\s*setInserting\(true\);/);
   assert.match(insert, /finally \{\s*insertingRef\.current = false;\s*setInserting\(false\);/);

@@ -30,6 +30,7 @@ import {
 import type { TrackSelectionRange } from "./editor/trackSelection";
 import { resolveTrackLookup } from "./editor/trackLookup";
 import { midiLabel, midiToHz } from "./editor/musicMath";
+import { retainValidSelection } from "./editor/selectionValidity";
 import { formatCursorPeakLabel } from "./editor/cursorStatus";
 import { shouldShowCanvasEmptyHint } from "./editor/emptyState";
 import { runMidiExport } from "./editor/midiExport";
@@ -284,7 +285,7 @@ export default function App() {
     setView(state.view);
     setPlayback(state.playback);
     setNotes(state.notes);
-    setSelected((old) => old.filter((i) => i >= 0 && i < state.notes.length));
+    setSelected((old) => retainValidSelection(old, state.notes.length));
     setTrackSelection({ ids: [], range: null, useRange: false });
     setHoveredTrack(null);
     setAnalysisAvailable(state.analysis.available);
@@ -864,9 +865,7 @@ export default function App() {
     if (selection)
       setSelected(selection.filter((i) => i >= 0 && i < result.notes.length));
     else
-      setSelected((old) =>
-        old.filter((i) => i >= 0 && i < result.notes.length),
-      );
+      setSelected((old) => retainValidSelection(old, result.notes.length));
   }
   async function queuedMutation(
     call: () => Promise<NoteMutationResult>,
@@ -882,7 +881,9 @@ export default function App() {
         () => generation === documentGeneration.current,
       ),
       () => undefined,
-      (message) => setStatus(`ノート編集に失敗しました: ${message}`),
+      (message) => {
+        if (generation === documentGeneration.current) setStatus(`ノート編集に失敗しました: ${message}`);
+      },
     );
   }
   function queueExternalMutation(
@@ -1400,6 +1401,7 @@ export default function App() {
         <AdoFAIExportDialog
           api={api}
           selected={selected}
+          documentGeneration={documentGeneration.current}
           defaultSelectedOnly={adoExportSelectedOnly}
           onClose={() => setAdoExportOpen(false)}
           onStatus={setStatus}
@@ -1437,6 +1439,7 @@ export default function App() {
         <HarmonicDiagramDialog
           api={toolsApi}
           selected={selected}
+          documentGeneration={documentGeneration.current}
           onClose={() => setToolDialog(null)}
           onStatus={setStatus}
           onQueuedMutation={queueExternalMutation}

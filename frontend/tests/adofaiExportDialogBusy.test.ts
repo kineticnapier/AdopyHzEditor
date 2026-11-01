@@ -22,7 +22,7 @@ test("ADOFAI export settings are disabled during an operation", () => {
     dialogSource.indexOf("function patch<"),
     dialogSource.indexOf("async function run<"),
   );
-  assert.match(patch, /if \(workingRef\.current\) return;/);
+  assert.match(patch, /if \(workingRef\.current \|\| !defaultsCurrent\) return;/);
   assert.match(dialogSource, /return actionOnce\.current\(async \(\) => \{/);
 });
 

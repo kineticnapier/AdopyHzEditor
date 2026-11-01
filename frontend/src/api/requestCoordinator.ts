@@ -39,7 +39,9 @@ export function enqueueAppliedTask<T>(
     if (!isCurrent()) return undefined;
     const result = await call();
     // An in-flight response can also outlive a document switch.
-    if (isCurrent()) apply(result);
+    // Do not return an obsolete result to callers that show status or close dialogs.
+    if (!isCurrent()) return undefined;
+    apply(result);
     return result;
   });
 }

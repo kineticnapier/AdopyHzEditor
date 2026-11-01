@@ -100,8 +100,15 @@ class IOMixin:
         for project_key, setting_key, _value_type in PROJECT_SETTING_FIELDS:
             if project_key in data and setting_key in settings:
                 settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
+        canonical_keys_present = {
+            setting_key
+            for project_key, setting_key, _value_type in PROJECT_SETTING_FIELDS
+            if project_key in data
+        }
         for project_key, setting_key in PROJECT_SETTING_ALIASES.items():
-            if project_key in data and setting_key in settings:
+            # A legacy alias fills a missing setting; it must not override a
+            # newer canonical field when both occur in the same project.
+            if project_key in data and setting_key in settings and setting_key not in canonical_keys_present:
                 settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
         return settings
 

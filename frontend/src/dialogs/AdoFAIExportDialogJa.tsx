@@ -7,12 +7,17 @@ import type {
 } from "./bridge";
 import { LatestRequestGate } from "../api/requestCoordinator";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
+import { exportDefaultsContextIsCurrent } from "./previewFreshness";
+
+type ExportContext = { api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number };
 
 type Props = {
   api: BackendApi;
   selected: number[];
+  documentGeneration: number;
   defaultSelectedOnly?: boolean;
   onClose(): void;
   onStatus(text: string): void;
@@ -21,14 +26,16 @@ type Props = {
 export default function AdoFAIExportDialogJa({
   api,
   selected,
+  documentGeneration,
   defaultSelectedOnly = false,
   onClose,
   onStatus,
   onHelp,
 }: Props) {
   const [options, setOptions] = useState<AdoFAIExportOptions | null>(null),
+    [loadedContext, setLoadedContext] = useState<{ api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number } | null>(null),
     [working, setWorking] = useState(false),
-    [error, setError] = useState(""),
+    [error, setError] = useState<{ message: string; context: ExportContext } | null>(null),
     [tile, setTile] = useState<AdoFAITilePreview | null>(null),
     [debug, setDebug] = useState<AdoFAIDebugPreview | null>(null),
     [previewMode, setPreviewMode] = useState<"none" | "tile" | "debug">("none");
@@ -36,23 +43,44 @@ export default function AdoFAIExportDialogJa({
   const previewRequests = useRef(new LatestRequestGate());
   const actionOnce = useRef(createExclusiveAsyncAction());
   const workingRef = useRef(false);
+  // Async actions must check the latest document/selection, not their old render.
+  const requestContext = { api, selected, defaultSelectedOnly, loadAttempt, documentGeneration };
+  const latestRequestContext = useRef(requestContext);
+  latestRequestContext.current = requestContext;
+  // Compare during render: effects run after a new selection has already rendered.
+  const defaultsCurrent = exportDefaultsContextIsCurrent(loadedContext, requestContext);
+  // A failure from a previous selection/document must not appear in the new form.
+  const currentError = exportDefaultsContextIsCurrent(error?.context ?? null, requestContext)
+    ? error!.message : "";
+  function isCurrentAction(context: typeof loadedContext) {
+    return exportDefaultsContextIsCurrent(context, latestRequestContext.current);
+  }
   useEffect(() => {
     previewRequests.current.invalidate();
     setTile(null);
     setDebug(null);
     setPreviewMode("none");
-    setError("");
+    setError(null);
+    // A changed selection invalidates the previous export options. Do not let
+    // the user export with stale defaults while the new request is pending.
+    setOptions(null);
+    setLoadedContext(null);
     let alive = true;
     void api
       .get_adofai_export_defaults(selected)
       .then((v) => {
-        if (alive) setOptions({ ...v, selectedOnly:defaultSelectedOnly&&selected.length>0, harmonyTuning: "equal temperament" });
+        if (alive) {
+          setLoadedContext({ api, selected, defaultSelectedOnly, loadAttempt, documentGeneration });
+          setOptions({ ...v, selectedOnly:defaultSelectedOnly&&selected.length>0, harmonyTuning: "equal temperament" });
+        }
       })
-      .catch((e) => alive && setError(String(e)));
+      .catch((e) => {
+        if (alive) setError({ message: String(e), context: { api, selected, defaultSelectedOnly, loadAttempt, documentGeneration } });
+      });
     return () => {
       alive = false;
     };
-  }, [api, selected, defaultSelectedOnly, loadAttempt]);
+  }, [api, selected, defaultSelectedOnly, loadAttempt, documentGeneration]);
   function invalidatePreview() {
     previewRequests.current.invalidate();
     setTile(null);
@@ -64,21 +92,22 @@ export default function AdoFAIExportDialogJa({
     v: AdoFAIExportOptions[K],
   ) {
     // A focused numeric input may blur as the form becomes disabled.
-    if (workingRef.current) return;
+    if (workingRef.current || !defaultsCurrent) return;
     invalidatePreview();
     setOptions((o) =>
       o ? { ...o, [k]: v, harmonyTuning: "equal temperament" } : o,
     );
   }
   async function run<T>(fn: () => Promise<T>) {
+    const context = loadedContext;
     return actionOnce.current(async () => {
       workingRef.current = true;
       setWorking(true);
-      setError("");
+      setError(null);
       try {
         return await fn();
       } catch (e) {
-        setError(String(e));
+        if (context && isCurrentAction(context)) setError({ message: String(e), context });
         return null;
       } finally {
         workingRef.current = false;
@@ -86,50 +115,55 @@ export default function AdoFAIExportDialogJa({
       }
     });
   }
-  const fixed = options
+  const fixed = options && defaultsCurrent
     ? { ...options, harmonyTuning: "equal temperament" as const }
     : null;
   async function exportLevel() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const r = await run(() => api.export_adofai_advanced(fixed, selected));
-    if (!r) return;
+    if (!r || !isCurrentAction(context)) return;
     onStatus(r.status);
     if (r.ok) onClose();
   }
   async function tilePreview() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const snapshot = { ...fixed }, selection = [...selected];
     const r = await run(async () => {
       const request = previewRequests.current.issue();
       const result = await api.preview_adofai_tiles(snapshot, selection);
       return { request, result };
     });
-    if (r && previewRequests.current.isCurrent(r.request)) {
+    if (r && isCurrentAction(context) && previewRequests.current.isCurrent(r.request)) {
       setTile(r.result);
       setDebug(null);
       setPreviewMode("tile");
     }
   }
   async function debugPreview() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const snapshot = { ...fixed }, selection = [...selected];
     const r = await run(async () => {
       const request = previewRequests.current.issue();
       const result = await api.preview_adofai_debug(snapshot, selection);
       return { request, result };
     });
-    if (r && previewRequests.current.isCurrent(r.request)) {
+    if (r && isCurrentAction(context) && previewRequests.current.isCurrent(r.request)) {
       setDebug(r.result);
       setTile(null);
       setPreviewMode("debug");
     }
   }
   async function chooseSongSource() {
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const r = await run(() => api.choose_adofai_song_source());
-    if (r?.ok && r.path) {
+    if (r?.ok && r.path && isCurrentAction(context)) {
       invalidatePreview();
       setOptions((o) =>
-        o
+        isCurrentAction(context) && o
           ? {
               ...o,
               useProjectSong: true,
@@ -141,18 +175,19 @@ export default function AdoFAIExportDialogJa({
       onStatus(r.status);
     }
   }
-  if (!options)
+  if (!options || !defaultsCurrent)
     return (
-      <Modal title="ADOFAI出力" onClose={onClose}>
-        {error ? (
+      <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
+        {currentError ? (
           <>
-            <div className="dialog-error">
-              設定の読込に失敗しました: {error}
+            <div className="dialog-error" role="alert">
+              設定の読込に失敗しました: {currentError}
             </div>
             <div className="dialog-footer">
-              <button onClick={onClose}>閉じる</button>
+              <button onClick={onClose} disabled={working}>閉じる</button>
               <button
                 className="primary"
+                disabled={working}
                 onClick={() => setLoadAttempt((v) => v + 1)}
               >
                 再試行
@@ -160,7 +195,7 @@ export default function AdoFAIExportDialogJa({
             </div>
           </>
         ) : (
-          <div className="dialog-loading">設定を読み込んでいます…</div>
+          <div className="dialog-loading" role="status">{working ? "出力処理中…" : "設定を読み込んでいます…"}</div>
         )}
       </Modal>
     );
@@ -660,7 +695,7 @@ export default function AdoFAIExportDialogJa({
           </div>
         </details>
         </fieldset>
-        {error && <div className="dialog-error">{error}</div>}
+        {currentError && <div className="dialog-error" role="alert">{currentError}</div>}
         {previewMode === "tile" && tile && <TilePreview preview={tile} />}{" "}
         {previewMode === "debug" && debug && <DebugPreview preview={debug} />}
       </div>
@@ -720,6 +755,7 @@ function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-busy={locked}
       >
         <header className="modal-title">
           <strong id={titleId}>{title}</strong>
@@ -817,6 +853,8 @@ function Num({
         onChange={(event) => setText(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
+          // IME owns Enter/Escape while a composition is active.
+          if (isDialogCompositionKey(event.nativeEvent)) return;
           if (event.key === "Enter") event.currentTarget.blur();
           else if (event.key === "Escape") {
             event.preventDefault();

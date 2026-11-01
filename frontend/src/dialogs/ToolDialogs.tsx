@@ -9,11 +9,12 @@ import type {
   ToolBackendApi,
 } from "./toolsBridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runQuickHzOutputAction } from "./quickHzOutputActions";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { previewIsCurrent } from "./previewFreshness";
+import { blankWorkspaceDefaultsContextIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, quickHzChartIsCurrent, quickHzPreviewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 import { quickHzActionPolicy } from "./quickHzActionPolicy";
 type Common = {
@@ -131,6 +132,8 @@ function Num({
         onChange={(event) => setText(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
+          // IME owns Enter/Escape while a composition is active.
+          if (isDialogCompositionKey(event.nativeEvent)) return;
           if (event.key === "Enter") event.currentTarget.blur();
           else if (event.key === "Escape") {
             event.preventDefault();
@@ -144,13 +147,13 @@ function Num({
       />
   );
 }
-function LoadFailure({ error, onRetry }: { error: string; onRetry(): void }) {
+function LoadFailure({ error, onRetry, disabled = false }: { error: string; onRetry(): void; disabled?: boolean }) {
   return (
     <>
-      <div className="dialog-error">読込に失敗しました: {error}</div>
+      <div className="dialog-error" role="alert">読込に失敗しました: {error}</div>
       <div className="dialog-footer">
         <span />
-        <button className="primary" onClick={onRetry}>
+        <button className="primary" onClick={onRetry} disabled={disabled}>
           再試行
         </button>
       </div>
@@ -166,26 +169,49 @@ export function BlankWorkspaceDialog({
 }: Common & { onApply(options: BlankWorkspaceOptions): Promise<void> }) {
   const applyOnce = useRef(createExclusiveAsyncAction());
   const [value, setValue] = useState<BlankWorkspaceOptions | null>(null),
-    [loadError, setLoadError] = useState(""),
+    [loadedContext, setLoadedContext] = useState<{ api: ToolBackendApi; attempt: number } | null>(null),
+    [loadError, setLoadError] = useState<{ message: string; api: ToolBackendApi; attempt: number } | null>(null),
     [attempt, setAttempt] = useState(0),
     [applying, setApplying] = useState(false);
+  // An API replacement or retry must hide the previous defaults during render,
+  // before React runs the cleanup/reset effect.
+  const requestContext = { api, attempt };
+  const defaultsCurrent = blankWorkspaceDefaultsContextIsCurrent(loadedContext, requestContext);
+  const currentLoadError = blankWorkspaceDefaultsContextIsCurrent(loadError, requestContext)
+    ? loadError!.message : "";
   useEffect(() => {
     let alive = true;
-    setLoadError("");
+    setValue(null);
+    setLoadedContext(null);
+    setLoadError(null);
     void api
       .get_blank_workspace_defaults()
-      .then((x) => alive && setValue(x))
-      .catch((e) => alive && setLoadError(String(e)));
+      .then((x) => {
+        if (!alive) return;
+        setValue(x);
+        setLoadedContext({ api, attempt });
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setValue(null);
+        setLoadedContext(null);
+        setLoadError({ message: String(e), api, attempt });
+      });
     return () => {
       alive = false;
     };
   }, [api, attempt]);
+  function patchValue(changes: Partial<BlankWorkspaceOptions>) {
+    if (!defaultsCurrent || applying) return;
+    setValue((current) => current ? { ...current, ...changes } : current);
+  }
   async function apply() {
-    if (!value) return;
+    if (!value || !defaultsCurrent || applying) return;
+    const snapshot = { ...value };
     await applyOnce.current(async () => {
       setApplying(true);
       try {
-        await onApply(value);
+        await onApply(snapshot);
         onStatus("空のワークスペースに切り替えました");
         onClose();
       } catch (e) {
@@ -197,15 +223,16 @@ export function BlankWorkspaceDialog({
   }
   return (
     <Modal title="空のワークスペース" onClose={onClose} locked={applying}>
-      {loadError ? (
+      {currentLoadError ? (
         <LoadFailure
-          error={loadError}
+          error={currentLoadError}
           onRetry={() => setAttempt((v) => v + 1)}
+          disabled={applying}
         />
       ) : (
         <>
           <div className="dialog-body export-dialog-body">
-            {value ? (
+            {value && defaultsCurrent ? (
               <>
                 <div className="info-card">
                   音声を外して黒い編集領域に切り替えます。既存ノートは保持されます。
@@ -217,7 +244,7 @@ export function BlankWorkspaceDialog({
                     min={1}
                     max={36000}
                     step={1}
-                    onChange={(v) => setValue({ ...value, duration: v })}
+                    onChange={(v) => patchValue({ duration: v })}
                   />
                   <span>秒</span>
                 </Field>
@@ -227,9 +254,7 @@ export function BlankWorkspaceDialog({
                     disabled={applying}
                     min={0}
                     max={127}
-                    onChange={(v) =>
-                      setValue({ ...value, midiMin: Math.round(v) })
-                    }
+                    onChange={(v) => patchValue({ midiMin: Math.round(v) })}
                   />
                 </Field>
                 <Field label="最高MIDI">
@@ -238,14 +263,12 @@ export function BlankWorkspaceDialog({
                     disabled={applying}
                     min={0}
                     max={127}
-                    onChange={(v) =>
-                      setValue({ ...value, midiMax: Math.round(v) })
-                    }
+                    onChange={(v) => patchValue({ midiMax: Math.round(v) })}
                   />
                 </Field>
               </>
             ) : (
-              <div className="dialog-loading">読み込み中…</div>
+              <div className="dialog-loading" role="status">読み込み中…</div>
             )}
           </div>
           <div className="dialog-footer">
@@ -254,7 +277,7 @@ export function BlankWorkspaceDialog({
             <button
               className="primary"
               onClick={() => void apply()}
-              disabled={!value || applying}
+              disabled={!value || !defaultsCurrent || applying}
             >
               適用
             </button>
@@ -267,6 +290,9 @@ export function BlankWorkspaceDialog({
 
 export function QuickHzDialog({ api, onClose, onStatus }: Common) {
   const appendOnce = useRef(createExclusiveAsyncAction());
+  // Check the backend again after file pickers and other awaited operations.
+  const latestApi = useRef(api);
+  latestApi.current = api;
   const [appending, setAppending] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [outputting, setOutputting] = useState<"copy" | "save" | null>(null);
@@ -282,13 +308,20 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
   });
   const [result, setResult] = useState<QuickHzResult | null>(null),
     [resultKey, setResultKey] = useState(""),
+    [resultApi, setResultApi] = useState<ToolBackendApi | null>(null),
     [error, setError] = useState(""),
-    [chart, setChart] = useState("");
-  const optsKey = JSON.stringify(opts), resultCurrent = previewIsCurrent(result, resultKey, optsKey);
+    [chart, setChart] = useState(""),
+    [chartApi, setChartApi] = useState<ToolBackendApi | null>(null);
+  const optsKey = JSON.stringify(opts);
+  const resultCurrent = quickHzPreviewIsCurrent(result, resultKey, optsKey, resultApi, api);
+  const chartCurrent = quickHzChartIsCurrent(chart, chartApi, api);
   const busy = appending || choosing || outputting !== null;
-  const actions = quickHzActionPolicy(busy, Boolean(chart), resultCurrent);
+  const actions = quickHzActionPolicy(busy, chartCurrent, resultCurrent);
   useEffect(() => {
     let alive = true;
+    setResult(null);
+    setResultKey("");
+    setResultApi(null);
     const requestedKey = optsKey;
     const id = window.setTimeout(
       () =>
@@ -298,6 +331,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
             if (alive) {
               setResult(x);
               setResultKey(requestedKey);
+              setResultApi(api);
               setError("");
             }
           })
@@ -322,9 +356,11 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
       setChoosing(true);
       try {
         const x = await api.choose_quick_hz_chart();
+        if (api !== latestApi.current) return;
         onStatus(x.status);
         if (x.ok && x.path) {
           setChart(x.path);
+          setChartApi(api);
           setOpts((o) => ({
             ...o,
             startFloor: x.tailFloor ?? o.startFloor,
@@ -335,15 +371,15 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           }));
         }
       } catch (e) {
-        setError(String(e));
+        if (api === latestApi.current) setError(String(e));
       } finally {
         setChoosing(false);
       }
     });
   }
   async function append() {
-    if (!chart) {
-      setError("譜面が選択されていません");
+    if (!chartCurrent) {
+      setError("現在の接続で譜面が選択されていません");
       return;
     }
     if (!resultCurrent) { setError("最新設定のプレビューを待っています"); return; }
@@ -351,6 +387,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
       setAppending(true);
       try {
         const x = await api.append_quick_hz_chart(chart, opts);
+        if (api !== latestApi.current) return;
         if (x.ok) {
           setError("");
           onStatus(x.status);
@@ -358,7 +395,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           setError(x.status);
         }
       } catch (e) {
-        setError(String(e));
+        if (api === latestApi.current) setError(String(e));
       } finally {
         setAppending(false);
       }
@@ -374,8 +411,13 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
         await runQuickHzOutputAction(
           "コピー",
           () => navigator.clipboard.writeText(result.output),
-          () => { setError(""); onStatus("Quick Hz出力をコピーしました"); },
-          setError,
+          () => {
+            if (api === latestApi.current) {
+              setError("");
+              onStatus("Quick Hz出力をコピーしました");
+            }
+          },
+          message => { if (api === latestApi.current) setError(message); },
         );
       } finally {
         setOutputting(null);
@@ -390,8 +432,13 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
         await runQuickHzOutputAction(
           "テキスト保存",
           () => api.save_quick_hz_text(result.output),
-          x => { setError(""); onStatus(x.status); },
-          setError,
+          x => {
+            if (api === latestApi.current) {
+              setError("");
+              onStatus(x.status);
+            }
+          },
+          message => { if (api === latestApi.current) setError(message); },
         );
       } finally {
         setOutputting(null);
@@ -496,11 +543,11 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
               </div>
             </div>
           )}
-          {error && <div className="dialog-error inline">{error}</div>}
+          {error && <div className="dialog-error inline" role="alert">{error}</div>}
           <div className="chart-tools">
             <button onClick={() => void chooseChart()} disabled={!actions.canChooseChart}>譜面を選択…</button>
-            <span title={chart}>
-              {chart ? chart.split(/[\\/]/).pop() : "未選択"}
+            <span title={chartCurrent ? chart : ""}>
+              {chartCurrent ? chart.split(/[\\/]/).pop() : "未選択"}
             </span>
             <label>
               <input
@@ -519,7 +566,7 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
           </div>
         </section>
         <section className="quick-hz-output">
-          <textarea value={resultCurrent ? result?.output ?? "" : ""} readOnly spellCheck={false} />
+          <textarea aria-label="Quick Hz出力プレビュー" value={resultCurrent ? result?.output ?? "" : ""} readOnly spellCheck={false} />
           <div className="preview-actions">
             <button onClick={() => void copy()} disabled={!actions.canOutput}>
               {outputting === "copy" ? "コピー中…" : "コピー"}
@@ -543,11 +590,13 @@ export function QuickHzDialog({ api, onClose, onStatus }: Common) {
 export function HarmonicDiagramDialog({
   api,
   selected,
+  documentGeneration,
   onClose,
   onStatus,
   onQueuedMutation,
 }: Common & {
   selected: number[];
+  documentGeneration: number;
   onQueuedMutation(
     call: () => Promise<NoteMutationResult>,
     selection?: (result: NoteMutationResult) => number[] | undefined,
@@ -559,19 +608,37 @@ export function HarmonicDiagramDialog({
   const [opts, setOpts] = useState<HarmonicDiagramOptions | null>(null),
     [preview, setPreview] = useState<HarmonicPreview | null>(null),
     [previewKey,setPreviewKey]=useState(""),
+    [defaultsSelectionKey, setDefaultsSelectionKey] = useState<string | null>(null),
+    [defaultsContext, setDefaultsContext] = useState<{ api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number } | null>(null),
     [error, setError] = useState(""),
     [attempt, setAttempt] = useState(0);
-  const previewCurrent = previewIsCurrent(preview, previewKey, JSON.stringify(opts));
+  const selectionKey = JSON.stringify(selected);
+  const selectionCurrent = defaultsSelectionKey === selectionKey &&
+    harmonicDefaultsContextIsCurrent(defaultsContext, { api, selected, attempt, documentGeneration });
+  const previewCurrent = selectionCurrent && selectionScopedPreviewIsCurrent(preview, previewKey, JSON.stringify(opts), defaultsSelectionKey, selectionKey);
   function updateOpts(next: HarmonicDiagramOptions) {
     // A numeric field can commit on blur while disabling the form.
-    if (!insertingRef.current) setOpts(next);
+    if (!insertingRef.current && selectionCurrent) setOpts(next);
   }
   useEffect(() => {
     let alive = true;
+    // Selection-dependent defaults are invalid as soon as the selection changes.
+    // Do not allow inserting the previous selection's diagram while loading.
+    setOpts(null);
+    setDefaultsSelectionKey(null);
+    setDefaultsContext(null);
+    setPreview(null);
+    setPreviewKey("");
     setError("");
-    void api.get_harmonic_diagram_defaults(selected).then(value => alive && setOpts(value)).catch(reason => alive && setError(String(reason)));
+    void api.get_harmonic_diagram_defaults(selected).then(value => {
+      if (alive) {
+        setOpts(value);
+        setDefaultsSelectionKey(selectionKey);
+        setDefaultsContext({ api, selected, attempt, documentGeneration });
+      }
+    }).catch(reason => alive && setError(String(reason)));
     return () => { alive = false; };
-  }, [api, selected, attempt]);
+  }, [api, selected, attempt, documentGeneration]);
   useEffect(() => {
     if (!opts) return;
     let alive = true;
@@ -602,7 +669,7 @@ export function HarmonicDiagramDialog({
     };
   }, [api, opts]);
   async function insert() {
-    if (!opts) return;
+    if (!opts || !selectionCurrent) return;
     if(!previewCurrent){setError("最新設定のプレビューを待っています");return}
     await insertOnce.current(async () => {
       insertingRef.current = true;
@@ -624,11 +691,11 @@ export function HarmonicDiagramDialog({
     });
   }
   if (!opts && error)
-    return <Modal title="倍音ダイアグラム" onClose={onClose}><LoadFailure error={error} onRetry={() => setAttempt(value => value + 1)} /></Modal>;
-  if (!opts)
+    return <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}><LoadFailure error={error} onRetry={() => setAttempt(value => value + 1)} disabled={inserting} /></Modal>;
+  if (!opts || !selectionCurrent)
     return (
-      <Modal title="倍音ダイアグラム" onClose={onClose}>
-        <div className="dialog-loading">読み込み中…</div>
+      <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}>
+        <div className="dialog-loading" role="status">{inserting ? "挿入処理中…" : "読み込み中…"}</div>
       </Modal>
     );
   return (
@@ -723,7 +790,7 @@ export function HarmonicDiagramDialog({
               onChange={(v) => updateOpts({ ...opts, offset: Math.round(v) })}
             />
           </Field>
-          {error && <div className="dialog-error inline">{error}</div>}
+          {error && <div className="dialog-error inline" role="alert">{error}</div>}
         </fieldset>
         <section className="harmonic-preview">
           {previewCurrent && preview ? (

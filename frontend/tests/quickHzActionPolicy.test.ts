@@ -78,7 +78,7 @@ test("Quick Hz connects picker and append to one guard and locks the dialog", ()
   assert.ok(start >= 0 && end > start);
   const dialog = source.slice(start, end);
   assert.match(dialog, /const busy = appending \|\| choosing \|\| outputting !== null/);
-  assert.match(dialog, /quickHzActionPolicy\(busy, Boolean\(chart\), resultCurrent\)/);
+  assert.match(dialog, /quickHzActionPolicy\(busy, chartCurrent, resultCurrent\)/);
   assert.match(dialog, /async function chooseChart\(\)\s*\{[\s\S]*?await appendOnce\.current\(async \(\) => \{/);
   assert.match(dialog, /async function append\(\)\s*\{[\s\S]*?await appendOnce\.current\(async \(\) => \{/);
   assert.match(dialog, /<Modal title="Quick Hz ツール" onClose=\{onClose\} wide locked=\{busy\}>/);
