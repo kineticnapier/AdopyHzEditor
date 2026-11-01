@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { dialogFocusableSelector, dialogTabDestination, isDialogCompositionKey, isDialogTabbable } from "../src/dialogs/dialogFocus.ts";
+import { dialogFocusableSelector, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isTopmostDialog } from "../src/dialogs/dialogFocus.ts";
 
 const items = [{ focus() {} }, { focus() {} }, { focus() {} }];
 
@@ -100,4 +100,28 @@ test("dialog Escape and Tab do not interrupt IME conversion", () => {
   assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 9 }), false);
   const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
   assert.match(hook, /event\.defaultPrevented \|\| isDialogCompositionKey\(event\)/);
+});
+
+
+test("only the frontmost modal handles keyboard events when dialogs overlap", () => {
+  let dialogs: HTMLElement[] = [];
+  const ownerDocument = {
+    querySelectorAll: (selector: string) => {
+      assert.equal(selector, '[role="dialog"][aria-modal="true"]');
+      return dialogs;
+    },
+  };
+  const first = { isConnected: true, ownerDocument } as unknown as HTMLElement;
+  const second = { isConnected: true, ownerDocument } as unknown as HTMLElement;
+  dialogs = [first, second];
+  assert.equal(isTopmostDialog(first), false);
+  assert.equal(isTopmostDialog(second), true);
+  assert.equal(isTopmostDialog(null), false);
+  dialogs = [first];
+  assert.equal(isTopmostDialog(first), true);
+  assert.equal(isTopmostDialog(second), false);
+  assert.equal(isTopmostDialog({ isConnected: false, ownerDocument } as unknown as HTMLElement), false);
+
+  const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
+  assert.match(hook, /event\\.defaultPrevented \\|\\| isDialogCompositionKey\\(event\\) \\|\\| !isTopmostDialog\\(dialog\\)/);
 });
