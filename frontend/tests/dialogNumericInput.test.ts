@@ -77,3 +77,20 @@ test("ADOFAI export defaults failure is announced and busy dialog state is expos
   assert.match(modal, /aria-modal="true"[\s\S]*?aria-labelledby=\{titleId\}[\s\S]*?aria-busy=\{locked\}/);
   assert.match(source, /<Modal[\s\S]*?locked=\{working\}/);
 });
+
+test("harmonic frequency and duration accept decimals without native step mismatch", () => {
+  const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const harmonic = source.slice(
+    source.indexOf("export function HarmonicDiagramDialog("),
+    source.indexOf("export function LanguageDialog("),
+  );
+  assert.ok(harmonic.length > 0, "harmonic dialog exists");
+  // min=0.001 with step=1 or 0.25 rejects ordinary values such as
+  // 440 Hz and 1 second under the browser's native step-mismatch rules.
+  for (const field of ["rootHz", "duration"]) {
+    const control = harmonic.match(new RegExp(`<Num\\s+value=\\{opts\\.${field}\\}[\\s\\S]*?\\/>`))?.[0];
+    assert.ok(control, `missing ${field} input`);
+    assert.match(control, /min=\{0\.001\}/);
+    assert.match(control, /step="any"/);
+  }
+});
