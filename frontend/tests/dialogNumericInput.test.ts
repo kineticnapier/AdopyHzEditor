@@ -119,3 +119,18 @@ test("tool dialogs accept fractional values returned by the backend", () => {
     assert.match(section.slice(start, end), /step="any"/, `${field} must accept fractional values`);
   }
 });
+
+test("ADOFAI export accepts its backend default fixed X and custom angle", () => {
+  const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  // Python defaults: fixedX=8.0, finalCustomAngle=180.0. Their previous
+  // min+step combinations (0.000001+0.1n and 0.001+1n) reject both.
+  for (const [field, min] of [["fixedX", "0.000001"], ["finalCustomAngle", "0.001"]] as const) {
+    const start = source.indexOf(`value={options.${field}}`);
+    assert.ok(start >= 0, `missing ${field} input`);
+    const end = source.indexOf("/>", start);
+    assert.ok(end > start, `missing end of ${field} input`);
+    const control = source.slice(start, end);
+    assert.ok(control.includes(`min={${min}}`), `unexpected minimum for ${field}`);
+    assert.match(control, /step="any"/, `${field} must not reject its backend default`);
+  }
+});
