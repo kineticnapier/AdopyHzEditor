@@ -94,3 +94,28 @@ test("harmonic frequency and duration accept decimals without native step mismat
     assert.match(control, /step="any"/);
   }
 });
+
+test("tool dialogs accept fractional values returned by the backend", () => {
+  const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const blank = source.slice(
+    source.indexOf("export function BlankWorkspaceDialog("),
+    source.indexOf("export function HarmonicDiagramDialog("),
+  );
+  const harmonic = source.slice(
+    source.indexOf("export function HarmonicDiagramDialog("),
+    source.indexOf("export function LanguageDialog("),
+  );
+  // Python returns the current duration, playhead position and BPM as floats.
+  // HTML's default step=1 or step=0.25 rejects valid values from those APIs.
+  for (const [section, field] of [
+    [blank, "value.duration"],
+    [harmonic, "opts.bpm"],
+    [harmonic, "opts.start"],
+  ] as const) {
+    const start = section.indexOf(`value={${field}}`);
+    assert.ok(start >= 0, `missing ${field} input`);
+    const end = section.indexOf("/>", start);
+    assert.ok(end > start, `missing end of ${field} input`);
+    assert.match(section.slice(start, end), /step="any"/, `${field} must accept fractional values`);
+  }
+});
