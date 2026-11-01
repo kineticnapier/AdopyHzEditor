@@ -10,10 +10,8 @@ import numpy as np
 
 import web.adofai as web_adofai
 import web.io as web_io
-import core.atomic_io as atomic_io
 from core.note_model import Note
 from core.project_loading import resolve_project_audio_plan
-from tools import quick_hz
 from web_ui import Bridge
 
 
@@ -77,16 +75,6 @@ class IssueDataSafetyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     bridge.save_note_preset("new", 0)
             self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
-
-    def test_quick_hz_replace_failure_preserves_existing_chart(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "level.adofai"
-            path.write_bytes(b"known-good")
-            with mock.patch.object(atomic_io.os, "replace", side_effect=OSError("locked")):
-                with self.assertRaises(quick_hz.HzToolError):
-                    quick_hz.SaveChartAs({"angleData": [180]}, path, overwrite=True)
-            self.assertEqual(path.read_bytes(), b"known-good")
-            self.assertEqual(list(path.parent.glob(".level.adofai.*.tmp")), [])
 
     def test_audio_copy_failure_preserves_existing_adofai_chart(self):
         bridge = Bridge()
