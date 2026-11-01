@@ -94,6 +94,8 @@ export default function AdoFAIExportDialogJa({
     // A focused numeric input may blur as the form becomes disabled.
     if (workingRef.current || !defaultsCurrent) return;
     invalidatePreview();
+    // An error from the previous options must not remain after editing.
+    setError(null);
     setOptions((o) =>
       o ? { ...o, [k]: v, harmonyTuning: "equal temperament" } : o,
     );
