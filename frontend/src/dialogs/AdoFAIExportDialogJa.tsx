@@ -665,7 +665,7 @@ export default function AdoFAIExportDialogJa({
                 value={options.maxTiles}
                 min={0}
                 max={10000000}
-                step={10000}
+                step={1}
                 onChange={(v) => patch("maxTiles", Math.round(v))}
               />
             </Field>
@@ -674,7 +674,7 @@ export default function AdoFAIExportDialogJa({
                 value={options.maxTilesPerNote}
                 min={0}
                 max={1000000}
-                step={500}
+                step={1}
                 onChange={(v) => patch("maxTilesPerNote", Math.round(v))}
               />
             </Field>
