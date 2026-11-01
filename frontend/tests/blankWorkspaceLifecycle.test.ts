@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { blankWorkspaceDefaultsContextIsCurrent } from "../src/dialogs/previewFreshness.ts";
+import { blankWorkspaceDefaultsContextIsCurrent, blankWorkspaceMidiRangeIsValid } from "../src/dialogs/previewFreshness.ts";
 
 const source = readFileSync(
   new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url),
@@ -28,8 +28,8 @@ test("blank workspace hides stale defaults before effects and blocks apply", () 
   assert.match(blank, /setLoadedContext\(\{ api, attempt \}\)/);
   assert.match(blank, /\[api, attempt\]/);
   assert.match(blank, /value && defaultsCurrent \?/);
-  assert.match(blank, /if \(!value \|\| !defaultsCurrent \|\| applying\) return/);
-  assert.match(blank, /disabled=\{!value \|\| !defaultsCurrent \|\| applying\}/);
+  assert.match(blank, /if \(!value \|\| !defaultsCurrent \|\| applying \|\| !midiRangeValid\) return/);
+  assert.match(blank, /disabled=\{!value \|\| !defaultsCurrent \|\| applying \|\| !midiRangeValid\}/);
   assert.match(blank, /onChange=\{\(v\) => patchValue\(\{ duration: v \}\)\}/);
 });
 
@@ -56,4 +56,24 @@ test("blank workspace does not close or report an obsolete apply after an API ch
   current = { api: {}, attempt: 0 };
   finish();
   assert.equal(await completion, false);
+});
+
+test("blank workspace prevents silent normalization of invalid MIDI bounds", () => {
+  assert.equal(blankWorkspaceMidiRangeIsValid({ midiMin: 0, midiMax: 127 }), true);
+  assert.equal(blankWorkspaceMidiRangeIsValid({ midiMin: 60, midiMax: 61 }), true);
+  for (const invalid of [
+    null,
+    { midiMin: 60, midiMax: 60 },
+    { midiMin: 120, midiMax: 12 },
+    { midiMin: 127, midiMax: 127 },
+    { midiMin: -1, midiMax: 120 },
+    { midiMin: 0, midiMax: 128 },
+    { midiMin: 0.5, midiMax: 120 },
+    { midiMin: Number.NaN, midiMax: 120 },
+  ]) {
+    assert.equal(blankWorkspaceMidiRangeIsValid(invalid), false);
+  }
+  assert.match(blank, /const midiRangeValid = blankWorkspaceMidiRangeIsValid\(value\)/);
+  assert.match(blank, /role="alert">\s*最低MIDIは最高MIDIより小さくしてください。/);
+  assert.match(blank, /disabled=\{!value \|\| !defaultsCurrent \|\| applying \|\| !midiRangeValid\}/);
 });
