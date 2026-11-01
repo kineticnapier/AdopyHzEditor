@@ -548,27 +548,53 @@ export function LanguageDialog({ onClose }: Common) {
   );
 }
 export function UpdateDialog({ api, onClose, onStatus }: Common) {
-  const [info, setInfo] = useState<{
-    version: string;
-    text: string;
-    info: string;
-  } | null>(null), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
-  const [openError, setOpenError] = useState(""), [opening, setOpening] = useState(false);
+  type UpdateInfo = { version: string; text: string; info: string };
+  type RequestContext = { api: ToolBackendApi; attempt: number };
+  const [info, setInfo] = useState<(RequestContext & { value: UpdateInfo }) | null>(null);
+  const [error, setError] = useState<(RequestContext & { message: string }) | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [openError, setOpenError] = useState<(RequestContext & { message: string }) | null>(null);
+  const [opening, setOpening] = useState(false);
   const openOnce = useRef(createExclusiveAsyncAction());
+  const context: RequestContext = { api, attempt };
+  const latestContext = useRef(context);
+  latestContext.current = context;
+  // Hide results from a previous API or retry during render, before effect cleanup.
+  const currentInfo = blankWorkspaceDefaultsContextIsCurrent(info, context) ? info!.value : null;
+  const currentError = blankWorkspaceDefaultsContextIsCurrent(error, context) ? error!.message : "";
+  const currentOpenError = blankWorkspaceDefaultsContextIsCurrent(openError, context) ? openError!.message : "";
+
   useEffect(() => {
-    let alive=true;setError("");
-    void api.get_update_info().then(value=>alive&&setInfo(value)).catch(reason=>alive&&setError(String(reason)));
-    return()=>{alive=false};
-  }, [api,attempt]);
+    let alive = true;
+    setInfo(null);
+    setError(null);
+    setOpenError(null);
+    void api.get_update_info()
+      .then(value => {
+        if (alive) setInfo({ api, attempt, value });
+      })
+      .catch(reason => {
+        if (alive) setError({ api, attempt, message: String(reason) });
+      });
+    return () => { alive = false; };
+  }, [api, attempt]);
+
   async function open() {
     await openOnce.current(async () => {
       setOpening(true);
-      setOpenError("");
+      setOpenError(null);
       try {
         await runReleasePageAction(
           () => api.open_releases_page(),
-          () => { onStatus("リリースページを開きました"); onClose(); },
-          setOpenError,
+          () => {
+            if (!blankWorkspaceDefaultsContextIsCurrent(context, latestContext.current)) return;
+            onStatus("リリースページを開きました");
+            onClose();
+          },
+          message => {
+            if (blankWorkspaceDefaultsContextIsCurrent(context, latestContext.current))
+              setOpenError({ ...context, message });
+          },
         );
       } finally {
         setOpening(false);
@@ -578,16 +604,18 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
   return (
     <Modal title="更新を確認" onClose={onClose} locked={opening}>
       <div className="dialog-body export-dialog-body">
-        {error ? <LoadFailure error={error} onRetry={()=>setAttempt(value=>value+1)}/> : info ? (
+        {currentError ? (
+          <LoadFailure error={currentError} onRetry={() => setAttempt(value => value + 1)} disabled={opening} />
+        ) : currentInfo ? (
           <>
-            <div className="info-card">現在のバージョン: {info.version}</div>
-            <div className="info-card">{info.text}</div>
-            <div className="info-card">{info.info}</div>
+            <div className="info-card">現在のバージョン: {currentInfo.version}</div>
+            <div className="info-card">{currentInfo.text}</div>
+            <div className="info-card">{currentInfo.info}</div>
           </>
         ) : (
-          <div className="dialog-loading">確認中…</div>
+          <div className="dialog-loading" role="status">確認中…</div>
         )}
-        {openError && <div className="dialog-error" role="alert">{openError}</div>}
+        {currentOpenError && <div className="dialog-error" role="alert">{currentOpenError}</div>}
       </div>
       <div className="dialog-footer">
         <span />
