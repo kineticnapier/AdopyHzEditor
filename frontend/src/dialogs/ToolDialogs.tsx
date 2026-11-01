@@ -90,7 +90,7 @@ function Num({
   value: number;
   min: number;
   max: number;
-  step?: number;
+  step?: number | "any";
   disabled?: boolean;
   onChange(v: number): void;
 }) {
@@ -423,6 +423,7 @@ export function HarmonicDiagramDialog({
               value={opts.rootHz}
               min={0.001}
               max={100000}
+              step="any"
               onChange={(v) => updateOpts({ ...opts, rootHz: v })}
             />
             <span>Hz</span>
@@ -486,7 +487,7 @@ export function HarmonicDiagramDialog({
               value={opts.duration}
               min={0.001}
               max={36000}
-              step={0.25}
+              step="any"
               onChange={(v) => updateOpts({ ...opts, duration: v })}
             />
           </Field>
