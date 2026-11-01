@@ -311,8 +311,10 @@ export function HarmonicDiagramDialog({
     [previewKey,setPreviewKey]=useState(""),
     [defaultsSelectionKey, setDefaultsSelectionKey] = useState<string | null>(null),
     [defaultsContext, setDefaultsContext] = useState<{ api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number } | null>(null),
-    [error, setError] = useState(""),
+    [error, setError] = useState<{ message: string; api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number } | null>(null),
     [attempt, setAttempt] = useState(0);
+  const currentError = harmonicDefaultsContextIsCurrent(error, { api, selected, attempt, documentGeneration })
+    ? error!.message : "";
   const selectionKey = JSON.stringify(selected);
   const selectionCurrent = defaultsSelectionKey === selectionKey &&
     harmonicDefaultsContextIsCurrent(defaultsContext, { api, selected, attempt, documentGeneration });
@@ -330,18 +332,18 @@ export function HarmonicDiagramDialog({
     setDefaultsContext(null);
     setPreview(null);
     setPreviewKey("");
-    setError("");
+    setError(null);
     void api.get_harmonic_diagram_defaults(selected).then(value => {
       if (alive) {
         setOpts(value);
         setDefaultsSelectionKey(selectionKey);
         setDefaultsContext({ api, selected, attempt, documentGeneration });
       }
-    }).catch(reason => alive && setError(String(reason)));
+    }).catch(reason => alive && setError({ message: String(reason), api, selected, attempt, documentGeneration }));
     return () => { alive = false; };
   }, [api, selected, attempt, documentGeneration]);
   useEffect(() => {
-    if (!opts) return;
+    if (!opts || !selectionCurrent) return;
     let alive = true;
     const requestedKey=JSON.stringify(opts);
     const id = window.setTimeout(
@@ -352,14 +354,14 @@ export function HarmonicDiagramDialog({
             if (alive) {
               setPreview(x);
               setPreviewKey(requestedKey);
-              setError("");
+              setError(null);
             }
           })
           .catch((e) => {
             if (alive) {
               setPreview(null);
               setPreviewKey("");
-              setError(String(e));
+              setError({ message: String(e), api, selected, attempt, documentGeneration });
             }
           }),
       100,
@@ -368,10 +370,10 @@ export function HarmonicDiagramDialog({
       alive = false;
       window.clearTimeout(id);
     };
-  }, [api, opts]);
+  }, [api, opts, selected, attempt, documentGeneration, selectionCurrent]);
   async function insert() {
     if (!opts || !selectionCurrent) return;
-    if(!previewCurrent){setError("最新設定のプレビューを待っています");return}
+    if(!previewCurrent){setError({ message: "最新設定のプレビューを待っています", api, selected, attempt, documentGeneration });return}
     await insertOnce.current(async () => {
       insertingRef.current = true;
       setInserting(true);
@@ -384,15 +386,15 @@ export function HarmonicDiagramDialog({
         onStatus(r.status);
         onClose();
       } catch (e) {
-        setError(String(e));
+        setError({ message: String(e), api, selected, attempt, documentGeneration });
       } finally {
         insertingRef.current = false;
         setInserting(false);
       }
     });
   }
-  if (!opts && error)
-    return <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}><LoadFailure error={error} onRetry={() => setAttempt(value => value + 1)} disabled={inserting} /></Modal>;
+  if (!opts && currentError)
+    return <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}><LoadFailure error={currentError} onRetry={() => setAttempt(value => value + 1)} disabled={inserting} /></Modal>;
   if (!opts || !selectionCurrent)
     return (
       <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}>
@@ -491,7 +493,7 @@ export function HarmonicDiagramDialog({
               onChange={(v) => updateOpts({ ...opts, offset: Math.round(v) })}
             />
           </Field>
-          {error && <div className="dialog-error inline" role="alert">{error}</div>}
+          {currentError && <div className="dialog-error inline" role="alert">{currentError}</div>}
         </fieldset>
         <section className="harmonic-preview">
           {previewCurrent && preview ? (
@@ -512,7 +514,7 @@ export function HarmonicDiagramDialog({
             </>
           ) : (
             <div className="dialog-loading" role="status">
-              {error ? "プレビューを表示できません" : "プレビューを計算中…"}
+              {currentError ? "プレビューを表示できません" : "プレビューを計算中…"}
             </div>
           )}
         </section>
