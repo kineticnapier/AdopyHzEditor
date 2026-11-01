@@ -369,19 +369,6 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
         self.max_tiles_per_note.setSingleStep(500)
         self.max_tiles_per_note.setSpecialValueText("Unlimited")
 
-        self.track_visual = QtWidgets.QComboBox()
-        add_translated_items(self.track_visual, [
-            ("normal", "export.track_visual.normal"),
-            ("faint", "export.track_visual.faint"),
-            ("very faint", "export.track_visual.very_faint"),
-            ("hidden", "export.track_visual.hidden"),
-        ])
-        set_combo_value(self.track_visual, "normal")
-        self.track_visual.setToolTip(
-            "Angle Compression は見た目がスパゲッティ状になりやすいです。\n"
-            "faint/hidden にするとトラック線を薄く/非表示にできます。"
-        )
-
         self.visual_path_mode = QtWidgets.QComboBox()
         add_translated_items(self.visual_path_mode, [
             ("raw", "export.visual_path.raw"),
@@ -530,7 +517,6 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             (tr("export.method"), self.method),
             (tr("export.base_bpm"), self.base_bpm),
             (tr("export.angle_only_bpm"), self.angle_only_bpm),
-            (tr("export.track_visual"), self.track_visual),
             (tr("export.visual_path_mode"), self.visual_path_mode),
             (tr("export.visual_path_angle"), self.visual_path_angle),
             (tr("export.visual_position_mode"), self.visual_position_mode),
@@ -667,7 +653,7 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
             "rabbit_target_bpm": float(self.target_bpm.value()),
             "max_tiles": int(self.max_tiles.value()),
             "max_tiles_per_note": int(self.max_tiles_per_note.value()),
-            "track_visual": self._combo_value(self.track_visual),
+            "track_visual": "normal",
             "visual_path_mode": self._combo_value(self.visual_path_mode),
             "visual_path_angle": float(self.visual_path_angle.value()),
             "visual_position_mode": self._combo_value(self.visual_position_mode),
