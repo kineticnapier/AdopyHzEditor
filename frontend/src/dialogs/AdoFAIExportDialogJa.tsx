@@ -234,7 +234,7 @@ export default function AdoFAIExportDialogJa({
               value={options.baseBpm}
               min={1}
               max={999999}
-              step={0.001}
+              step="any"
               onChange={(v) => patch("baseBpm", v)}
             />
           </Field>
@@ -245,7 +245,7 @@ export default function AdoFAIExportDialogJa({
               value={options.angleOnlyBpm}
               min={1}
               max={999999}
-              step={1}
+              step="any"
               onChange={(v) => patch("angleOnlyBpm", v)}
             />
           </Field>
@@ -277,7 +277,7 @@ export default function AdoFAIExportDialogJa({
                   value={options.harmonyCustomSemitone}
                   min={-48}
                   max={48}
-                  step={0.1}
+                  step="any"
                   onChange={(v) => patch("harmonyCustomSemitone", v)}
                 />
               </Field>
@@ -408,7 +408,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.targetBpm}
                       min={1}
                       max={999999}
-                      step={1}
+                      step="any"
                       onChange={(v) => patch("targetBpm", v)}
                     />
                   </Field>
@@ -438,7 +438,7 @@ export default function AdoFAIExportDialogJa({
                   value={options.visualPathAngle}
                   min={0}
                   max={359.999}
-                  step={1}
+                  step="any"
                   suffix="°"
                   onChange={(v) => patch("visualPathAngle", v)}
                 />
@@ -466,7 +466,7 @@ export default function AdoFAIExportDialogJa({
                     value={options.visualPositionX}
                     min={-100000}
                     max={100000}
-                    step={1}
+                    step="any"
                     onChange={(v) => patch("visualPositionX", v)}
                   />
                 </Field>
@@ -475,7 +475,7 @@ export default function AdoFAIExportDialogJa({
                     value={options.visualPositionY}
                     min={-100000}
                     max={100000}
-                    step={1}
+                    step="any"
                     onChange={(v) => patch("visualPositionY", v)}
                   />
                 </Field>
@@ -516,7 +516,7 @@ export default function AdoFAIExportDialogJa({
                   value={options.finalCardinalStep}
                   min={1}
                   max={180}
-                  step={1}
+                  step="any"
                   suffix="°"
                   onChange={(v) => patch("finalCardinalStep", v)}
                 />
@@ -554,7 +554,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.harmonyVisualStep}
                       min={1}
                       max={180}
-                      step={1}
+                      step="any"
                       suffix="°"
                       onChange={(v) => patch("harmonyVisualStep", v)}
                     />
@@ -567,7 +567,7 @@ export default function AdoFAIExportDialogJa({
                         value={options.harmonyPolyCycleAngle}
                         min={1}
                         max={100000}
-                        step={1}
+                        step="any"
                         suffix="°"
                         onChange={(v) => patch("harmonyPolyCycleAngle", v)}
                       />
@@ -652,7 +652,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.songOffsetMs}
                       min={-3600000}
                       max={3600000}
-                      step={1}
+                      step="any"
                       suffix=" ms"
                       onChange={(v) => patch("songOffsetMs", v)}
                     />
