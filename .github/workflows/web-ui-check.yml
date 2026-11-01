@@ -60,8 +60,8 @@ jobs:
           legacy_modules = {
               "audio_analysis", "audio_player", "note_model", "project_io",
               "export_adofai", "export_midi", "adofai_angles", "rabbit_zip_formula",
-              "midi_import", "quick_hz_tools", "editor_view", "export_adofai_dialog",
-              "help_dialog", "midi_import_dialog", "quick_hz_tools_dialog",
+              "midi_import", "editor_view", "export_adofai_dialog",
+              "help_dialog", "midi_import_dialog",
               "tile_preview_dialog", "toolbox_fix", "ui_final_tweaks", "ui_modern",
               "ui_polish", "update_manager", "web_backend_editing", "web_backend_io",
               "web_backend_notes",
@@ -69,8 +69,8 @@ jobs:
           root_shims = {
               "audio_analysis.py", "audio_player.py", "note_model.py", "project_io.py",
               "export_adofai.py", "export_midi.py", "adofai_angles.py", "rabbit_zip_formula.py",
-              "midi_import.py", "quick_hz_tools.py", "editor_view.py", "export_adofai_dialog.py",
-              "help_dialog.py", "midi_import_dialog.py", "quick_hz_tools_dialog.py",
+              "midi_import.py", "editor_view.py", "export_adofai_dialog.py",
+              "help_dialog.py", "midi_import_dialog.py",
               "tile_preview_dialog.py", "toolbox_fix.py", "ui_final_tweaks.py", "ui_modern.py",
               "ui_polish.py", "update_manager.py",
           }
