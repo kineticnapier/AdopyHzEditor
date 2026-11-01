@@ -27,10 +27,10 @@ test("collapsed inspector still keeps a usable editor width", () => {
 });
 
 test("expanded settings sections retain their height and the sidebar remains scrollable", () => {
-  const bodyRule = css.match(/\\.settings-body\\s*\\{([^}]*)\\}/)?.[1];
+  const bodyRule = css.match(/\.settings-body\s*\{([^}]*)\}/)?.[1];
   assert.ok(bodyRule, "settings-body layout rule should exist");
-  assert.match(bodyRule, /min-height:\\s*0;/);
-  assert.match(bodyRule, /grid-auto-rows:\\s*max-content;/);
-  assert.match(bodyRule, /overflow:\\s*auto;/);
-  assert.match(bodyRule, /overscroll-behavior:\\s*contain;/);
+  assert.match(bodyRule, /min-height:\s*0;/);
+  assert.match(bodyRule, /grid-auto-rows:\s*max-content;/);
+  assert.match(bodyRule, /overflow:\s*auto;/);
+  assert.match(bodyRule, /overscroll-behavior:\s*contain;/);
 });
