@@ -11,7 +11,7 @@ import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { blankWorkspaceDefaultsContextIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
+import { blankWorkspaceDefaultsContextIsCurrent, documentActionIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 type Common = {
   api: ToolBackendApi;
@@ -304,6 +304,9 @@ export function HarmonicDiagramDialog({
   ): Promise<NoteMutationResult | undefined>;
 }) {
   const insertOnce = useRef(createExclusiveAsyncAction());
+  // A completed insertion may legitimately change selection; only API/document changes invalidate its completion.
+  const latestDocumentContext = useRef({ api, documentGeneration });
+  latestDocumentContext.current = { api, documentGeneration };
   const insertingRef = useRef(false);
   const [inserting, setInserting] = useState(false);
   const [opts, setOpts] = useState<HarmonicDiagramOptions | null>(null),
@@ -374,6 +377,7 @@ export function HarmonicDiagramDialog({
   async function insert() {
     if (!opts || !selectionCurrent) return;
     if(!previewCurrent){setError({ message: "最新設定のプレビューを待っています", api, selected, attempt, documentGeneration });return}
+    const startedDocument = { api, documentGeneration };
     await insertOnce.current(async () => {
       insertingRef.current = true;
       setInserting(true);
@@ -383,10 +387,13 @@ export function HarmonicDiagramDialog({
           result => result.indices ?? [],
         );
         if (!r) return;
+        if (!documentActionIsCurrent(startedDocument, latestDocumentContext.current)) return;
         onStatus(r.status);
         onClose();
       } catch (e) {
-        setError({ message: String(e), api, selected, attempt, documentGeneration });
+        if (documentActionIsCurrent(startedDocument, latestDocumentContext.current)) {
+          setError({ message: String(e), api, selected, attempt, documentGeneration });
+        }
       } finally {
         insertingRef.current = false;
         setInserting(false);
