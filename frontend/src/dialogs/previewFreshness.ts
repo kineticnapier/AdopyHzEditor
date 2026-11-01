@@ -72,3 +72,13 @@ export function blankWorkspaceMidiRangeIsValid(
     value.midiMax <= 127 &&
     value.midiMin < value.midiMax;
 }
+
+/** A preview error must disappear as soon as its options are no longer current. */
+export function harmonicErrorIsCurrent(
+  error: { optionsKey?: string } | null,
+  currentOptionsKey: string | null,
+): boolean {
+  return error !== null &&
+    (error.optionsKey === undefined ||
+      (currentOptionsKey !== null && error.optionsKey === currentOptionsKey));
+}
