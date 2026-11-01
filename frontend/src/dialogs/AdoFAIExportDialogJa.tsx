@@ -809,7 +809,7 @@ function Num({
   value: number;
   min: number;
   max: number;
-  step: number;
+  step: number | "any";
   suffix?: string;
   onChange(v: number): void;
 }) {
