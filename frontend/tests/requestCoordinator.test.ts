@@ -654,3 +654,35 @@ test("App routes both MIDI export modes through the document queue", () => {
   assert.match(exportBlock, /runMidiExport\(action,/);
   assert.match(exportBlock, /generation === documentGeneration\.current/);
 });
+
+test("obsolete copy and playback failures do not overwrite the next document status", async () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const [startMarker, endMarker, label] of [
+    ["  async function copySelected()", "  async function cutSelected()", "コピーに失敗しました"],
+    ["  async function queuedPlaybackAction(", "  async function seekTo(", "再生操作に失敗しました"],
+  ] as const) {
+    const start = app.indexOf(startMarker);
+    const end = app.indexOf(endMarker, start);
+    assert.ok(start >= 0 && end > start, `missing ${label} handler`);
+    const handler = app.slice(start, end);
+    assert.ok(
+      handler.includes(`if (generation === documentGeneration.current) setStatus(\`${label}: \${message}\`)`),
+      `${label} must be guarded against document switches`,
+    );
+  }
+
+  let documentGeneration = 0;
+  let rejectPending!: (reason?: unknown) => void;
+  const messages: string[] = [];
+  const pending = runWithErrorFeedback(
+    () => new Promise<void>((_resolve, reject) => { rejectPending = reject; }),
+    () => { messages.push("success"); },
+    (message) => {
+      if (documentGeneration === 0) messages.push(message);
+    },
+  );
+  documentGeneration += 1;
+  rejectPending(new Error("old document failure"));
+  assert.equal(await pending, undefined);
+  assert.deepEqual(messages, []);
+});
