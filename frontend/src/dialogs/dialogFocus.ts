@@ -57,5 +57,15 @@ export function isTopmostDialog(dialog: HTMLElement | null): boolean {
   const dialogs = dialog.ownerDocument.querySelectorAll<HTMLElement>(
     '[role="dialog"][aria-modal="true"]',
   );
-  return dialogs.length > 0 && dialogs[dialogs.length - 1] === dialog;
+  // A hidden or inert modal must not block keyboard handling by a visible one.
+  for (let i = dialogs.length - 1; i >= 0; i--) {
+    const candidate = dialogs[i];
+    if (!candidate.isConnected ||
+        !candidate.getClientRects().length ||
+        candidate.closest("[inert], [aria-hidden='true']")) continue;
+    const visibility = candidate.ownerDocument.defaultView?.getComputedStyle(candidate).visibility;
+    if (visibility === "hidden" || visibility === "collapse") continue;
+    return candidate === dialog;
+  }
+  return false;
 }
