@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import { dialogFocusableSelector, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isTopmostDialog } from "./dialogFocus";
+import { dialogFocusableSelector, dialogFocusRestorationTarget, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isTopmostDialog } from "./dialogFocus";
 
 export function useDialogAccessibility(onClose: () => void) {
   const dialogRef = useRef<HTMLElement>(null), titleId = useId(), closeRef = useRef(onClose);
@@ -36,7 +36,7 @@ export function useDialogAccessibility(onClose: () => void) {
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener("keydown", key);
-      if (previous?.isConnected) previous.focus();
+      dialogFocusRestorationTarget(previous, dialog)?.focus();
     };
   }, []);
   return { dialogRef, titleId };
