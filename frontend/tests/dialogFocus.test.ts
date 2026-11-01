@@ -106,13 +106,24 @@ test("dialog Escape and Tab do not interrupt IME conversion", () => {
 test("only the frontmost modal handles keyboard events when dialogs overlap", () => {
   let dialogs: HTMLElement[] = [];
   const ownerDocument = {
+    defaultView: { getComputedStyle: (dialog: HTMLElement) => ({ visibility: (dialog as any).testVisibility ?? "visible" }) },
     querySelectorAll: (selector: string) => {
       assert.equal(selector, '[role="dialog"][aria-modal="true"]');
       return dialogs;
     },
   };
-  const first = { isConnected: true, ownerDocument } as unknown as HTMLElement;
-  const second = { isConnected: true, ownerDocument } as unknown as HTMLElement;
+  const modal = (options: { connected?: boolean; hidden?: boolean; inert?: boolean; ariaHidden?: boolean; visibility?: string } = {}) => ({
+    isConnected: options.connected !== false,
+    ownerDocument,
+    getClientRects: () => options.hidden ? [] : [{}],
+    closest: (selector: string) => {
+      assert.equal(selector, "[inert], [aria-hidden='true']");
+      return options.inert || options.ariaHidden ? {} : null;
+    },
+    testVisibility: options.visibility ?? "visible",
+  }) as unknown as HTMLElement;
+  const first = modal();
+  const second = modal();
   dialogs = [first, second];
   assert.equal(isTopmostDialog(first), false);
   assert.equal(isTopmostDialog(second), true);
@@ -120,8 +131,23 @@ test("only the frontmost modal handles keyboard events when dialogs overlap", ()
   dialogs = [first];
   assert.equal(isTopmostDialog(first), true);
   assert.equal(isTopmostDialog(second), false);
-  assert.equal(isTopmostDialog({ isConnected: false, ownerDocument } as unknown as HTMLElement), false);
+  assert.equal(isTopmostDialog(modal({ connected: false })), false);
+  // A later hidden, inert or aria-hidden dialog must not steal the key handler.
+  for (const hidden of [
+    modal({ hidden: true }),
+    modal({ inert: true }),
+    modal({ ariaHidden: true }),
+    modal({ visibility: "hidden" }),
+    modal({ visibility: "collapse" }),
+    modal({ connected: false }),
+  ]) {
+    dialogs = [first, hidden];
+    assert.equal(isTopmostDialog(first), true);
+    assert.equal(isTopmostDialog(hidden), false);
+  }
+  dialogs = [first, second];
 
   const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
   assert.match(hook, /event\.defaultPrevented \|\| isDialogCompositionKey\(event\) \|\| !isTopmostDialog\(dialog\)/);
+  assert.match(hook, /if \(isTopmostDialog\(dialog\)\) \(focusable\(\)\[0\] \?\? dialog\)\.focus\(\)/);
 });
