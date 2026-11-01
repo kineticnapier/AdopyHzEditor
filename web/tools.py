@@ -12,22 +12,12 @@ from exporters.midi import export_midi
 from i18n import available_languages, current_language, set_language, tr
 from core.note_model import Note
 from core.project_io import load_project
-from tools.quick_hz import (
-    AppendGeneratedDataToChart,
-    CalculateHzInfo,
-    GenerateOutputText,
-    ReadChartTailFloor,
-    ResolveGenerateCount,
-    SaveChartAs,
-)
-
 PROJECT_FILE_TYPES = (
     "AdopyHzEditor Project (*.adopyhz;*.ahe.json)",
     "JSON (*.json)",
     "All files (*.*)",
 )
 MIDI_FILE_TYPES = ("MIDI Files (*.mid;*.midi)", "All files (*.*)")
-ADOF_FILE_TYPES = ("ADOFAI Level (*.adofai)", "All files (*.*)")
 
 
 class ToolsMixin:
@@ -168,74 +158,6 @@ class ToolsMixin:
         with self._lock:
             self._status = f"Exported {len(notes)} selected note(s): {Path(path).name}"
         return {"ok": True, "path": str(path), "status": self._status}
-
-    # ------------------------------------------------------------------
-    # Quick Hz tools
-    # ------------------------------------------------------------------
-    def calculate_quick_hz(self, options: dict[str, Any]) -> dict[str, Any]:
-        bpm = float(options.get("bpm", self.settings.get("bpm", 175.0)))
-        hz = float(options.get("hz", 16.0))
-        start_floor = max(0, int(options.get("startFloor", 0)))
-        use_end = bool(options.get("useEndFloor", False))
-        if use_end:
-            count = ResolveGenerateCount(start_floor, end_floor=int(options.get("endFloor", start_floor + 16)))
-        else:
-            count = ResolveGenerateCount(start_floor, count=int(options.get("count", 16)))
-        add_set_speed = bool(options.get("addSetSpeed", True))
-        info = CalculateHzInfo(bpm, hz)
-        output = GenerateOutputText(info, start_floor, count, add_set_speed=add_set_speed)
-        return {
-            "info": {
-                "intervalMs": info.interval_ms,
-                "beatMs": info.beat_ms,
-                "beatsPerHit": info.beats_per_hit,
-                "beatFractionText": info.beat_fraction_text,
-                "relativeAngle": info.relative_angle,
-                "equivalentBpm": info.equivalent_bpm,
-            },
-            "startFloor": start_floor,
-            "count": count,
-            "output": output,
-        }
-
-    def choose_quick_hz_chart(self) -> dict[str, Any]:
-        path = self._dialog(webview.FileDialog.OPEN, file_types=ADOF_FILE_TYPES)
-        if not path:
-            return {"ok": False, "status": "Cancelled"}
-        tail = ReadChartTailFloor(path)
-        return {"ok": True, "path": str(Path(path).resolve()), "tailFloor": tail, "status": f"Chart tail: floor {tail}"}
-
-    def append_quick_hz_chart(self, chart_path: str, options: dict[str, Any]) -> dict[str, Any]:
-        if not chart_path:
-            return {"ok": False, "status": "No ADOFAI chart selected"}
-        calculated = self.calculate_quick_hz(options)
-        info = CalculateHzInfo(float(options.get("bpm", 175.0)), float(options.get("hz", 16.0)))
-        data, result = AppendGeneratedDataToChart(
-            chart_path,
-            info,
-            int(calculated["count"]),
-            start_floor=int(calculated["startFloor"]),
-            add_set_speed=bool(options.get("addSetSpeed", True)),
-        )
-        output_path = SaveChartAs(data, chart_path, overwrite=bool(options.get("overwrite", False)))
-        return {
-            "ok": True,
-            "path": str(output_path),
-            "tiles": result.angle_data_added,
-            "actions": result.actions_added,
-            "status": f"Appended {result.angle_data_added} tiles / {result.actions_added} actions: {output_path}",
-        }
-
-    def save_quick_hz_text(self, text: str) -> dict[str, Any]:
-        if not str(text).strip():
-            return {"ok": False, "status": "No output"}
-        path = self._dialog(webview.FileDialog.SAVE, file_types=("Text File (*.txt)", "All files (*.*)"), save_filename="quick_hz_output.txt")
-        if not path:
-            return {"ok": False, "status": "Cancelled"}
-        if Path(path).suffix.lower() != ".txt":
-            path += ".txt"
-        Path(path).write_text(str(text), encoding="utf-8")
-        return {"ok": True, "path": path, "status": f"Saved {path}"}
 
     # ------------------------------------------------------------------
     # Harmonic diagram
