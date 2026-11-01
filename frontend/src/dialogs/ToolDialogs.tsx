@@ -244,7 +244,7 @@ export function BlankWorkspaceDialog({
                     disabled={applying}
                     min={1}
                     max={36000}
-                    step={1}
+                    step="any"
                     onChange={(v) => patchValue({ duration: v })}
                   />
                   <span>秒</span>
@@ -473,6 +473,7 @@ export function HarmonicDiagramDialog({
               value={opts.bpm}
               min={1}
               max={2000}
+              step="any"
               disabled={opts.timeUnit !== "beats"}
               onChange={(v) => updateOpts({ ...opts, bpm: v })}
             />
@@ -482,7 +483,7 @@ export function HarmonicDiagramDialog({
               value={opts.start}
               min={0}
               max={36000}
-              step={0.25}
+              step="any"
               onChange={(v) => updateOpts({ ...opts, start: v })}
             />
           </Field>
