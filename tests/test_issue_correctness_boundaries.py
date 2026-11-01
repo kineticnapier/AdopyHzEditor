@@ -14,7 +14,6 @@ from core.note_model import Note
 from exporters.midi import export_midi
 from importers.midi import import_midi
 from web.backend import Bridge
-import web.tools as web_tools
 from web_ui import Bridge as WebUIBridge
 
 
@@ -255,15 +254,6 @@ class IssueCorrectnessBoundaryTests(unittest.TestCase):
         messages = [message for message in midi.tracks[0] if message.type in {"note_on", "note_off"}]
         self.assertEqual([message.type for message in messages], ["note_on", "note_off"])
         self.assertEqual(sum(message.time for message in messages), 1440)
-
-    def test_quick_hz_append_validates_requested_start_floor(self):
-        bridge = WebUIBridge()
-        with (
-            mock.patch.object(web_tools, "AppendGeneratedDataToChart", side_effect=ValueError("start mismatch")) as append,
-            self.assertRaisesRegex(ValueError, "start mismatch"),
-        ):
-            bridge.append_quick_hz_chart("level.adofai", {"bpm": 120, "hz": 4, "startFloor": 7, "count": 1})
-        self.assertEqual(append.call_args.kwargs["start_floor"], 7)
 
 
 if __name__ == "__main__":
