@@ -51,3 +51,12 @@ export function blankWorkspaceDefaultsContextIsCurrent(
 ): boolean {
   return loaded !== null && loaded.api === current.api && loaded.attempt === current.attempt;
 }
+
+/** A successful insertion may change selection; only document/API replacement invalidates its completion. */
+export function documentActionIsCurrent(
+  started: { api: object; documentGeneration: number },
+  current: { api: object; documentGeneration: number },
+): boolean {
+  return started.api === current.api &&
+    started.documentGeneration === current.documentGeneration;
+}
