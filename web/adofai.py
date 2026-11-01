@@ -4,6 +4,7 @@ import csv
 import filecmp
 import io
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -93,7 +94,9 @@ def _copy_song_atomic(source: Path, target: Path) -> None:
 def _as_float(value: Any, default: float, lo: float | None = None, hi: float | None = None) -> float:
     try:
         result = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        result = float(default)
+    if not math.isfinite(result):
         result = float(default)
     if lo is not None:
         result = max(float(lo), result)
@@ -105,7 +108,7 @@ def _as_float(value: Any, default: float, lo: float | None = None, hi: float | N
 def _as_int(value: Any, default: int, lo: int | None = None, hi: int | None = None) -> int:
     try:
         result = int(round(float(value)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         result = int(default)
     if lo is not None:
         result = max(int(lo), result)
