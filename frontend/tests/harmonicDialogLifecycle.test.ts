@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { harmonicDefaultsContextIsCurrent, selectionScopedPreviewIsCurrent } from "../src/dialogs/previewFreshness.ts";
+import { documentActionIsCurrent, harmonicDefaultsContextIsCurrent, selectionScopedPreviewIsCurrent } from "../src/dialogs/previewFreshness.ts";
 
 const source = readFileSync(
   new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url),
@@ -100,4 +100,17 @@ test("harmonic errors are scoped to the active API, selection, retry and documen
   // Do not start a preview using the previous selection's options.
   assert.match(harmonic, /if \(!opts \|\| !selectionCurrent\) return;/);
   assert.match(harmonic, /\[api, opts, selected, attempt, documentGeneration, selectionCurrent\]/);
+});
+
+test("harmonic insertion completion ignores selection updates but not document or API replacement", () => {
+  const api = {};
+  const started = { api, documentGeneration: 7 };
+  const selectionUpdated = { ...started, selected: [99] };
+  assert.equal(documentActionIsCurrent(started, selectionUpdated), true);
+  assert.equal(documentActionIsCurrent(started, { api: {}, documentGeneration: 7 }), false);
+  assert.equal(documentActionIsCurrent(started, { api, documentGeneration: 8 }), false);
+  const insertion = harmonic.slice(harmonic.indexOf("async function insert()"), harmonic.indexOf("if (!opts && currentError)"));
+  assert.match(insertion, /const startedDocument = \{ api, documentGeneration \}/);
+  assert.match(insertion, /if \(!documentActionIsCurrent\(startedDocument, latestDocumentContext\.current\)\) return;\s*onStatus\(r\.status\);\s*onClose\(\);/);
+  assert.match(insertion, /catch \(e\) \{\s*if \(documentActionIsCurrent\(startedDocument, latestDocumentContext\.current\)\)/);
 });
