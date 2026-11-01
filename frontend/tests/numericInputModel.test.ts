@@ -51,3 +51,22 @@ test("settings numeric input ignores IME keys and disabled blur", () => {
   assert.match(input.slice(escape), /e\.stopPropagation\(\)/,
     "cancelled numeric Escape must not bubble to editor shortcuts");
 });
+
+test("fractional playback and timing settings are valid in the HTML inputs", () => {
+  const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8")
+    .replace(/\r\n/g, "\n");
+  for (const [label, example, min, max] of [
+    ["再生速度", "1.03", 0.1, 4],
+    ["BPM", "123.45", 1, 10000],
+    ["オフセット", "0.5", -600000, 600000],
+    ["目標角度", "123.4567", 0.001, 359.999],
+  ] as const) {
+    const start = source.indexOf(`<Row label="${label}">`);
+    assert.ok(start >= 0, `${label} row exists`);
+    const end = source.indexOf("</Row>", start);
+    assert.ok(end > start, `${label} row is complete`);
+    const row = source.slice(start, end);
+    assert.match(row, /<NumberInput[\\s\\S]*?step="any"/, `${label} must accept API-valid fractions`);
+    assert.equal(commitNumericText(example, 0, min, max), Number(example));
+  }
+});
