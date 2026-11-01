@@ -24,7 +24,6 @@ type Props = {
   onSplit():void;
   onHarmonicDiagram():void;
   onReanalyze():void;
-  onQuickHz():void;
   onUpdates():void;
   onHelp():void;
 };
@@ -107,7 +106,6 @@ export default function AppMenus(p:Props){
     </Menu>
     <Menu id="tools" label="ツール" active={active} setActive={setActive}>
       <Action close={close} onClick={p.onHarmonicDiagram}>倍音ダイアグラムを挿入…</Action>
-      <Action close={close} onClick={p.onQuickHz}>Quick Hz ツール…</Action>
     </Menu>
     <Menu id="options" label="オプション" active={active} setActive={setActive}>
       <Action close={close} onClick={p.onUpdates}>更新を確認…</Action>

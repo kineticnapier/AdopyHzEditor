@@ -12,20 +12,12 @@ import numpy as np
 import core.audio_analysis as audio_analysis
 from core.audio_analysis import Spectrogram
 from core.note_model import Note
-import tools.quick_hz as quick_hz
 import web.adofai as web_adofai
 from web.backend import Bridge as CoreBridge
 from web_ui import Bridge
 
 
 class IssuePerformanceRegressionTests(unittest.TestCase):
-    def test_quick_hz_text_materializes_only_visible_preview_rows(self):
-        info = quick_hz.CalculateHzInfo(120.0, 4.0)
-        with mock.patch.object(quick_hz, "GenerateHzPreview", wraps=quick_hz.GenerateHzPreview) as generate:
-            output = quick_hz.GenerateOutputText(info, 0, 1_000_000)
-        self.assertEqual(generate.call_args.args[2], 200)
-        self.assertIn("999800 more rows omitted", output)
-
     def test_undo_snapshots_share_unchanged_note_objects(self):
         bridge = CoreBridge()
         bridge.notes = [Note(i, i + 0.5, 60 + i % 12) for i in range(1000)]
