@@ -123,5 +123,5 @@ test("only the frontmost modal handles keyboard events when dialogs overlap", ()
   assert.equal(isTopmostDialog({ isConnected: false, ownerDocument } as unknown as HTMLElement), false);
 
   const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
-  assert.match(hook, /event\\.defaultPrevented \\|\\| isDialogCompositionKey\\(event\\) \\|\\| !isTopmostDialog\\(dialog\\)/);
+  assert.match(hook, /event\.defaultPrevented \|\| isDialogCompositionKey\(event\) \|\| !isTopmostDialog\(dialog\)/);
 });
