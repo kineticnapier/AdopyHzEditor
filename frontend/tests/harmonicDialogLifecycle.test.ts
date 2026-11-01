@@ -21,7 +21,7 @@ test("selection changes invalidate harmonic defaults and the previous preview be
 });
 
 test("selection refresh does not unlock a pending harmonic insertion", () => {
-  const loading = harmonic.slice(harmonic.indexOf("if (!opts && error)"), harmonic.indexOf("return (\n    <Modal title=\"倍音ダイアグラム\" onClose={onClose} wide"));
+  const loading = harmonic.slice(harmonic.indexOf("if (!opts && currentError)"), harmonic.indexOf("return (\n    <Modal title=\"倍音ダイアグラム\" onClose={onClose} wide"));
   assert.match(loading, /<Modal title="倍音ダイアグラム" onClose=\{onClose\} locked=\{inserting\}>/g);
   assert.equal((loading.match(/locked=\{inserting\}/g) ?? []).length, 2);
   assert.match(loading, /<LoadFailure[^\n]*disabled=\{inserting\}/);
@@ -74,4 +74,30 @@ test("harmonic dialog reloads on document changes even if selection reference st
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /<HarmonicDiagramDialog[\s\S]*?documentGeneration=\{documentGeneration\.current\}/);
   assert.match(harmonic, /\[api, selected, attempt, documentGeneration\]/);
+});
+
+test("harmonic errors are scoped to the active API, selection, retry and document", () => {
+  const api = {};
+  const selected = [3, 5];
+  const context = { api, selected, attempt: 0, documentGeneration: 7 };
+  assert.equal(harmonicDefaultsContextIsCurrent(context, context), true);
+  for (const stale of [
+    { ...context, api: {} },
+    { ...context, selected: [3, 5] },
+    { ...context, attempt: 1 },
+    { ...context, documentGeneration: 8 },
+  ]) {
+    assert.equal(harmonicDefaultsContextIsCurrent(context, stale), false);
+  }
+  // Errors from defaults loading, preview and insertion must all carry their source.
+  assert.match(harmonic, /const currentError = harmonicDefaultsContextIsCurrent\(error, \{ api, selected, attempt, documentGeneration \}\)/);
+  assert.match(harmonic, /setError\(\{ message: String\(reason\), api, selected, attempt, documentGeneration \}\)/);
+  assert.equal((harmonic.match(/setError\(\{ message: String\(e\), api, selected, attempt, documentGeneration \}\)/g) ?? []).length, 2);
+  assert.match(harmonic, /if \(!opts && currentError\)/);
+  assert.match(harmonic, /<LoadFailure error=\{currentError\}/);
+  assert.match(harmonic, /\{currentError && <div className="dialog-error inline"/);
+  assert.match(harmonic, /\{currentError \? "プレビューを表示できません"/);
+  // Do not start a preview using the previous selection's options.
+  assert.match(harmonic, /if \(!opts \|\| !selectionCurrent\) return;/);
+  assert.match(harmonic, /\[api, opts, selected, attempt, documentGeneration, selectionCurrent\]/);
 });
