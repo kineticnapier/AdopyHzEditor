@@ -397,7 +397,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.fixedX}
                       min={0.000001}
                       max={100000}
-                      step={0.1}
+                      step="any"
                       onChange={(v) => patch("fixedX", v)}
                     />
                   </Field>
@@ -504,7 +504,7 @@ export default function AdoFAIExportDialogJa({
                   value={options.finalCustomAngle}
                   min={0.001}
                   max={359.999}
-                  step={1}
+                  step="any"
                   suffix="°"
                   onChange={(v) => patch("finalCustomAngle", v)}
                 />
