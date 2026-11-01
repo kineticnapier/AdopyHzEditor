@@ -474,6 +474,7 @@ export default function SettingsPanel({
                     ["organ", "オルガン"],
                     ["square", "矩形波"],
                     ["triangle", "三角波"],
+                    ["adofai_kick", "ADOFAI Kick"],
                   ]}
                   onChange={(v) => void onPatch({ previewSound: v })}
                 />
