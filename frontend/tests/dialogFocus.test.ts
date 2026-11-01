@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { dialogFocusableSelector, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isTopmostDialog } from "../src/dialogs/dialogFocus.ts";
+import { dialogFocusableSelector, dialogFocusRestorationTarget, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isTopmostDialog } from "../src/dialogs/dialogFocus.ts";
 
 const items = [{ focus() {} }, { focus() {} }, { focus() {} }];
 
@@ -50,6 +50,7 @@ test("Tab from the details summary can advance to the first advanced setting", (
 function fakeDialogControl(options: {
   disabled?: boolean;
   inert?: boolean;
+  ariaHidden?: boolean;
   hidden?: boolean;
   visibility?: "visible" | "hidden" | "collapse";
   tabIndex?: number;
@@ -63,8 +64,8 @@ function fakeDialogControl(options: {
       return !!options.disabled;
     },
     closest: (selector: string) => {
-      assert.equal(selector, "[inert]");
-      return options.inert ? {} : null;
+      assert.equal(selector, "[inert], [aria-hidden='true']");
+      return options.inert || options.ariaHidden ? {} : null;
     },
   } as unknown as HTMLElement;
 }
@@ -78,6 +79,7 @@ test("dialog Tab trap skips controls disabled by their parent fieldset", () => {
 
 test("dialog Tab trap skips inert, hidden, and negative-tabIndex controls", () => {
   assert.equal(isDialogTabbable(fakeDialogControl({ inert: true })), false);
+  assert.equal(isDialogTabbable(fakeDialogControl({ ariaHidden: true })), false);
   assert.equal(isDialogTabbable(fakeDialogControl({ hidden: true })), false);
   assert.equal(isDialogTabbable(fakeDialogControl({ tabIndex: -1 })), false);
 });
@@ -150,4 +152,51 @@ test("only the frontmost modal handles keyboard events when dialogs overlap", ()
   const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
   assert.match(hook, /event\.defaultPrevented \|\| isDialogCompositionKey\(event\) \|\| !isTopmostDialog\(dialog\)/);
   assert.match(hook, /if \(isTopmostDialog\(dialog\)\) \(focusable\(\)\[0\] \?\? dialog\)\.focus\(\)/);
+});
+
+test("dialog cleanup does not steal focus from a still-open modal", () => {
+  let dialogs: HTMLElement[] = [];
+  const doc = {
+    activeElement: null as HTMLElement | null,
+    defaultView: { getComputedStyle: () => ({ visibility: "visible" }) },
+    querySelectorAll: (selector: string) => {
+      assert.equal(selector, '[role="dialog"][aria-modal="true"]');
+      return dialogs;
+    },
+  };
+  const modal = (children: HTMLElement[]) => ({
+    isConnected: true,
+    ownerDocument: doc,
+    getClientRects: () => [{}],
+    closest: () => null,
+    contains: (item: HTMLElement | null) => item !== null && children.includes(item),
+    querySelectorAll: () => children,
+  }) as unknown as HTMLElement;
+  const control = () => ({
+    isConnected: true,
+    ownerDocument: doc,
+    getClientRects: () => [{}],
+    tabIndex: 0,
+    matches: () => false,
+    closest: () => null,
+    focus() {},
+  }) as unknown as HTMLElement;
+  const previous = control(), foregroundControl = control(), outside = control();
+  const lower = modal([previous]), upper = modal([foregroundControl]);
+  dialogs = [lower, upper];
+  doc.activeElement = foregroundControl;
+  // The background dialog disappears while the user types in the foreground.
+  assert.equal(dialogFocusRestorationTarget(previous, lower), null);
+  // Closing the foreground restores the earlier focus in the remaining modal.
+  doc.activeElement = outside;
+  assert.equal(dialogFocusRestorationTarget(previous, upper), previous);
+  // A previous element outside the remaining modal must not receive focus.
+  assert.equal(dialogFocusRestorationTarget(outside, upper), previous);
+  // Closing the final dialog restores the original application control.
+  dialogs = [upper];
+  assert.equal(dialogFocusRestorationTarget(outside, upper), outside);
+  assert.equal(dialogFocusRestorationTarget(null, upper), null);
+
+  const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
+  assert.match(hook, /dialogFocusRestorationTarget\(previous, dialog\)\?\.focus\(\)/);
 });
