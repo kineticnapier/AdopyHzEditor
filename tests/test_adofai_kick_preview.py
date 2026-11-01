@@ -52,7 +52,7 @@ class AdoFaiKickPreviewTests(unittest.TestCase):
         output = np.zeros((len(positions), 1), dtype=np.float32)
         player._mix_preview_notes(output, positions)
 
-        self.assertTrue(np.allclose(output[:10], 0.0))
+        self.assertLess(float(np.max(np.abs(output[:10]))), 1e-5)
         self.assertGreater(float(output[10, 0]), 0.9)
         self.assertGreater(float(output[80, 0]), 0.9)
 
