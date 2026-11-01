@@ -100,3 +100,15 @@ test("ADOFAI export song-source input has its own accessible name", () => {
   assert.match(songSource, /aria-label="音源先"/);
   assert.match(songSource, /<button/);
 });
+
+test("unused track appearance control stays hidden while exports keep normal appearance", () => {
+  const desktopSource = readFileSync(
+    new URL("../../desktop/export_adofai_dialog.py", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(dialogSource, /<Field label="床の見た目">/);
+  assert.match(dialogSource, /trackVisual: "normal"/);
+  assert.doesNotMatch(desktopSource, /self\.track_visual\s*=\s*QtWidgets\.QComboBox\(/);
+  assert.doesNotMatch(desktopSource, /tr\("export\.track_visual"\), self\.track_visual/);
+  assert.match(desktopSource, /"track_visual": "normal"/);
+});
