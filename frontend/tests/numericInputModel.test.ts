@@ -35,9 +35,9 @@ test("numeric inputs defer Enter and Escape to the IME", () => {
 
 test("settings numeric input ignores IME keys and disabled blur", () => {
   const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8")
-    .replace(/\\r\\n/g, "\\n");
+    .replace(/\r\n/g, "\n");
   const start = source.indexOf("function NumberInput(");
-  const end = source.indexOf("\\nfunction Select(", start);
+  const end = source.indexOf("\nfunction Select(", start);
   assert.ok(start >= 0 && end > start, "settings numeric input is present");
   const input = source.slice(start, end);
   const disabled = input.indexOf("if (disabled) {");
@@ -48,6 +48,6 @@ test("settings numeric input ignores IME keys and disabled blur", () => {
   const escape = input.indexOf('else if (e.key === "Escape")');
   assert.ok(composition >= 0 && enter > composition && escape > enter,
     "IME composition must be checked before Enter/Escape handling");
-  assert.match(input.slice(escape), /e\\.stopPropagation\\(\\)/,
+  assert.match(input.slice(escape), /e\.stopPropagation\(\)/,
     "cancelled numeric Escape must not bubble to editor shortcuts");
 });
