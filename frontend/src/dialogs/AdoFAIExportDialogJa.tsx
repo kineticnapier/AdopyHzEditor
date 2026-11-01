@@ -46,7 +46,14 @@ export default function AdoFAIExportDialogJa({
     void api
       .get_adofai_export_defaults(selected)
       .then((v) => {
-        if (alive) setOptions({ ...v, selectedOnly:defaultSelectedOnly&&selected.length>0, harmonyTuning: "equal temperament" });
+        if (alive) {
+          setOptions({
+            ...v,
+            trackVisual: "normal",
+            selectedOnly: defaultSelectedOnly && selected.length > 0,
+            harmonyTuning: "equal temperament",
+          });
+        }
       })
       .catch((e) => alive && setError(String(e)));
     return () => {
@@ -380,20 +387,6 @@ export default function AdoFAIExportDialogJa({
                 )}
               </>
             )}
-            <Field label="床の見た目">
-              <Select
-                value={options.trackVisual}
-                options={[
-                  ["normal", "通常"],
-                  ["faint", "薄い"],
-                  ["very faint", "かなり薄い"],
-                  ["hidden", "非表示"],
-                ]}
-                onChange={(v) =>
-                  patch("trackVisual", v as AdoFAIExportOptions["trackVisual"])
-                }
-              />
-            </Field>
             <Field label="経路">
               <Select
                 value={options.visualPathMode}
