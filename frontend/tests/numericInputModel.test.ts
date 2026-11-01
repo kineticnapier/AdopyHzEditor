@@ -66,7 +66,7 @@ test("fractional playback and timing settings are valid in the HTML inputs", () 
     const end = source.indexOf("</Row>", start);
     assert.ok(end > start, `${label} row is complete`);
     const row = source.slice(start, end);
-    assert.match(row, /<NumberInput[\\s\\S]*?step="any"/, `${label} must accept API-valid fractions`);
+    assert.match(row, /<NumberInput[\s\S]*?step="any"/, `${label} must accept API-valid fractions`);
     assert.equal(commitNumericText(example, 0, min, max), Number(example));
   }
 });
