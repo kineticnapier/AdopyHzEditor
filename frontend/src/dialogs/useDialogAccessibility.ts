@@ -10,7 +10,7 @@ export function useDialogAccessibility(onClose: () => void) {
     const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(dialogFocusableSelector) ?? [])
       .filter(isDialogTabbable);
     const frame = window.requestAnimationFrame(() => {
-      if (dialog?.isConnected) (focusable()[0] ?? dialog).focus();
+      if (isTopmostDialog(dialog)) (focusable()[0] ?? dialog).focus();
     });
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isDialogCompositionKey(event) || !isTopmostDialog(dialog)) return;
