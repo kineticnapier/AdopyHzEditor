@@ -180,3 +180,14 @@ test("ADOFAI export tile limits accept every backend-supported integer", () => {
     assert.match(control, /step=\{1\}/, `${field} must allow any integer count`);
   }
 });
+
+test("ADOFAI export clears stale errors after editing an option", () => {
+  const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const start = source.indexOf("  function patch<K extends keyof AdoFAIExportOptions>(");
+  const end = source.indexOf("  async function run<T>(", start);
+  assert.ok(start >= 0 && end > start, "export options update function exists");
+  const patch = source.slice(start, end);
+  assert.match(patch, /if \(workingRef\.current \|\| !defaultsCurrent\) return;/);
+  assert.match(patch, /invalidatePreview\(\);\s*(?:\/\/[^\n]*\n\s*)?setError\(null\);\s*setOptions\(/,
+    "changing an option must dismiss the previous preview/export error");
+});
