@@ -55,7 +55,7 @@ test("tool dialog group fields and harmonic errors are accessible", () => {
   assert.match(source, /<div className="dialog-field" role="group" aria-label=\{label\}>/);
   const numeric = source.slice(source.indexOf("function Num({"), source.indexOf("function LoadFailure("));
   assert.match(numeric, /type="number"\s+aria-label=\{label\}/);
-  assert.match(source, /<div className="dialog-error inline" role="alert">\{error\}<\/div>/);
+  assert.match(source, /<div className="dialog-error inline" role="alert">\{currentError\}<\/div>/);
 });
 
 test("tool dialog load failures are announced as alerts", () => {
