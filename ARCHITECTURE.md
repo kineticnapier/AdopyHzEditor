@@ -12,7 +12,7 @@ AdopyHzEditor has two UI entry points that share the same editor/domain code.
 - `core/` — notes, audio playback/analysis, and project serialization shared by both UIs.
 - `exporters/` — ADOFAI/MIDI exporters and ADOFAI angle helpers.
 - `importers/` — file import logic such as MIDI parsing/cleanup.
-- `tools/` — reusable editor utilities such as Quick Hz.
+- `tools/` — reusable editor utilities.
 - `desktop/` — PySide6-specific editor widgets, dialogs, styling helpers, and updater UI.
 - `web/` — pywebview backend bridge and Web-only editing/preset/tool APIs.
 
@@ -34,7 +34,6 @@ Python application code imports implementation modules through their package pat
 - `core.audio_player`
 - `exporters.adofai`
 - `importers.midi`
-- `tools.quick_hz`
 - `desktop.editor_view`
 - `web.editing`
 
