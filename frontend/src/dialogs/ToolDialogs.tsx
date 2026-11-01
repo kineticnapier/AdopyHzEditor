@@ -176,6 +176,9 @@ export function BlankWorkspaceDialog({
   // An API replacement or retry must hide the previous defaults during render,
   // before React runs the cleanup/reset effect.
   const requestContext = { api, attempt };
+  // Async completion must check the latest API, not the render that started it.
+  const latestRequestContext = useRef(requestContext);
+  latestRequestContext.current = requestContext;
   const defaultsCurrent = blankWorkspaceDefaultsContextIsCurrent(loadedContext, requestContext);
   const currentLoadError = blankWorkspaceDefaultsContextIsCurrent(loadError, requestContext)
     ? loadError!.message : "";
@@ -212,10 +215,11 @@ export function BlankWorkspaceDialog({
       setApplying(true);
       try {
         await onApply(snapshot);
+        if (!blankWorkspaceDefaultsContextIsCurrent(loadedContext, latestRequestContext.current)) return;
         onStatus("空のワークスペースに切り替えました");
         onClose();
       } catch (e) {
-        onStatus(String(e));
+        if (blankWorkspaceDefaultsContextIsCurrent(loadedContext, latestRequestContext.current)) onStatus(String(e));
       } finally {
         setApplying(false);
       }
