@@ -13,6 +13,7 @@ import type {
 import { midiLabel, midiToHz } from "../editor/musicMath";
 import { commitNumericEdit } from "./numericInputModel";
 import { isDialogCompositionKey } from "../dialogs/dialogFocus";
+import { selectionIdentityKey } from "./selectionIdentity";
 
 type Page = "inspector" | "settings";
 type Props = {
@@ -97,9 +98,10 @@ export default function SettingsPanel({
     analysisAvailable &&
     settings.analysisSource === "vorbis_direct" &&
     actualAnalysisSource !== "vorbis_direct";
+  const selectionKey = selectionIdentityKey(selected, trackSelection.ids);
   useEffect(() => {
     if (selected.length || trackSelection.ids.length) setPage("inspector");
-  }, [selected.length, trackSelection.ids.length]);
+  }, [selectionKey]);
 
   return (
     <aside className="settings inspector-panel">
