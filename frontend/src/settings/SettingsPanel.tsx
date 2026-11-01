@@ -390,7 +390,7 @@ export default function SettingsPanel({
                         value={settings.targetAngle}
                         min={0.001}
                         max={359.999}
-                        step={0.001}
+                        step="any"
                         suffix="°"
                         onChange={(v) => void onPatch({ targetAngle: v })}
                       />
@@ -446,7 +446,7 @@ export default function SettingsPanel({
                   value={settings.speed}
                   min={0.1}
                   max={4}
-                  step={0.05}
+                  step="any"
                   suffix="x"
                   onChange={(v) => void onPatch({ speed: v })}
                 />
@@ -508,7 +508,7 @@ export default function SettingsPanel({
                   value={settings.bpm}
                   min={1}
                   max={10000}
-                  step={0.1}
+                  step="any"
                   onChange={(v) => void onPatch({ bpm: v })}
                 />
               </Row>
@@ -527,7 +527,7 @@ export default function SettingsPanel({
                   value={settings.offsetMs}
                   min={-600000}
                   max={600000}
-                  step={1}
+                  step="any"
                   suffix="ms"
                   onChange={(v) => void onPatch({ offsetMs: v })}
                 />
@@ -896,7 +896,7 @@ function NumberInput({
   value: number;
   min: number;
   max: number;
-  step: number;
+  step: number | "any";
   suffix?: string;
   disabled?: boolean;
   onChange(v: number): void;
