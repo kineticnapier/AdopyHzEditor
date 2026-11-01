@@ -163,3 +163,20 @@ test("ADOFAI export accepts fractional values for every Python float option", ()
     assert.match(source.slice(start, end), /step="any"/, `${field} must allow fractional values`);
   }
 });
+
+test("ADOFAI export tile limits accept every backend-supported integer", () => {
+  const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const backend = readFileSync(new URL("../../web/adofai.py", import.meta.url), "utf8");
+  // The backend accepts arbitrary integer counts, not only multiples of
+  // 10000 (maxTiles) or 500 (maxTilesPerNote). HTML must agree.
+  for (const field of ["maxTiles", "maxTilesPerNote"] as const) {
+    assert.ok(backend.includes(`_as_int(raw.get("${field}")`), `backend must parse ${field} as int`);
+    const start = source.indexOf(`value={options.${field}}`);
+    assert.ok(start >= 0, `missing ${field} input`);
+    const end = source.indexOf("/>", start);
+    assert.ok(end > start && end - start < 500, `missing end of ${field} input`);
+    const control = source.slice(start, end);
+    assert.match(control, /min=\{0\}/);
+    assert.match(control, /step=\{1\}/, `${field} must allow any integer count`);
+  }
+});
