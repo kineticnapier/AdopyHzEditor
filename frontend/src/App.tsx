@@ -983,7 +983,7 @@ export default function App() {
           () => generation === documentGeneration.current,
         ),
         () => undefined,
-        (message) => setStatus(`コピーに失敗しました: ${message}`),
+        (message) => { if (generation === documentGeneration.current) setStatus(`コピーに失敗しました: ${message}`); },
       );
     }
   }
@@ -1027,7 +1027,7 @@ export default function App() {
         () => generation === documentGeneration.current,
       ),
       () => undefined,
-      (message) => setStatus(`再生操作に失敗しました: ${message}`),
+      (message) => { if (generation === documentGeneration.current) setStatus(`再生操作に失敗しました: ${message}`); },
     );
   }
   async function seekTo(t: number) {
