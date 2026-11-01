@@ -67,7 +67,7 @@ test("harmonic dialog blocks stale defaults, preview, insertion and delayed nume
   assert.match(harmonic, /setDefaultsContext\(\{ api, selected, attempt, documentGeneration \}\)/);
   assert.match(harmonic, /const previewCurrent = selectionCurrent &&/);
   assert.match(harmonic, /if \(!opts \|\| !selectionCurrent\) return;/);
-  assert.match(harmonic, /if \(!insertingRef.current && selectionCurrent\) setOpts\(next\)/);
+  assert.match(harmonic, /if \(!insertingRef.current && selectionCurrent\) \{\s*setError\(null\);\s*setOpts\(next\);\s*\}/);
 });
 
 test("harmonic dialog reloads on document changes even if selection reference stays stable", () => {
@@ -92,7 +92,9 @@ test("harmonic errors are scoped to the active API, selection, retry and documen
   // Errors from defaults loading, preview and insertion must all carry their source.
   assert.match(harmonic, /const currentError = harmonicDefaultsContextIsCurrent\(error, \{ api, selected, attempt, documentGeneration \}\)/);
   assert.match(harmonic, /setError\(\{ message: String\(reason\), api, selected, attempt, documentGeneration \}\)/);
-  assert.equal((harmonic.match(/setError\(\{ message: String\(e\), api, selected, attempt, documentGeneration \}\)/g) ?? []).length, 2);
+  assert.match(harmonic, /setError\(\{ message: String\(e\), api, selected, attempt, documentGeneration, optionsKey: requestedKey \}\)/);
+  assert.match(harmonic, /setError\(\{ message: String\(e\), api, selected, attempt, documentGeneration, optionsKey: JSON\.stringify\(opts\) \}\)/);
+  assert.match(harmonic, /harmonicErrorIsCurrent\(error, opts \? JSON\.stringify\(opts\) : null\)/);
   assert.match(harmonic, /if \(!opts && currentError\)/);
   assert.match(harmonic, /<LoadFailure error=\{currentError\}/);
   assert.match(harmonic, /\{currentError && <div className="dialog-error inline"/);
