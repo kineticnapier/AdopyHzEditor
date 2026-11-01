@@ -52,10 +52,10 @@ test("tool dialogs commit signed decimals and restore cancelled/blank edits", ()
 
 test("tool dialog group fields and harmonic errors are accessible", () => {
   const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
-  assert.match(source, /<div className="dialog-field" role="group" aria-label=\\{label\\}>/);
+  assert.match(source, /<div className="dialog-field" role="group" aria-label=\{label\}>/);
   const numeric = source.slice(source.indexOf("function Num({"), source.indexOf("function LoadFailure("));
-  assert.match(numeric, /type="number"\\s+aria-label=\\{label\\}/);
-  assert.match(source, /<div className="dialog-error inline" role="alert">\\{error\\}<\\/div>/);
+  assert.match(numeric, /type="number"\s+aria-label=\{label\}/);
+  assert.match(source, /<div className="dialog-error inline" role="alert">\{error\}<\/div>/);
 });
 
 test("tool dialog load failures are announced as alerts", () => {
