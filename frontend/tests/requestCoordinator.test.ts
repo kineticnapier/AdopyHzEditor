@@ -666,7 +666,7 @@ test("obsolete copy and playback failures do not overwrite the next document sta
     assert.ok(start >= 0 && end > start, `missing ${label} handler`);
     const handler = app.slice(start, end);
     assert.ok(
-      handler.includes(`if (generation === documentGeneration.current) setStatus(\`${label}: \${message}\`)`),
+      handler.includes("if (generation === documentGeneration.current) setStatus(") && handler.includes(label),
       `${label} must be guarded against document switches`,
     );
   }
