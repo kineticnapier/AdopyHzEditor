@@ -11,7 +11,7 @@ import { isDialogCompositionKey } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { blankWorkspaceDefaultsContextIsCurrent, blankWorkspaceMidiRangeIsValid, documentActionIsCurrent, harmonicDefaultsContextIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
+import { blankWorkspaceDefaultsContextIsCurrent, blankWorkspaceMidiRangeIsValid, documentActionIsCurrent, harmonicDefaultsContextIsCurrent, harmonicErrorIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 type Common = {
   api: ToolBackendApi;
@@ -320,9 +320,10 @@ export function HarmonicDiagramDialog({
     [previewKey,setPreviewKey]=useState(""),
     [defaultsSelectionKey, setDefaultsSelectionKey] = useState<string | null>(null),
     [defaultsContext, setDefaultsContext] = useState<{ api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number } | null>(null),
-    [error, setError] = useState<{ message: string; api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number } | null>(null),
+    [error, setError] = useState<{ message: string; api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number; optionsKey?: string } | null>(null),
     [attempt, setAttempt] = useState(0);
-  const currentError = harmonicDefaultsContextIsCurrent(error, { api, selected, attempt, documentGeneration })
+  const currentError = harmonicDefaultsContextIsCurrent(error, { api, selected, attempt, documentGeneration }) &&
+    harmonicErrorIsCurrent(error, opts ? JSON.stringify(opts) : null)
     ? error!.message : "";
   const selectionKey = JSON.stringify(selected);
   const selectionCurrent = defaultsSelectionKey === selectionKey &&
@@ -330,7 +331,10 @@ export function HarmonicDiagramDialog({
   const previewCurrent = selectionCurrent && selectionScopedPreviewIsCurrent(preview, previewKey, JSON.stringify(opts), defaultsSelectionKey, selectionKey);
   function updateOpts(next: HarmonicDiagramOptions) {
     // A numeric field can commit on blur while disabling the form.
-    if (!insertingRef.current && selectionCurrent) setOpts(next);
+    if (!insertingRef.current && selectionCurrent) {
+      setError(null);
+      setOpts(next);
+    }
   }
   useEffect(() => {
     let alive = true;
@@ -370,7 +374,7 @@ export function HarmonicDiagramDialog({
             if (alive) {
               setPreview(null);
               setPreviewKey("");
-              setError({ message: String(e), api, selected, attempt, documentGeneration });
+              setError({ message: String(e), api, selected, attempt, documentGeneration, optionsKey: requestedKey });
             }
           }),
       100,
@@ -382,7 +386,7 @@ export function HarmonicDiagramDialog({
   }, [api, opts, selected, attempt, documentGeneration, selectionCurrent]);
   async function insert() {
     if (!opts || !selectionCurrent) return;
-    if(!previewCurrent){setError({ message: "最新設定のプレビューを待っています", api, selected, attempt, documentGeneration });return}
+    if(!previewCurrent){setError({ message: "最新設定のプレビューを待っています", api, selected, attempt, documentGeneration, optionsKey: JSON.stringify(opts) });return}
     const startedDocument = { api, documentGeneration };
     await insertOnce.current(async () => {
       insertingRef.current = true;
@@ -398,7 +402,7 @@ export function HarmonicDiagramDialog({
         onClose();
       } catch (e) {
         if (documentActionIsCurrent(startedDocument, latestDocumentContext.current)) {
-          setError({ message: String(e), api, selected, attempt, documentGeneration });
+          setError({ message: String(e), api, selected, attempt, documentGeneration, optionsKey: JSON.stringify(opts) });
         }
       } finally {
         insertingRef.current = false;
