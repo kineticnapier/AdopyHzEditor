@@ -60,3 +60,15 @@ export function documentActionIsCurrent(
   return started.api === current.api &&
     started.documentGeneration === current.documentGeneration;
 }
+
+/** Reject a MIDI range that the Python blank-workspace API would silently rewrite. */
+export function blankWorkspaceMidiRangeIsValid(
+  value: { midiMin: number; midiMax: number } | null,
+): boolean {
+  return value !== null &&
+    Number.isInteger(value.midiMin) &&
+    Number.isInteger(value.midiMax) &&
+    value.midiMin >= 0 &&
+    value.midiMax <= 127 &&
+    value.midiMin < value.midiMax;
+}
