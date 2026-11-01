@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { isDialogCompositionKey } from "../src/dialogs/dialogFocus.ts";
 import { commitNumericText, commitNumericEdit } from "../src/settings/numericInputModel.ts";
 
 test("transient numeric strings keep the prior committed value", () => {
@@ -22,4 +24,30 @@ test("Enter and blur still commit valid values", () => {
   assert.equal(commitNumericEdit("2.000", 1, 0, 36000, false), 2);
   assert.equal(commitNumericEdit("-4", 12, -600000, 600000, false), -4);
   assert.equal(commitNumericEdit("200", 10, 0, 127, false), 127);
+});
+
+
+test("numeric inputs defer Enter and Escape to the IME", () => {
+  assert.equal(isDialogCompositionKey({ isComposing: true, keyCode: 13 }), true);
+  assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 229 }), true);
+  assert.equal(isDialogCompositionKey({ isComposing: false, keyCode: 13 }), false);
+});
+
+test("settings numeric input ignores IME keys and disabled blur", () => {
+  const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8")
+    .replace(/\\r\\n/g, "\\n");
+  const start = source.indexOf("function NumberInput(");
+  const end = source.indexOf("\\nfunction Select(", start);
+  assert.ok(start >= 0 && end > start, "settings numeric input is present");
+  const input = source.slice(start, end);
+  const disabled = input.indexOf("if (disabled) {");
+  const commit = input.indexOf("const next = commitNumericEdit(");
+  assert.ok(disabled >= 0 && commit > disabled, "disabled blur must not commit an old value");
+  const composition = input.indexOf("if (isDialogCompositionKey(e.nativeEvent)) return;");
+  const enter = input.indexOf('if (e.key === "Enter")');
+  const escape = input.indexOf('else if (e.key === "Escape")');
+  assert.ok(composition >= 0 && enter > composition && escape > enter,
+    "IME composition must be checked before Enter/Escape handling");
+  assert.match(input.slice(escape), /e\\.stopPropagation\\(\\)/,
+    "cancelled numeric Escape must not bubble to editor shortcuts");
 });
