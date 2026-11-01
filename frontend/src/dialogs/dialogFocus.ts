@@ -18,7 +18,7 @@ export function isDialogTabbable(item: HTMLElement): boolean {
   if (!item.getClientRects().length ||
       item.tabIndex < 0 ||
       item.matches(":disabled") ||
-      item.closest("[inert]")) return false;
+      item.closest("[inert], [aria-hidden='true']")) return false;
   // visibility:hidden/collapse still has layout rectangles, but is not tabbable.
   // Computed visibility includes inherited visibility from the dialog's ancestors.
   const visibility = item.ownerDocument?.defaultView?.getComputedStyle(item).visibility;
@@ -68,4 +68,32 @@ export function isTopmostDialog(dialog: HTMLElement | null): boolean {
     return candidate === dialog;
   }
   return false;
+}
+
+/** Avoid stealing focus from another open modal when a dialog unmounts.
+ * When the top modal closes, return focus to the remaining visible modal.
+ */
+export function dialogFocusRestorationTarget(
+  previous: HTMLElement | null,
+  closing: HTMLElement | null,
+): HTMLElement | null {
+  const doc = closing?.ownerDocument ?? previous?.ownerDocument;
+  if (!doc) return previous?.isConnected ? previous : null;
+  const dialogs = doc.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]');
+  for (let i = dialogs.length - 1; i >= 0; i--) {
+    const candidate = dialogs[i];
+    if (candidate === closing ||
+        !candidate.isConnected ||
+        !candidate.getClientRects().length ||
+        candidate.closest("[inert], [aria-hidden='true']")) continue;
+    const visibility = doc.defaultView?.getComputedStyle(candidate).visibility;
+    if (visibility === "hidden" || visibility === "collapse") continue;
+    // A background dialog unmounting must not reset focus in the active one.
+    if (candidate.contains(doc.activeElement)) return null;
+    if (previous?.isConnected && candidate.contains(previous)) return previous;
+    const first = Array.from(candidate.querySelectorAll<HTMLElement>(dialogFocusableSelector))
+      .find(isDialogTabbable);
+    return first ?? candidate;
+  }
+  return previous?.isConnected ? previous : null;
 }
