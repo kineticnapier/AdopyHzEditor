@@ -80,7 +80,18 @@ button:disabled { cursor: default; opacity: .48; }
 .settings nav button { border: 0; border-radius: 5px; background: transparent; color: #d6dbe1; padding: 5px 4px; min-height: 28px; font-size: 11px; white-space: nowrap; }
 .settings nav button:hover { background: #454d56; }
 .settings nav button.active { background: #1769aa; color: #fff; font-weight: 700; }
-.settings-body { align-content: start; display: grid; gap: 8px; padding: 9px 8px; overflow: auto; }
+.settings-body {
+  min-height: 0;
+  display: grid;
+  /* Keep expanded <details> at their full height so the panel can scroll. */
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 8px;
+  padding: 9px 8px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
 .inspector-empty { min-height: 120px; display: grid; place-content: center; gap: 5px; text-align: center; color: #8f99a3; }
 .inspector-empty strong { color: #dbe2e8; font-size: 14px; }
 .inspector-empty span { max-width: 210px; font-size: 11px; line-height: 1.45; }
