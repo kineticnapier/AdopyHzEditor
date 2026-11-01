@@ -134,3 +134,32 @@ test("ADOFAI export accepts its backend default fixed X and custom angle", () =>
     assert.match(control, /step="any"/, `${field} must not reject its backend default`);
   }
 });
+
+
+test("ADOFAI export accepts fractional values for every Python float option", () => {
+  const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const backend = readFileSync(new URL("../../web/adofai.py", import.meta.url), "utf8");
+  const continuous = [
+    "baseBpm",
+    "angleOnlyBpm",
+    "harmonyCustomSemitone",
+    "targetBpm",
+    "visualPathAngle",
+    "visualPositionX",
+    "visualPositionY",
+    "finalCardinalStep",
+    "harmonyVisualStep",
+    "harmonyPolyCycleAngle",
+    "songOffsetMs",
+  ] as const;
+  for (const field of continuous) {
+    // These inputs are parsed with _as_float by the backend. The native HTML
+    // step constraint must not reject values that the backend accepts.
+    assert.ok(backend.includes(`_as_float(raw.get("${field}")`), `backend must parse ${field} as float`);
+    const start = source.indexOf(`value={options.${field}}`);
+    assert.ok(start >= 0, `missing ${field} control`);
+    const end = source.indexOf("/>", start);
+    assert.ok(end > start && end - start < 500, `missing end of ${field} control`);
+    assert.match(source.slice(start, end), /step="any"/, `${field} must allow fractional values`);
+  }
+});
