@@ -508,6 +508,10 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                 for key, value in changes.items()
                 if key in self.settings
             }
+            # Repeating an existing value (or sending only unknown keys)
+            # must not mark an otherwise clean project as modified.
+            if not any(self.settings[key] != value for key, value in normalized.items()):
+                return dict(self.settings)
             self.settings.update(normalized)
             self._apply_player_settings()
             self._dirty = True
