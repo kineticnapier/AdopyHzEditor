@@ -18,7 +18,7 @@ export default function Timeline({view,playback,followPlayback,onFollowPlayback,
   const pitchTop=Math.min(128,view.pitchBottom+view.visibleNotes);
   return <div className="timeline">
     <input className="timeline-slider" aria-label="表示開始位置" type="range" min={0}
-      max={max > 0 ? max : .001} step={max > 0 ? max / 1000 : .001}
+      max={max > 0 ? max : .001} step="any"
       value={Math.max(0, Math.min(view.start, max))} disabled={max <= 0}
       onChange={e => {
         const start = timelineSliderStart(Number(e.target.value), view.start, max);
