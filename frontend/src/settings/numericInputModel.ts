@@ -5,7 +5,7 @@ export function commitNumericText(text: string, fallback: number, min: number, m
 }
 
 /** Match Python round() (ties to even) used by the settings API. */
-function roundToNearestEven(value: number): number {
+export function roundToNearestEven(value: number): number {
   const lower = Math.floor(value);
   const fraction = value - lower;
   if (fraction < 0.5) return lower;
