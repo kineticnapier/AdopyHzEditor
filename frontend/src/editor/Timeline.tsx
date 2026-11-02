@@ -34,11 +34,16 @@ export default function Timeline({view,playback,followPlayback,onFollowPlayback,
 function CommitNumber({id,label,value,min,max,step,onCommit}:{id?:string;label:string;value:number;min:number;max:number;step:number;onCommit(value:number):void}){
   const [text, setText] = useState(String(value));
   const cancelledRef = useRef(false);
-  useEffect(() => setText(String(value)), [value]);
+  const editingRef = useRef(false);
+  const editedRef = useRef(false);
+  // A wheel/slider update must not overwrite text while the user is typing.
+  useEffect(() => { if (!editingRef.current) setText(String(value)); }, [value]);
 
   function commit() {
     // Escape calls blur synchronously; state updates have not reached text yet.
-    const next = commitNumericEdit(text, value, min, max, cancelledRef.current, step === 1);
+    const next = commitNumericEdit(text, value, min, max, cancelledRef.current, step === 1, editedRef.current);
+    editingRef.current = false;
+    editedRef.current = false;
     cancelledRef.current = false;
     setText(String(next));
     if (next !== value) onCommit(next);
@@ -53,8 +58,8 @@ function CommitNumber({id,label,value,min,max,step,onCommit}:{id?:string;label:s
       max={max}
       step={step}
       value={text}
-      onFocus={() => { cancelledRef.current = false; }}
-      onChange={(event) => setText(event.target.value)}
+      onFocus={() => { cancelledRef.current = false; editingRef.current = true; editedRef.current = false; }}
+      onChange={(event) => { editedRef.current = true; setText(event.target.value); }}
       onBlur={commit}
       onKeyDown={(event) => {
         // Do not commit or cancel a number while the IME is composing.
