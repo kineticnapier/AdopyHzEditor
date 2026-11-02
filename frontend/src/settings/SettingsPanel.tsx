@@ -905,6 +905,7 @@ function NumberInput({
     [text, setText] = useState(String(fallback)),
     [editing, setEditing] = useState(false);
   const cancelledRef = useRef(false);
+  const editedRef = useRef(false);
   useEffect(() => {
     if (!editing) setText(String(fallback));
   }, [editing, fallback]);
@@ -912,6 +913,7 @@ function NumberInput({
     // A disabled field may blur after its controlling setting changes.
     if (disabled) {
       cancelledRef.current = false;
+      editedRef.current = false;
       setEditing(false);
       setText(String(fallback));
       return;
@@ -923,8 +925,10 @@ function NumberInput({
       max,
       cancelledRef.current,
       step === 1,
+      editedRef.current,
     );
     cancelledRef.current = false;
+    editedRef.current = false;
     setEditing(false);
     setText(String(next));
     if (next !== fallback) onChange(next);
@@ -940,9 +944,10 @@ function NumberInput({
         disabled={disabled}
         onFocus={() => {
           cancelledRef.current = false;
+          editedRef.current = false;
           setEditing(true);
         }}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => { editedRef.current = true; setText(e.target.value); }}
         onBlur={commit}
         onKeyDown={(e) => {
           // Enter/Escape are owned by the IME until composition ends.
