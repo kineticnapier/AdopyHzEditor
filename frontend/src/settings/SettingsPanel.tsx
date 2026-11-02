@@ -922,6 +922,7 @@ function NumberInput({
       min,
       max,
       cancelledRef.current,
+      step === 1,
     );
     cancelledRef.current = false;
     setEditing(false);
