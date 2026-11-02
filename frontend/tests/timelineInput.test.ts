@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { commitNumericEdit } from "../src/settings/numericInputModel.ts";
-import { clampTimeViewChange, timelineSliderStart } from "../src/editor/timelineNavigation.ts";
+import { clampTimeViewChange, timelineSliderBounds, timelineSliderStart } from "../src/editor/timelineNavigation.ts";
 import { clampPitchViewChange, hasEffectiveViewChange, pitchBottomToRevealNote } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
 
@@ -33,6 +33,23 @@ test("Timeline slider cannot change the view when the entire chart fits", () => 
   assert.equal(timelineSliderStart(0, 0, 0), null);
 });
 
+test("Timeline slider keeps fractional positions and clamps finite bounds", () => {
+  assert.deepEqual(timelineSliderBounds(60, 12, 1.234567), { max: 48, value: 1.234567 });
+  assert.deepEqual(timelineSliderBounds(60, 12, 100), { max: 48, value: 48 });
+  assert.deepEqual(timelineSliderBounds(.1, .2, 1), { max: 0, value: 0 });
+});
+
+test("Timeline slider never renders nonfinite playback metadata or start values", () => {
+  assert.deepEqual(timelineSliderBounds(NaN, 12, 1), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(Infinity, 12, 1), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, NaN, 1), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, 12, NaN), { max: 48, value: 0 });
+  assert.deepEqual(timelineSliderBounds(1e308, -1e308, 1), { max: 0, value: 0 });
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
+  assert.match(source, /timelineSliderBounds\(playback\.duration, view\.windowSeconds, view\.start\)/);
+  assert.match(source, /value=\{sliderValue\}/);
+});
+
 test("Timeline slider clamps out-of-range input and ignores unchanged positions", () => {
   assert.equal(timelineSliderStart(3, 3, 20), null);
   assert.equal(timelineSliderStart(25, 3, 20), 20);
@@ -51,6 +68,7 @@ test("Timeline slider rejects invalid values and disables an immovable thumb", (
   assert.equal(timelineSliderStart(2, 1, NaN), null);
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
   assert.match(source, /disabled=\{max <= 0\}/);
+  assert.match(source, /value=\{sliderValue\}/);
   assert.match(source, /timelineSliderStart\(Number\(e\.target\.value\), view\.start, max\)/);
   assert.match(source, /if \(start !== null\) onView\(\{ start \}\)/);
 });
