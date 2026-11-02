@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { commitNumericEdit } from "../src/settings/numericInputModel.ts";
 import { clampTimeViewChange, timelineSliderStart } from "../src/editor/timelineNavigation.ts";
-import { clampPitchViewChange, hasEffectiveViewChange } from "../src/editor/pitchViewport.ts";
+import { clampPitchViewChange, hasEffectiveViewChange, pitchBottomToRevealNote } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
 
 test("Timeline Escape cancels a pending edit even when blur sees stale text", () => {
@@ -122,4 +122,11 @@ test("half-even pitch no-ops do not trigger a false viewport change", () => {
     clampPitchViewChange(endView, { pitchBottom: 40.5 })), false);
   assert.deepEqual(clampPitchViewChange(endView, { visibleNotes: 127.5, pitchBottom: 100 }),
     { visibleNotes: 128, pitchBottom: 0 });
+});
+
+test("revealing a fractional MIDI note uses the same half-even pitch as the backend", () => {
+  const view = { pitchBottom: 0, visibleNotes: 60 };
+  assert.equal(pitchBottomToRevealNote(view, 72.5), 42);
+  assert.equal(pitchBottomToRevealNote(view, 73.5), 44);
+  assert.equal(pitchBottomToRevealNote(view, 12.5), null);
 });
