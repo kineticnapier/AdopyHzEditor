@@ -819,12 +819,14 @@ function Num({
   const [text, setText] = useState(String(fallback));
   const [editing, setEditing] = useState(false);
   const cancelledRef = useRef(false);
+  const editedRef = useRef(false);
   useEffect(() => {
     if (!editing) setText(String(fallback));
   }, [editing, fallback]);
   function commit() {
-    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current);
+    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current, false, editedRef.current);
     cancelledRef.current = false;
+    editedRef.current = false;
     setEditing(false);
     setText(String(next));
     if (next !== fallback) onChange(next);
@@ -837,8 +839,8 @@ function Num({
         min={min}
         max={max}
         step={step}
-        onFocus={() => { cancelledRef.current = false; setEditing(true); }}
-        onChange={(event) => setText(event.target.value)}
+        onFocus={() => { cancelledRef.current = false; editedRef.current = false; setEditing(true); }}
+        onChange={(event) => { editedRef.current = true; setText(event.target.value); }}
         onBlur={commit}
         onKeyDown={(event) => {
           // IME owns Enter/Escape while a composition is active.
