@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { commitNumericEdit } from "../settings/numericInputModel";
+import { isDialogCompositionKey } from "../dialogs/dialogFocus";
 import { timelineSliderStart } from "./timelineNavigation";
 import type { PlaybackState, ViewState } from "./bridge";
 
@@ -56,10 +57,15 @@ function CommitNumber({id,label,value,min,max,step,onCommit}:{id?:string;label:s
       onChange={(event) => setText(event.target.value)}
       onBlur={commit}
       onKeyDown={(event) => {
+        // Do not commit or cancel a number while the IME is composing.
+        if (isDialogCompositionKey(event.nativeEvent)) return;
         if (event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
           event.currentTarget.blur();
         } else if (event.key === "Escape") {
           event.preventDefault();
+          event.stopPropagation();
           cancelledRef.current = true;
           setText(String(value));
           event.currentTarget.blur();
