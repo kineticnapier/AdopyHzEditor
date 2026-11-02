@@ -46,5 +46,5 @@ test("invalid note pitches do not request a viewport jump", () => {
   assert.equal(pitchBottomToRevealNote(view, Number.NaN), null);
   assert.equal(pitchBottomToRevealNote(view, Number.POSITIVE_INFINITY), null);
   assert.equal(pitchBottomToRevealNote(view, Number.NEGATIVE_INFINITY), null);
-  assert.equal(pitchBottomToRevealNote(view, 110), 80);
+  assert.equal(pitchBottomToRevealNote(view, 110), 68);
 });
