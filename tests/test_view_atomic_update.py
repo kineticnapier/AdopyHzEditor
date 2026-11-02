@@ -36,6 +36,30 @@ class ViewAtomicUpdateTests(unittest.TestCase):
 
         self.assertEqual(bridge.view, before)
 
+    def test_nonfinite_time_start_rejects_without_partial_view_update(self):
+        for bad in ("nan", "inf", "-inf", float("nan"), float("inf")):
+            with self.subTest(value=str(bad)):
+                bridge = Bridge()
+                bridge.duration = 60.0
+                before = dict(bridge.view)
+                with self.assertRaises(ValueError):
+                    bridge.set_view({
+                        "mode": "notes",
+                        "windowSeconds": 5.0,
+                        "start": bad,
+                    })
+                self.assertEqual(bridge.view, before)
+
+    def test_nonfinite_window_rejects_without_changing_view(self):
+        for bad in ("nan", "inf", "-inf"):
+            with self.subTest(value=bad):
+                bridge = Bridge()
+                bridge.duration = 60.0
+                before = dict(bridge.view)
+                with self.assertRaises(ValueError):
+                    bridge.set_view({"mode": "notes", "windowSeconds": bad})
+                self.assertEqual(bridge.view, before)
+
     def test_valid_combined_update_still_clamps_and_publishes(self):
         bridge = Bridge()
         bridge.duration = 60.0
