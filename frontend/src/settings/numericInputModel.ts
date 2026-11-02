@@ -21,8 +21,10 @@ export function commitNumericEdit(
   max: number,
   cancelled: boolean,
   integerStep = false,
+  edited = true,
 ) {
-  if (cancelled || text.trim() === "" || !Number.isFinite(Number(text))) return fallback;
+  // An untouched focused field must not restore a stale value after an external view update.
+  if (!edited || cancelled || text.trim() === "" || !Number.isFinite(Number(text))) return fallback;
   const next = commitNumericText(text, fallback, min, max);
   // Merely focusing an existing fractional value must not rewrite it.
   if (next === fallback) return fallback;
