@@ -138,3 +138,25 @@ test("ties-to-even fix preserves untouched fractions and noninteger fields", () 
   assert.equal(commitNumericEdit("2.5", 0, 0, 64, false, false), 2.5);
   assert.equal(commitNumericEdit("3.5", 0, 0, 3, false, true), 3);
 });
+
+test("settings numeric fields preserve external updates when focused but untouched", () => {
+  // Focus at BPM=120; another control changes the setting to 125.
+  // Leaving the field untouched must not send the stale value 120.
+  assert.equal(commitNumericEdit("120", 125, 1, 10000, false, false, false), 125);
+  // Explicit edits still commit and Escape still cancels them.
+  assert.equal(commitNumericEdit("130", 125, 1, 10000, false, false, true), 130);
+  assert.equal(commitNumericEdit("130", 125, 1, 10000, true, false, true), 125);
+});
+
+test("settings numeric input tracks actual edits separately from focus", () => {
+  const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function NumberInput(");
+  const end = source.indexOf("\nfunction Select(", start);
+  assert.ok(start >= 0 && end > start);
+  const component = source.slice(start, end);
+  assert.match(component, /const editedRef = useRef\(false\)/);
+  assert.match(component, /onFocus=\{\(\) => \{[\s\S]*?editedRef\.current = false;/);
+  assert.match(component, /onChange=\{\(e\) => \{ editedRef\.current = true; setText\(e\.target\.value\); \}\}/);
+  assert.match(component, /commitNumericEdit\([\s\S]*?step === 1,\s*editedRef\.current,/);
+  assert.match(component, /if \(disabled\) \{[\s\S]*?editedRef\.current = false;/);
+});
