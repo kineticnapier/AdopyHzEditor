@@ -43,7 +43,7 @@ test("timeline uses integer normalization only for step-one pitch fields", () =>
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const component = source.slice(source.indexOf("function CommitNumber("));
   assert.match(component, /commitNumericEdit\(text, value, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
-  assert.match(source, /label="時間の表示幅"[^\n]*step=\{\.1\}/);
+  assert.match(source, /label="時間の表示幅"[^\n]*step="any"/);
   assert.match(source, /label="下端音高"[^\n]*step=\{1\}/);
   assert.match(source, /label="上端音高"[^\n]*step=\{1\}/);
 });
@@ -77,4 +77,16 @@ test("pitch viewport shared rounding import resolves under native Node TypeScrip
   const tsconfig = JSON.parse(readFileSync(new URL("../tsconfig.json", import.meta.url), "utf8"));
   assert.equal(tsconfig.compilerOptions.noEmit, true);
   assert.equal(tsconfig.compilerOptions.allowImportingTsExtensions, true);
+});
+
+
+test("timeline accepts fractional zoom widths returned by the view API", () => {
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8")
+    .replace(/\r\n/g, "\n");
+  // A zoom result such as 1.25 s is legal in the backend but is not on
+  // the old HTML step grid: min 0.2 + n * 0.1.
+  assert.equal((1.25 - 0.2) / 0.1, 10.5);
+  assert.equal(commitNumericEdit("1.25", 1, 0.2, 60, false, false), 1.25);
+  assert.match(source, /label="時間の表示幅"[^\n]*step="any"/);
+  assert.match(source, /step:number \| "any";onCommit\(value:number\):void/);
 });
