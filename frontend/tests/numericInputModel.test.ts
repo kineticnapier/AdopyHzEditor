@@ -102,3 +102,22 @@ test("fractional inspector note and bulk edits are not rejected by HTML step con
     }
   }
 });
+
+test("whole-step settings inputs normalize fractions before sending to the API", () => {
+  assert.equal(commitNumericEdit("1.4", 1, 1, 64, false, true), 1);
+  assert.equal(commitNumericEdit("1.6", 1, 1, 64, false, true), 2);
+  assert.equal(commitNumericEdit("-1.6", 0, -12, 12, false, true), -2);
+  assert.equal(commitNumericEdit("1.4", 1, 1, 64, false, false), 1.4);
+  assert.equal(commitNumericEdit("", 1, 1, 64, false, true), 1);
+  assert.equal(commitNumericEdit("2.5", 1, 1, 64, true, true), 1);
+});
+
+test("settings panel passes whole-step information to numeric commit", () => {
+  const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8")
+    .replace(/\r\n/g, "\n");
+  const start = source.indexOf("function NumberInput(");
+  const end = source.indexOf("\nfunction Select(", start);
+  assert.ok(start >= 0 && end > start);
+  const component = source.slice(start, end);
+  assert.match(component, /commitNumericEdit\([\s\S]*?cancelledRef\.current,\s*step === 1,/);
+});
