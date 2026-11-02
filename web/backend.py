@@ -540,24 +540,28 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         if not isinstance(changes, dict):
             raise TypeError("changes must be an object")
         with self._lock:
+            # Validate the entire viewport update before publishing any field.
+            # A later invalid value must not leave mode/time/pitch half-updated.
+            next_view = dict(self.view)
             if "mode" in changes and str(changes["mode"]) in {"spec", "notes", "both"}:
-                self.view["mode"] = str(changes["mode"])
+                next_view["mode"] = str(changes["mode"])
             if "windowSeconds" in changes:
-                self.view["windowSeconds"] = _clamp(changes["windowSeconds"], 0.2, max(0.2, self.duration))
+                next_view["windowSeconds"] = _clamp(changes["windowSeconds"], 0.2, max(0.2, self.duration))
             if "start" in changes:
-                max_start = max(0.0, self.duration - float(self.view["windowSeconds"]))
-                self.view["start"] = _clamp(changes["start"], 0.0, max_start)
+                max_start = max(0.0, self.duration - float(next_view["windowSeconds"]))
+                next_view["start"] = _clamp(changes["start"], 0.0, max_start)
             elif "windowSeconds" in changes:
-                max_start = max(0.0, self.duration - float(self.view["windowSeconds"]))
-                self.view["start"] = _clamp(self.view["start"], 0.0, max_start)
+                max_start = max(0.0, self.duration - float(next_view["windowSeconds"]))
+                next_view["start"] = _clamp(next_view["start"], 0.0, max_start)
             if "pitchBottom" in changes:
-                self.view["pitchBottom"] = _int_clamp(changes["pitchBottom"], 0, 127)
+                next_view["pitchBottom"] = _int_clamp(changes["pitchBottom"], 0, 127)
             if "visibleNotes" in changes:
-                self.view["visibleNotes"] = _int_clamp(changes["visibleNotes"], 6, 128)
-            self.view["pitchBottom"] = min(
-                int(self.view["pitchBottom"]),
-                max(0, 128 - int(self.view["visibleNotes"])),
+                next_view["visibleNotes"] = _int_clamp(changes["visibleNotes"], 6, 128)
+            next_view["pitchBottom"] = min(
+                int(next_view["pitchBottom"]),
+                max(0, 128 - int(next_view["visibleNotes"])),
             )
+            self.view.update(next_view)
             return dict(self.view)
 
     def fit_view(self) -> dict[str, Any]:
