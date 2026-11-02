@@ -42,8 +42,29 @@ test("timeline whole-step pitch inputs round before calling set_view", () => {
 test("timeline uses integer normalization only for step-one pitch fields", () => {
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const component = source.slice(source.indexOf("function CommitNumber("));
-  assert.match(component, /commitNumericEdit\(text, value, min, max, cancelledRef\.current, step === 1\)/);
+  assert.match(component, /commitNumericEdit\(text, value, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
   assert.match(source, /label="時間の表示幅"[^\n]*step=\{\.1\}/);
   assert.match(source, /label="下端音高"[^\n]*step=\{1\}/);
   assert.match(source, /label="上端音高"[^\n]*step=\{1\}/);
+});
+
+test("an untouched timeline input keeps the latest external viewport value", () => {
+  // Focus at 60, then a wheel/slider changes the backend view to 62.
+  // Blur must keep 62, rather than replaying the original input text "60".
+  assert.equal(commitNumericEdit("60", 62, 0, 127, false, true, false), 62);
+  // An actual user edit still wins, with the existing integer normalization.
+  assert.equal(commitNumericEdit("61.5", 62, 0, 127, false, true, true), 62);
+  assert.equal(commitNumericEdit("63.5", 62, 0, 127, false, true, true), 64);
+  assert.equal(commitNumericEdit("63.5", 62, 0, 127, true, true, true), 62);
+});
+
+test("timeline tracks focus and user edits before committing or syncing props", () => {
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
+  const component = source.slice(source.indexOf("function CommitNumber("));
+  assert.match(component, /const editingRef = useRef\(false\)/);
+  assert.match(component, /const editedRef = useRef\(false\)/);
+  assert.match(component, /if \(!editingRef\.current\) setText\(String\(value\)\)/);
+  assert.match(component, /onFocus=\{\(\) => \{[^}]*editingRef\.current = true; editedRef\.current = false;/);
+  assert.match(component, /onChange=\{\(event\) => \{ editedRef\.current = true; setText\(event\.target\.value\); \}\}/);
+  assert.match(component, /editingRef\.current = false;[\s\S]*?editedRef\.current = false;/);
 });
