@@ -501,10 +501,14 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         if not isinstance(changes, dict):
             raise TypeError("changes must be an object")
         with self._lock:
-            for key, value in changes.items():
-                if key not in self.settings:
-                    continue
-                self.settings[key] = self._normalize_setting(key, value)
+            # Validate the entire batch before mutating live settings. A bad
+            # later value must not leave earlier settings half-applied.
+            normalized = {
+                key: self._normalize_setting(key, value)
+                for key, value in changes.items()
+                if key in self.settings
+            }
+            self.settings.update(normalized)
             self._apply_player_settings()
             self._dirty = True
             return dict(self.settings)
