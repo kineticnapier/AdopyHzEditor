@@ -101,5 +101,6 @@ test("timeline slider preserves sub-step viewport positions", () => {
   assert.notEqual(Math.round(backendStart / oldStep) * oldStep, backendStart);
   assert.match(source, /className="timeline-slider"[^\n]*type="range"/);
   assert.match(source, /max=\{max > 0 \? max : \.001\} step="any"/);
-  assert.match(source, /value=\{Math\.max\(0, Math\.min\(view\.start, max\)\)\}/);
+  assert.match(source, /value=\{sliderValue\}/);
+  assert.match(source, /timelineSliderBounds\(playback\.duration, view\.windowSeconds, view\.start\)/);
 });
