@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { commitNumericEdit } from "../src/settings/numericInputModel.ts";
-import { clampTimeViewChange, timelineSliderBounds, timelineSliderStart } from "../src/editor/timelineNavigation.ts";
+import { clampTimeViewChange, timelineSliderBounds, timelineSliderStart, timelineWindowInputMax } from "../src/editor/timelineNavigation.ts";
 import { clampPitchViewChange, hasEffectiveViewChange, pitchBottomToRevealNote } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
 
@@ -48,6 +48,25 @@ test("Timeline slider never renders nonfinite playback metadata or start values"
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
   assert.match(source, /timelineSliderBounds\(playback\.duration, view\.windowSeconds, view\.start\)/);
   assert.match(source, /value=\{sliderValue\}/);
+});
+
+test("Timeline slider disables invalid negative duration and window metadata", () => {
+  assert.deepEqual(timelineSliderBounds(-1, -2, 0.5), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(-1, 0.2, 0.5), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, -1, 0.5), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, 0, 0.5), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, 0.2, 1.234567), { max: 59.8, value: 1.234567 });
+});
+
+test("Timeline width input keeps a finite HTML max for invalid audio duration", () => {
+  assert.equal(timelineWindowInputMax(60, 12), 60);
+  assert.equal(timelineWindowInputMax(0, 12), 0.2);
+  assert.equal(timelineWindowInputMax(NaN, 12), 12);
+  assert.equal(timelineWindowInputMax(Infinity, 12), 12);
+  assert.equal(timelineWindowInputMax(-1, 12), 12);
+  assert.equal(timelineWindowInputMax(NaN, NaN), 0.2);
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
+  assert.match(source, /max=\\{timelineWindowInputMax\\(playback\\.duration, view\\.windowSeconds\\)\\} step="any"/);
 });
 
 test("Timeline slider clamps out-of-range input and ignores unchanged positions", () => {
