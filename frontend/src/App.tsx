@@ -7,6 +7,7 @@ import EditorCanvas, {
 } from "./editor/EditorCanvas";
 import HelpDialog from "./dialogs/HelpDialog";
 import SettingsPanel from "./settings/SettingsPanel";
+import { settingsResponseIsCurrent } from "./settings/settingsResponseFreshness";
 import {
   BlankWorkspaceDialog,
   HarmonicDiagramDialog,
@@ -639,21 +640,25 @@ export default function App() {
         const batch = pendingSettings.current;
         pendingSettings.current = {};
         const request = settingsRequests.current.issue();
+        const requestGeneration = documentGeneration.current;
+        const isCurrent = () =>
+          settingsResponseIsCurrent(
+            settingsRequests.current.isCurrent(request),
+            Object.keys(pendingSettings.current).length > 0,
+            requestGeneration,
+            documentGeneration.current,
+          );
         try {
           const normalized = await api.update_settings(batch);
-          if (
-            settingsRequests.current.isCurrent(request) &&
-            Object.keys(pendingSettings.current).length === 0
-          )
-            setSettings(normalized);
+          if (isCurrent()) setSettings(normalized);
         } catch (e) {
-          setStatus(`設定の更新に失敗しました: ${String(e)}`);
-          if (
-            settingsRequests.current.isCurrent(request) &&
-            Object.keys(pendingSettings.current).length === 0
-          ) {
+          // A newer edit or document may have arrived while the request failed.
+          if (isCurrent()) {
+            setStatus(`設定の更新に失敗しました: ${String(e)}`);
             try {
-              setSettings((await api.get_state()).settings);
+              const recovered = (await api.get_state()).settings;
+              // Recheck after awaiting recovery: do not overwrite edits made meanwhile.
+              if (isCurrent()) setSettings(recovered);
             } catch {
               /* Keep the visible value and the dirty warning. */
             }
