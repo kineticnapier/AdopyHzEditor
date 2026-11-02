@@ -108,6 +108,7 @@ test("whole-step settings inputs normalize fractions before sending to the API",
   assert.equal(commitNumericEdit("1.6", 1, 1, 64, false, true), 2);
   assert.equal(commitNumericEdit("-1.6", 0, -12, 12, false, true), -2);
   assert.equal(commitNumericEdit("1.4", 1, 1, 64, false, false), 1.4);
+  assert.equal(commitNumericEdit("1.5", 1.5, -200, 300, false, true), 1.5);
   assert.equal(commitNumericEdit("", 1, 1, 64, false, true), 1);
   assert.equal(commitNumericEdit("2.5", 1, 1, 64, true, true), 1);
 });
