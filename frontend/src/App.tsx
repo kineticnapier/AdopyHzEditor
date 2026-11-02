@@ -7,6 +7,7 @@ import EditorCanvas, {
 } from "./editor/EditorCanvas";
 import HelpDialog from "./dialogs/HelpDialog";
 import SettingsPanel from "./settings/SettingsPanel";
+import { hasEffectiveSettingsChange } from "./settings/settingsChange";
 import { settingsResponseIsCurrent } from "./settings/settingsResponseFreshness";
 import {
   BlankWorkspaceDialog,
@@ -613,6 +614,9 @@ export default function App() {
       setStatus("プロジェクト処理中は設定を変更できません");
       return;
     }
+    // The backend also treats unchanged batches as no-ops. Do not create a
+    // false local dirty flag or send an unnecessary request for those batches.
+    if (!hasEffectiveSettingsChange(settings, changes)) return;
     const sourceChanged =
       changes.analysisSource !== undefined &&
       changes.analysisSource !== settings.analysisSource;
