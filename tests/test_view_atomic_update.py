@@ -80,5 +80,32 @@ class ViewAtomicUpdateTests(unittest.TestCase):
         self.assertEqual(bridge.view, result)
 
 
+    def test_short_audio_load_keeps_minimum_view_window(self):
+        # set_view() and Timeline both require a window of at least 0.2 s.
+        # Loading a shorter audio file must not bypass that invariant.
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        for duration in (0.001, 0.1, 0.199, 0.2, 0.3, 60.0):
+            with self.subTest(duration=duration):
+                bridge = Bridge()
+                bridge.view["start"] = 3.0
+                bridge.view["windowSeconds"] = 12.0
+                decoded = SimpleNamespace(
+                    samples=None, sample_rate=44100, duration=duration,
+                )
+                with patch.object(bridge.player, "set_audio"), patch.object(
+                    bridge.player, "set_virtual_duration"
+                ):
+                    bridge._set_audio_data("short.wav", decoded)
+
+                self.assertEqual(bridge.duration, max(0.001, duration))
+                self.assertEqual(
+                    bridge.view["windowSeconds"],
+                    min(12.0, max(0.2, bridge.duration)),
+                )
+                self.assertEqual(bridge.view["start"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
