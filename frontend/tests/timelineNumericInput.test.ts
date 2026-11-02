@@ -68,3 +68,13 @@ test("timeline tracks focus and user edits before committing or syncing props", 
   assert.match(component, /onChange=\{\(event\) => \{ editedRef\.current = true; setText\(event\.target\.value\); \}\}/);
   assert.match(component, /editingRef\.current = false;[\s\S]*?editedRef\.current = false;/);
 });
+
+
+test("pitch viewport shared rounding import resolves under native Node TypeScript tests", () => {
+  const source = readFileSync(new URL("../src/editor/pitchViewport.ts", import.meta.url), "utf8");
+  assert.match(source, /from "\.\.\/settings\/numericInputModel\.ts"/,
+    "Node's TypeScript type stripping requires an explicit .ts extension");
+  const tsconfig = JSON.parse(readFileSync(new URL("../tsconfig.json", import.meta.url), "utf8"));
+  assert.equal(tsconfig.compilerOptions.noEmit, true);
+  assert.equal(tsconfig.compilerOptions.allowImportingTsExtensions, true);
+});

@@ -1,5 +1,5 @@
 import type { ViewState } from "./bridge";
-import { roundToNearestEven } from "../settings/numericInputModel";
+import { roundToNearestEven } from "../settings/numericInputModel.ts";
 
 /** Match the Python view bounds before an optimistic canvas update. */
 export function clampPitchViewChange(
