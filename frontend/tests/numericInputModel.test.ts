@@ -70,3 +70,35 @@ test("fractional playback and timing settings are valid in the HTML inputs", () 
     assert.equal(commitNumericText(example, 0, min, max), Number(example));
   }
 });
+
+test("fractional inspector note and bulk edits are not rejected by HTML step constraints", () => {
+  const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8")
+    .replace(/\r\n/g, "\n");
+  const bulkStart = source.indexOf("function BulkEditor(");
+  const bulkEnd = source.indexOf("function Fold(", bulkStart);
+  assert.ok(bulkStart >= 0 && bulkEnd > bulkStart, "bulk editor boundaries exist");
+
+  for (const [section, cases] of [
+    [source.slice(0, bulkStart), [
+      ["開始", "0.0005", 0, 36000],
+      ["終了", "1.00025", 0, 36000],
+      ["長さ", "0.0015", 0.001, 36000],
+      ["MIDI", "60.125", 0, 127],
+    ]],
+    [source.slice(bulkStart, bulkEnd), [
+      ["時間移動", "0.0005", -36000, 36000],
+      ["音高移動", "0.125", -127, 127],
+      ["長さ", "0.0015", 0.001, 36000],
+    ]],
+  ] as const) {
+    for (const [label, example, min, max] of cases) {
+      const start = section.indexOf(`<Row label="${label}">`);
+      assert.ok(start >= 0, `${label} row exists`);
+      const end = section.indexOf("</Row>", start);
+      assert.ok(end > start, `${label} row is complete`);
+      const row = section.slice(start, end);
+      assert.match(row, /<NumberInput[\s\S]*?step="any"/, `${label} accepts API-valid fractions`);
+      assert.equal(commitNumericText(example, 0, min, max), Number(example));
+    }
+  }
+});
