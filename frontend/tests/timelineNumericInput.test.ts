@@ -90,3 +90,16 @@ test("timeline accepts fractional zoom widths returned by the view API", () => {
   assert.match(source, /label="時間の表示幅"[^\n]*step="any"/);
   assert.match(source, /step:number \| "any";onCommit\(value:number\):void/);
 });
+
+test("timeline slider preserves sub-step viewport positions", () => {
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8")
+    .replace(/\r\n/g, "\n");
+  // The old dynamic step max/1000 rounded legitimate backend positions.
+  const maxStart = 5;
+  const backendStart = 1.234567;
+  const oldStep = maxStart / 1000;
+  assert.notEqual(Math.round(backendStart / oldStep) * oldStep, backendStart);
+  assert.match(source, /className="timeline-slider"[^\n]*type="range"/);
+  assert.match(source, /max=\{max > 0 \? max : \.001\} step="any"/);
+  assert.match(source, /value=\{Math\.max\(0, Math\.min\(view\.start, max\)\)\}/);
+});
