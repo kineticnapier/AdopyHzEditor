@@ -38,7 +38,7 @@ function CommitNumber({id,label,value,min,max,step,onCommit}:{id?:string;label:s
 
   function commit() {
     // Escape calls blur synchronously; state updates have not reached text yet.
-    const next = commitNumericEdit(text, value, min, max, cancelledRef.current);
+    const next = commitNumericEdit(text, value, min, max, cancelledRef.current, step === 1);
     cancelledRef.current = false;
     setText(String(next));
     if (next !== value) onCommit(next);
