@@ -22,7 +22,7 @@ test("Timeline Enter and ordinary blur commit, but empty input keeps the value",
 test("Timeline connects Escape cancellation to the synchronous blur path", () => {
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
   assert.match(source, /const cancelledRef = useRef\(false\)/);
-  assert.match(source, /commitNumericEdit\(text, value, min, max, cancelledRef\.current, step === 1\)/);
+  assert.match(source, /commitNumericEdit\(text, value, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
   assert.match(source, /cancelledRef\.current = false;/);
   assert.match(source, /onBlur=\{commit\}/);
   assert.match(source, /event\.key === "Escape"[\s\S]*?cancelledRef\.current = true;[\s\S]*?event\.currentTarget\.blur\(\)/);
