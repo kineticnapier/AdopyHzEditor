@@ -45,7 +45,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, float(value)))
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("numeric value must be finite")
+    return max(lo, min(hi, parsed))
 
 
 def _int_clamp(value: Any, lo: int, hi: int) -> int:
