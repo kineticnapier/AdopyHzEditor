@@ -246,7 +246,7 @@ export default function SettingsPanel({
                     value={one.start}
                     min={0}
                     max={36000}
-                    step={0.001}
+                    step="any"
                     suffix="s"
                     onChange={(v) =>
                       mutate(
@@ -261,7 +261,7 @@ export default function SettingsPanel({
                     value={one.end}
                     min={0}
                     max={36000}
-                    step={0.001}
+                    step="any"
                     suffix="s"
                     onChange={(v) =>
                       mutate(
@@ -276,7 +276,7 @@ export default function SettingsPanel({
                     value={Math.max(0, one.end - one.start)}
                     min={0.001}
                     max={36000}
-                    step={0.001}
+                    step="any"
                     suffix="s"
                     onChange={(v) =>
                       mutate(
@@ -291,7 +291,7 @@ export default function SettingsPanel({
                     value={one.midi}
                     min={0}
                     max={127}
-                    step={0.01}
+                    step="any"
                     onChange={(v) =>
                       mutate(
                         () => api.set_note_properties(selected[0], { midi: v }),
@@ -787,7 +787,7 @@ function BulkEditor({
           value={timeDelta}
           min={-36000}
           max={36000}
-          step={0.001}
+          step="any"
           suffix="s"
           onChange={setTimeDelta}
         />
@@ -797,7 +797,7 @@ function BulkEditor({
           value={pitchDelta}
           min={-127}
           max={127}
-          step={0.01}
+          step="any"
           suffix="半音"
           onChange={setPitchDelta}
         />
@@ -813,7 +813,7 @@ function BulkEditor({
           value={duration}
           min={0.001}
           max={36000}
-          step={0.001}
+          step="any"
           suffix="s"
           onChange={setDuration}
         />
