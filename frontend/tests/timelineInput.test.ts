@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { commitNumericEdit } from "../src/settings/numericInputModel.ts";
 import { clampTimeViewChange, timelineSliderStart } from "../src/editor/timelineNavigation.ts";
-import { hasEffectiveViewChange } from "../src/editor/pitchViewport.ts";
+import { clampPitchViewChange, hasEffectiveViewChange } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
 
 test("Timeline Escape cancels a pending edit even when blur sees stale text", () => {
@@ -101,4 +101,25 @@ test("Timeline exposes separate pitch labels in a group rather than a label with
   assert.match(source, /<CommitNumber label="下端音高"/);
   assert.match(source, /<CommitNumber label="上端音高"/);
   assert.doesNotMatch(source, /<label className="timeline-field pitch-field"/);
+});
+
+// Bridge.set_view uses Python int(round(float(...))) for both integer pitch fields.
+test("pitch viewport matches Python half-even rounding before optimistic updates", () => {
+  assert.deepEqual(clampPitchViewChange(endView, { visibleNotes: 60.5 }),
+    { visibleNotes: 60, pitchBottom: 40 });
+  assert.deepEqual(clampPitchViewChange(endView, { visibleNotes: 61.5 }),
+    { visibleNotes: 62, pitchBottom: 40 });
+  assert.deepEqual(clampPitchViewChange(endView, { pitchBottom: 40.5 }),
+    { pitchBottom: 40 });
+  assert.deepEqual(clampPitchViewChange(endView, { pitchBottom: 41.5 }),
+    { pitchBottom: 42 });
+});
+
+test("half-even pitch no-ops do not trigger a false viewport change", () => {
+  assert.equal(hasEffectiveViewChange(endView,
+    clampPitchViewChange(endView, { visibleNotes: 60.5 })), false);
+  assert.equal(hasEffectiveViewChange(endView,
+    clampPitchViewChange(endView, { pitchBottom: 40.5 })), false);
+  assert.deepEqual(clampPitchViewChange(endView, { visibleNotes: 127.5, pitchBottom: 100 }),
+    { visibleNotes: 128, pitchBottom: 0 });
 });
