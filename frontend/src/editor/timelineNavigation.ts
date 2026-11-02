@@ -1,6 +1,20 @@
 import type { ViewState } from "./bridge";
 
 /** Reject no-op slider input before App.updateView disables playback follow. */
+/** Keep the HTML range bounds finite even if playback metadata is invalid. */
+export function timelineSliderBounds(
+  durationSeconds: number,
+  windowSeconds: number,
+  currentStart: number,
+): { max: number; value: number } {
+  const rawMax = durationSeconds - windowSeconds;
+  const max = Number.isFinite(durationSeconds) && Number.isFinite(windowSeconds) && Number.isFinite(rawMax)
+    ? Math.max(0, rawMax)
+    : 0;
+  const value = Number.isFinite(currentStart) ? Math.max(0, Math.min(currentStart, max)) : 0;
+  return { max, value };
+}
+
 export function timelineSliderStart(rawStart: number, currentStart: number, maxStart: number): number | null {
   if (!Number.isFinite(rawStart) || !Number.isFinite(currentStart) || !Number.isFinite(maxStart)) return null;
   const limit = Math.max(0, maxStart);
