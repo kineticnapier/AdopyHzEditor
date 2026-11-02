@@ -22,7 +22,7 @@ export function pitchBottomToRevealNote(
   midi: number,
 ): number | null {
   if (midi >= view.pitchBottom && midi < view.pitchBottom + view.visibleNotes) return null;
-  return Math.max(0, Math.min(128 - view.visibleNotes, Math.round(midi - view.visibleNotes / 2)));
+  return Math.max(0, Math.min(128 - view.visibleNotes, roundToNearestEven(midi - view.visibleNotes / 2)));
 }
 
 /** Skip view writes that cannot change any displayed value. */
