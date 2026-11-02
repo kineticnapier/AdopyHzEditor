@@ -35,6 +35,17 @@ class SettingsAtomicUpdateTests(unittest.TestCase):
         self.assertNotIn("unknownOption", result)
         self.assertTrue(bridge.get_state()["dirty"])
 
+    def test_nonfinite_float_setting_rejects_entire_batch(self):
+        for key, bad in (("speed", "nan"), ("bpm", "inf"),
+                         ("offsetMs", "-inf"), ("targetAngle", float("nan"))):
+            with self.subTest(setting=key):
+                bridge = Bridge()
+                before = bridge.get_settings()
+                with self.assertRaises(ValueError):
+                    bridge.update_settings({"volume": 12, key: bad})
+                self.assertEqual(bridge.get_settings(), before)
+                self.assertFalse(bridge.get_state()["dirty"])
+
     def test_empty_and_unknown_only_batches_do_not_dirty_project(self):
         bridge = Bridge()
         before = bridge.get_settings()
