@@ -15,6 +15,8 @@ export function commitNumericEdit(
 ) {
   if (cancelled || text.trim() === "" || !Number.isFinite(Number(text))) return fallback;
   const next = commitNumericText(text, fallback, min, max);
+  // Merely focusing an existing fractional value must not rewrite it.
+  if (next === fallback) return fallback;
   // HTML step=1 fields must not send fractional values to integer APIs.
   return integerStep ? Math.round(next) : next;
 }
