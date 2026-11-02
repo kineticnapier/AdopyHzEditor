@@ -98,6 +98,7 @@ function Num({
   const [text, setText] = useState(String(fallback));
   const [editing, setEditing] = useState(false);
   const cancelledRef = useRef(false);
+  const editedRef = useRef(false);
   useEffect(() => {
     if (!editing) setText(String(fallback));
   }, [editing, fallback]);
@@ -105,12 +106,14 @@ function Num({
     if (disabled) {
       // Disabling a focused input can fire blur after an action has started.
       cancelledRef.current = false;
+      editedRef.current = false;
       setEditing(false);
       setText(String(fallback));
       return;
     }
-    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current);
+    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current, false, editedRef.current);
     cancelledRef.current = false;
+    editedRef.current = false;
     setEditing(false);
     setText(String(next));
     if (next !== fallback) onChange(next);
@@ -124,8 +127,8 @@ function Num({
         max={max}
         step={step}
         disabled={disabled}
-        onFocus={() => { cancelledRef.current = false; setEditing(true); }}
-        onChange={(event) => setText(event.target.value)}
+        onFocus={() => { cancelledRef.current = false; editedRef.current = false; setEditing(true); }}
+        onChange={(event) => { editedRef.current = true; setText(event.target.value); }}
         onBlur={commit}
         onKeyDown={(event) => {
           // IME owns Enter/Escape while a composition is active.
