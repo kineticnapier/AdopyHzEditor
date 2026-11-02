@@ -18,9 +18,9 @@ for (const file of dialogFiles) {
     const component = source.slice(start, end + 2);
 
     assert.match(component, /value=\{text\}/);
-    assert.match(component, /onChange=\{\(event\) => setText\(event\.target\.value\)\}/);
+    assert.match(component, /onChange=\{\(event\) => \{ editedRef\.current = true; setText\(event\.target\.value\); \}\}/);
     assert.match(component, /onBlur=\{commit\}/);
-    assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current\)/);
+    assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, false, editedRef\.current\)/);
     assert.match(component, /cancelledRef\.current = true/);
     assert.match(component, /event\.stopPropagation\(\)/);
     assert.doesNotMatch(component, /Number\(event\.target\.value\)/);
@@ -190,4 +190,27 @@ test("ADOFAI export clears stale errors after editing an option", () => {
   assert.match(patch, /if \(workingRef\.current \|\| !defaultsCurrent\) return;/);
   assert.match(patch, /invalidatePreview\(\);\s*(?:\/\/[^\n]*\n\s*)?setError\(null\);\s*setOptions\(/,
     "changing an option must dismiss the previous preview/export error");
+});
+
+test("dialog numeric edits preserve externally updated values when untouched", () => {
+  // Focus with 120, then receive 125 from the parent before blur.
+  assert.equal(commitNumericEdit("120", 125, 1, 10000, false, false, false), 125);
+  // Explicit edits still commit, and Escape still wins over blur.
+  assert.equal(commitNumericEdit("130", 125, 1, 10000, false, false, true), 130);
+  assert.equal(commitNumericEdit("130", 125, 1, 10000, true, false, true), 125);
+});
+
+test("both tool and ADOFAI dialogs distinguish focus from actual edits", () => {
+  for (const file of dialogFiles) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    const start = source.indexOf("function Num({");
+    const end = source.indexOf("\n}\n", start);
+    assert.ok(start >= 0 && end > start, `Num component exists in ${file}`);
+    const component = source.slice(start, end + 2);
+    assert.match(component, /const editedRef = useRef\(false\)/);
+    assert.match(component, /onFocus=\{\(\) => \{ cancelledRef\.current = false; editedRef\.current = false; setEditing\(true\); \}\}/);
+    assert.match(component, /onChange=\{\(event\) => \{ editedRef\.current = true; setText\(event\.target\.value\); \}\}/);
+    assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, false, editedRef\.current\)/);
+    assert.match(component, /editedRef\.current = false;\s*setEditing\(false\);/);
+  }
 });
