@@ -66,7 +66,7 @@ test("Timeline width input keeps a finite HTML max for invalid audio duration", 
   assert.equal(timelineWindowInputMax(-1, 12), 12);
   assert.equal(timelineWindowInputMax(NaN, NaN), 0.2);
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
-  assert.match(source, /max=\\{timelineWindowInputMax\\(playback\\.duration, view\\.windowSeconds\\)\\} step="any"/);
+  assert.ok(source.includes('max={timelineWindowInputMax(playback.duration, view.windowSeconds)} step="any"'));
 });
 
 test("Timeline slider clamps out-of-range input and ignores unchanged positions", () => {
