@@ -7,10 +7,13 @@ export function isInteractiveShortcutTarget(target: EventTarget | null): boolean
 
 /** Ctrl/Meta+S must still commit a focused numeric field before saving. */
 export function shouldDispatchEditorShortcut(
-  event: Pick<KeyboardEvent, "target" | "key" | "ctrlKey" | "metaKey" | "repeat" | "defaultPrevented">,
+  event: Pick<KeyboardEvent, "target" | "key" | "ctrlKey" | "metaKey" | "repeat" | "defaultPrevented"> &
+    Partial<Pick<KeyboardEvent, "isComposing" | "keyCode">>,
   disabled: boolean,
 ): boolean {
-  if (event.defaultPrevented || disabled) return false;
+  // IME composition must not trigger F1 or Ctrl/Meta+S from focused fields.
+  // Windows IMEs may emit keyCode 229 with isComposing=false.
+  if (event.defaultPrevented || disabled || event.isComposing || event.keyCode === 229) return false;
   const key = event.key.toLowerCase();
   if (event.repeat && (key === "delete" || key === "backspace")) return false;
   return !isInteractiveShortcutTarget(event.target) ||

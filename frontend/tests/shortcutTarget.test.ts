@@ -46,3 +46,14 @@ test("Ctrl/Meta+S and F1 still work from fields, but disabled and handled events
   assert.equal(shouldDispatchEditorShortcut(keyEvent(input, "s", { ctrlKey: true, defaultPrevented: true }), false), false);
   assert.equal(shouldDispatchEditorShortcut(keyEvent(targetFor("canvas"), "Delete", { repeat: true }), false), false);
 });
+
+
+test("IME composition cannot trigger global shortcuts or blur an editing field", () => {
+  const input = targetFor("input");
+  const canvas = targetFor("canvas");
+  assert.equal(shouldDispatchEditorShortcut(keyEvent(input, "s", { ctrlKey: true, isComposing: true }), false), false);
+  assert.equal(shouldDispatchEditorShortcut(keyEvent(input, "s", { metaKey: true, keyCode: 229 }), false), false);
+  assert.equal(shouldDispatchEditorShortcut(keyEvent(canvas, "F1", { isComposing: true }), false), false);
+  assert.equal(shouldDispatchEditorShortcut(keyEvent(canvas, "Escape", { keyCode: 229 }), false), false);
+  assert.equal(shouldDispatchEditorShortcut(keyEvent(input, "s", { ctrlKey: true, isComposing: false, keyCode: 83 }), false), true);
+});
