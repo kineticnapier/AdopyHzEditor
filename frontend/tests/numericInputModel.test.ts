@@ -122,3 +122,19 @@ test("settings panel passes whole-step information to numeric commit", () => {
   const component = source.slice(start, end);
   assert.match(component, /commitNumericEdit\([\s\S]*?cancelledRef\.current,\s*step === 1,/);
 });
+
+test("whole-step inputs use Python's ties-to-even rounding at exact halves", () => {
+  // Backend _int_clamp uses int(round(float(value))), not JS Math.round.
+  for (const [text, expected] of [
+    ["2.5", 2], ["3.5", 4], ["-1.5", -2], ["-2.5", -2],
+    ["-0.5", 0], ["1.5", 2], ["2.6", 3], ["-1.6", -2],
+  ] as const) {
+    assert.equal(commitNumericEdit(text, 0, -12, 12, false, true), expected, text);
+  }
+});
+
+test("ties-to-even fix preserves untouched fractions and noninteger fields", () => {
+  assert.equal(commitNumericEdit("2.5", 2.5, 0, 64, false, true), 2.5);
+  assert.equal(commitNumericEdit("2.5", 0, 0, 64, false, false), 2.5);
+  assert.equal(commitNumericEdit("3.5", 0, 0, 3, false, true), 3);
+});
