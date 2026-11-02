@@ -29,8 +29,8 @@ test("App rechecks settings freshness after awaiting recovery", () => {
   const end = app.indexOf("  async function applyViewAction(", start);
   assert.ok(start >= 0 && end > start, "settings flush boundaries exist");
   const block = app.slice(start, end);
-  assert.match(block, /const requestGeneration = documentGeneration\\.current;/);
-  assert.match(block, /const isCurrent = \\(\\) =>\\s*settingsResponseIsCurrent\\(/);
-  assert.match(block, /if \\(isCurrent\\(\\)\\) setSettings\\(normalized\\);/);
-  assert.match(block, /const recovered = \\(await api\\.get_state\\(\\)\\)\\.settings;[\\s\\S]*?if \\(isCurrent\\(\\)\\) setSettings\\(recovered\\);/);
+  assert.match(block, /const requestGeneration = documentGeneration\.current;/);
+  assert.match(block, /const isCurrent = \(\) =>\s*settingsResponseIsCurrent\(/);
+  assert.match(block, /if \(isCurrent\(\)\) setSettings\(normalized\);/);
+  assert.match(block, /const recovered = \(await api\.get_state\(\)\)\.settings;[\s\S]*?if \(isCurrent\(\)\) setSettings\(recovered\);/);
 });
