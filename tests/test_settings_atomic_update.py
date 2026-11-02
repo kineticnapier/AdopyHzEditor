@@ -35,11 +35,10 @@ class SettingsAtomicUpdateTests(unittest.TestCase):
         self.assertNotIn("unknownOption", result)
         self.assertTrue(bridge.get_state()["dirty"])
 
-
     def test_empty_and_unknown_only_batches_do_not_dirty_project(self):
         bridge = Bridge()
         before = bridge.get_settings()
-        with unittest.mock.patch.object(bridge, "_apply_player_settings") as apply:
+        with mock.patch.object(bridge, "_apply_player_settings") as apply:
             self.assertEqual(bridge.update_settings({}), before)
             self.assertEqual(
                 bridge.update_settings({"unrecognizedSetting": "ignored"}), before
@@ -50,7 +49,7 @@ class SettingsAtomicUpdateTests(unittest.TestCase):
     def test_normalized_unchanged_values_do_not_dirty_or_reapply_audio(self):
         bridge = Bridge()
         before = bridge.get_settings()
-        with unittest.mock.patch.object(bridge, "_apply_player_settings") as apply:
+        with mock.patch.object(bridge, "_apply_player_settings") as apply:
             self.assertEqual(
                 bridge.update_settings({
                     "volume": 85.4,  # Normalizes back to the default 85.
@@ -64,10 +63,9 @@ class SettingsAtomicUpdateTests(unittest.TestCase):
 
         bridge.update_settings({"volume": 12})
         self.assertTrue(bridge.get_state()["dirty"])
-        with unittest.mock.patch.object(bridge, "_apply_player_settings") as apply:
+        with mock.patch.object(bridge, "_apply_player_settings") as apply:
             self.assertEqual(bridge.update_settings({"volume": 12}), bridge.get_settings())
             apply.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()
