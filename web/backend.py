@@ -619,7 +619,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self.duration = max(0.001, float(decoded.duration))
         self.player.set_virtual_duration(self.duration)
         self.view["start"] = 0.0
-        self.view["windowSeconds"] = min(max(0.2, self.view["windowSeconds"]), self.duration)
+        self.view["windowSeconds"] = min(max(0.2, self.view["windowSeconds"]), max(0.2, self.duration))
 
     def open_audio(self) -> dict[str, Any]:
         paths = self._file_dialog(webview.OPEN_DIALOG, file_types=AUDIO_FILE_TYPES, allow_multiple=False)
