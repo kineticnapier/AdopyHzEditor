@@ -172,7 +172,7 @@ class IOMixin:
         # document or clearing its Undo/Redo history. Corrupt numeric fields in
         # an imported project must not leave the previous project half-loaded.
         workspace_bounds: tuple[float, int, int] | None = None
-        if prepared_audio is None:
+        if not (audio_path and Path(audio_path).exists()):
             note_end = max((n.end for n in prepared_notes), default=0.0)
             saved_duration = settings.get("workspace_duration")
             if saved_duration is None:
