@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -173,6 +174,33 @@ class IOMixin:
             finally:
                 with self._lock:self._busy=False
 
+        # Validate audio-less workspace metadata before replacing the current
+        # document or clearing its Undo/Redo history. Corrupt numeric fields in
+        # an imported project must not leave the previous project half-loaded.
+        workspace_bounds: tuple[float, int, int] | None = None
+        if prepared_audio is None:
+            note_end = max((n.end for n in prepared_notes), default=0.0)
+            saved_duration = settings.get("workspace_duration")
+            if saved_duration is None:
+                workspace_duration = max(60.0, note_end)
+            else:
+                parsed_duration = float(saved_duration)
+                if not math.isfinite(parsed_duration):
+                    raise ValueError("workspace_duration must be finite")
+                workspace_duration = max(1.0, parsed_duration, note_end)
+            saved_midi_min = settings.get("workspace_midi_min")
+            saved_midi_max = settings.get("workspace_midi_max")
+            if saved_midi_min is None or saved_midi_max is None:
+                workspace_midi_min, workspace_midi_max = 12, 120
+            else:
+                workspace_midi_min = max(0, min(127, int(saved_midi_min)))
+                workspace_midi_max = max(0, min(127, int(saved_midi_max)))
+                if workspace_midi_max <= workspace_midi_min:
+                    workspace_midi_max = min(127, workspace_midi_min + 1)
+                    if workspace_midi_max <= workspace_midi_min:
+                        workspace_midi_min = max(0, workspace_midi_max - 1)
+            workspace_bounds = (workspace_duration, workspace_midi_min, workspace_midi_max)
+
         with self._lock:
             if source_request != self._source_generation:
                 return self._state_dict()
@@ -203,23 +231,8 @@ class IOMixin:
                     self._status=f"{Path(path).name} と音声を読み込みました"
             else:
                 self._detach_active_audio()
-                note_end=max((n.end for n in self.notes),default=0.0)
-                saved_duration=settings.get("workspace_duration")
-                saved_midi_min=settings.get("workspace_midi_min")
-                saved_midi_max=settings.get("workspace_midi_max")
-                if saved_duration is None:
-                    self.duration=max(60.0,note_end)
-                else:
-                    self.duration=max(1.0,float(saved_duration),note_end)
-                if saved_midi_min is None or saved_midi_max is None:
-                    self.midi_min=12;self.midi_max=120
-                else:
-                    self.midi_min=max(0,min(127,int(saved_midi_min)))
-                    self.midi_max=max(0,min(127,int(saved_midi_max)))
-                    if self.midi_max <= self.midi_min:
-                        self.midi_max=min(127,self.midi_min+1)
-                        if self.midi_max <= self.midi_min:
-                            self.midi_min=max(0,self.midi_max-1)
+                assert workspace_bounds is not None
+                self.duration, self.midi_min, self.midi_max = workspace_bounds
                 self.pitch_step=1.0;self.player.clear_audio();self._apply_player_settings();self._sync_notes_to_player()
                 if audio_path:
                     self._status=f"{Path(path).name} の音源が見つかりません。ファイル → プロジェクト音源を再指定… から選び直せます"
