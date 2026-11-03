@@ -63,6 +63,43 @@ class ProjectWorkspacePreflightTests(unittest.TestCase):
         reserve.assert_not_called()
         self.assertEqual(bridge._source_generation, generation_before)
 
+    def test_valid_workspace_reserves_source_request_once(self):
+        bridge = self.make_bridge()
+        generation_before = bridge._source_generation
+        with (
+            mock.patch.object(bridge, "_dialog", return_value="valid.adopyhz"),
+            mock.patch.object(
+                web_io, "load_project",
+                return_value=(None, [Note(3.0, 4.0, 72.0)], {"workspace_duration": 10.0}),
+            ),
+            mock.patch.object(
+                bridge, "_reserve_source_request",
+                wraps=bridge._reserve_source_request,
+            ) as reserve,
+        ):
+            bridge.load_project_dialog()
+        reserve.assert_called_once_with()
+        self.assertEqual(bridge._source_generation, generation_before + 1)
+
+    def test_non_finite_note_does_not_reserve_source_request(self):
+        bridge = self.make_bridge()
+        generation_before = bridge._source_generation
+        with (
+            mock.patch.object(bridge, "_dialog", return_value="broken.adopyhz"),
+            mock.patch.object(
+                web_io, "load_project",
+                return_value=(None, [Note(float("nan"), 2.0, 60.0)], {}),
+            ),
+            mock.patch.object(
+                bridge, "_reserve_source_request",
+                wraps=bridge._reserve_source_request,
+            ) as reserve,
+        ):
+            with self.assertRaises(ValueError):
+                bridge.load_project_dialog()
+        reserve.assert_not_called()
+        self.assertEqual(bridge._source_generation, generation_before)
+
     def test_non_finite_project_notes_preserve_document_and_history(self):
         invalid_notes = (
             Note(float("nan"), 2.0, 60.0),
