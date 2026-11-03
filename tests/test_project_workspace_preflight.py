@@ -47,6 +47,35 @@ class ProjectWorkspacePreflightTests(unittest.TestCase):
                 self.assertFalse(bridge._dirty)
                 sync.assert_not_called()
 
+    def test_non_finite_project_notes_preserve_document_and_history(self):
+        invalid_notes = (
+            Note(float("nan"), 2.0, 60.0),
+            Note(1.0, float("inf"), 60.0),
+            Note(1.0, 2.0, float("nan")),
+            Note(1.0, 2.0, 60.0, kind="curve", midi_end=float("inf")),
+            Note(1.0, 2.0, 60.0, target_angle=float("nan")),
+        )
+        for invalid_note in invalid_notes:
+            with self.subTest(note=invalid_note):
+                bridge = self.make_bridge()
+                before = bridge._document_checkpoint()
+                previous_project_path = bridge.project_path
+                with (
+                    mock.patch.object(bridge, "_dialog", return_value="broken.adopyhz"),
+                    mock.patch.object(
+                        web_io, "load_project", return_value=(None, [invalid_note], {}),
+                    ),
+                    mock.patch.object(bridge, "_sync_notes_to_player") as sync,
+                ):
+                    with self.assertRaisesRegex(ValueError, "project note contains"):
+                        bridge.load_project_dialog()
+                self.assertEqual(bridge._document_checkpoint(), before)
+                self.assertEqual(bridge.project_path, previous_project_path)
+                self.assertEqual(len(bridge._undo_stack), 0)
+                self.assertEqual(len(bridge._redo_stack), 1)
+                self.assertFalse(bridge._dirty)
+                sync.assert_not_called()
+
     def test_valid_workspace_metadata_restores_bounds_and_clears_history(self):
         bridge = self.make_bridge()
         settings = {
