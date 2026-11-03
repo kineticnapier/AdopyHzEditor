@@ -268,13 +268,21 @@ class IOMixin:
             if not imported:
                 self._status = "MIDIに読み込めるノートがありませんでした"
                 return self._state_dict()
+            # Prepare and validate every incoming note before modifying history
+            # or the document. A malformed later note must not leave a partial
+            # import or erase Redo.
+            prepared = [note.normalized() for note in imported]
+            merged_notes = sorted(
+                [*self.notes, *prepared],
+                key=lambda n: (n.start, n.midi, n.end),
+            )
+            new_duration = max(self.duration, max(note.end for note in prepared))
             self._push_undo()
-            self.notes.extend(imported)
-            self.notes.sort(key=lambda n: (n.start, n.midi, n.end))
-            self.duration = max(self.duration, max(n.end for n in imported))
+            self.notes = merged_notes
+            self.duration = new_duration
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"MIDIから{len(imported)}個のノートを読み込みました"
+            self._status = f"MIDIから{len(prepared)}個のノートを読み込みました"
             return self._state_dict()
 
     def export_midi_dialog(self) -> dict[str, Any]:
