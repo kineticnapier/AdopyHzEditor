@@ -260,11 +260,22 @@ class IOMixin:
     def import_midi_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.OPEN,file_types=MIDI_FILE_TYPES)
         if not path:return self.get_state()
-        result=import_midi(path);imported=result.notes
+        result = import_midi(path)
+        imported = result.notes
         with self._lock:
-            self._push_undo();self.notes.extend(imported);self.notes.sort(key=lambda n:(n.start,n.midi,n.end))
-            if imported:self.duration=max(self.duration,max(n.end for n in imported))
-            self._dirty=True;self._sync_notes_to_player();self._status=f"MIDIから{len(imported)}個のノートを読み込みました";return self._state_dict()
+            # An empty MIDI import must not create an Undo step, erase Redo,
+            # or mark an otherwise unchanged project as modified.
+            if not imported:
+                self._status = "MIDIに読み込めるノートがありませんでした"
+                return self._state_dict()
+            self._push_undo()
+            self.notes.extend(imported)
+            self.notes.sort(key=lambda n: (n.start, n.midi, n.end))
+            self.duration = max(self.duration, max(n.end for n in imported))
+            self._dirty = True
+            self._sync_notes_to_player()
+            self._status = f"MIDIから{len(imported)}個のノートを読み込みました"
+            return self._state_dict()
 
     def export_midi_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.SAVE,file_types=MIDI_FILE_TYPES,save_filename="notes.mid")
