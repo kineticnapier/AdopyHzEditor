@@ -157,6 +157,15 @@ class IOMixin:
         if not path:return self.get_state()
         audio_path,notes,settings=load_project(path)
         prepared_notes=[n.normalized() for n in notes]
+        # Reject non-finite values before replacing the document or clearing
+        # Undo/Redo. Note.normalized() preserves NaN/Infinity from JSON.
+        for note in prepared_notes:
+            for value in (
+                note.start, note.end, note.midi, note.midi_end,
+                note.ctrl1_midi, note.ctrl2_midi, note.target_angle,
+            ):
+                if value is not None and not math.isfinite(float(value)):
+                    raise ValueError("project note contains a non-finite numeric value")
         prepared_settings=self._normalized_project_settings(settings)
         prepared_audio=None
         source_request=self._reserve_source_request()
