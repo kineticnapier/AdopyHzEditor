@@ -98,8 +98,6 @@ class EditingMixin:
             for i, raw_note in enumerate(self.notes):
                 n = raw_note.normalized()
                 if i in valid and n.start + MIN_NOTE_DURATION < t < n.end - MIN_NOTE_DURATION:
-                    if split_count == 0:
-                        self._push_undo()
                     left, right = self._split_note_exact(n, t)
                     new_indices.extend([len(new_notes), len(new_notes) + 1])
                     new_notes.extend([left, right])
@@ -108,6 +106,9 @@ class EditingMixin:
                     new_notes.append(n)
             if split_count == 0:
                 return {"notes": self._note_dicts(), "indices": [], "status": "再生位置をまたぐ選択ノートがありません"}
+            # Build every fragment before touching Undo/Redo. A failed curve
+            # calculation must leave the document and history unchanged.
+            self._push_undo()
             self.notes = new_notes
             self._dirty = True
             self._sync_notes_to_player()
@@ -134,7 +135,6 @@ class EditingMixin:
                 return {"notes": self._note_dicts(), "indices": sorted(valid), "changed": False, "status": "切り取り範囲が短すぎます"}
 
             changed = 0
-            undo_pushed = False
             new_notes: list[Note] = []
             new_indices: list[int] = []
             eps = 1e-9
@@ -151,9 +151,6 @@ class EditingMixin:
                     new_notes.append(n)
                     continue
 
-                if not undo_pushed:
-                    self._push_undo()
-                    undo_pushed = True
                 changed += 1
 
                 left_duration = overlap_start - n.start
@@ -181,6 +178,8 @@ class EditingMixin:
             if changed == 0:
                 return {"notes": self._note_dicts(), "indices": sorted(valid), "changed": False, "status": "切り取り範囲と選択ノートが重なっていません"}
 
+            # The full cut must succeed before recording a history step.
+            self._push_undo()
             self.notes = new_notes
             self._dirty = True
             self._sync_notes_to_player()
