@@ -131,6 +131,61 @@ class NonFiniteNoteInputTests(unittest.TestCase):
         self.assertEqual(bridge.notes, [Note(1.0, 2.0, 60.0).normalized()])
         self.assertFalse(bridge._dirty)
 
+    def test_bulk_edit_rejects_nonfinite_inputs_without_history(self):
+        for field in ("timeDelta", "pitchDelta", "duration"):
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(field=field, value=value):
+                    bridge = self.make_bridge()
+                    original = list(bridge.notes)
+                    with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                        with self.assertRaisesRegex(ValueError, "finite"):
+                            bridge.bulk_edit_notes([0], {field: value})
+                    self.assert_unchanged(bridge, original)
+                    sync.assert_not_called()
+
+    def test_drag_duplicate_rejects_nonfinite_deltas_without_history(self):
+        for field in ("dx", "dy"):
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(field=field, value=value):
+                    bridge = self.make_bridge()
+                    original = list(bridge.notes)
+                    args = {"dx": 0.0, "dy": 0.0}
+                    args[field] = value
+                    with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                        with self.assertRaisesRegex(ValueError, "finite"):
+                            bridge.duplicate_notes_shifted([0], **args)
+                    self.assert_unchanged(bridge, original)
+                    sync.assert_not_called()
+
+    def test_bulk_edit_noop_preserves_redo_and_clean_state(self):
+        bridge = self.make_bridge()
+        original = list(bridge.notes)
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            result = bridge.bulk_edit_notes(
+                [0], {"timeDelta": 0.0, "pitchDelta": 0.0, "duration": 1.0}
+            )
+        self.assertFalse(result["changed"])
+        self.assertFalse(result["dirty"])
+        self.assert_unchanged(bridge, original)
+        sync.assert_not_called()
+
+    def test_bulk_edit_valid_change_can_be_undone(self):
+        bridge = self.make_bridge()
+        original = list(bridge.notes)
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            result = bridge.bulk_edit_notes([0], {"pitchDelta": 2.0, "duration": 1.5})
+        self.assertTrue(result["changed"])
+        self.assertEqual(bridge.notes[0].midi, 62.0)
+        self.assertEqual(bridge.notes[0].end, 2.5)
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        self.assertTrue(bridge._dirty)
+        sync.assert_called_once()
+        with mock.patch.object(bridge, "_sync_notes_to_player"):
+            bridge.undo()
+        self.assertEqual(bridge.notes, original)
+        self.assertFalse(bridge._dirty)
+
     def test_finite_bounds_still_clamp(self):
         self.assertEqual(_clamp(-5.0, 0.0, 10.0), 0.0)
         self.assertEqual(_clamp(5.5, 0.0, 10.0), 5.5)
