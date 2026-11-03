@@ -24,6 +24,8 @@ class MidiImportFinitePreflightTests(unittest.TestCase):
             Note(1.0, float("inf"), 60.0),
             Note(1.0, 2.0, float("nan")),
             Note(1.0, 2.0, 60.0, kind="curve", midi_end=float("inf")),
+            Note(1.0, 2.0, 60.0, kind="curve", ctrl1_midi=float("nan")),
+            Note(1.0, 2.0, 60.0, kind="curve", ctrl2_midi=float("-inf")),
             Note(1.0, 2.0, 60.0, target_angle=float("nan")),
         )
         for invalid_note in invalid_notes:
