@@ -107,8 +107,11 @@ class NoteMixin:
         return _clamp(offset + _round_like_javascript((t - offset) / step) * step, 0.0, self.duration)
 
     def _snap_pitch(self, midi: float) -> float:
+        parsed = float(midi)
+        if not math.isfinite(parsed):
+            raise ValueError("numeric value must be finite")
         step = max(1e-6, float(self.pitch_step))
-        snapped = round(float(midi) / step) * step
+        snapped = round(parsed / step) * step
         return self._clamp_pitch(snapped)
 
     @staticmethod
