@@ -205,11 +205,13 @@ class EditingMixin:
             if pitches:
                 dy = _clamp(float(dy), -min(pitches), 127.0 - max(pitches))
 
+            # Build every duplicate before changing the document or history.
+            # An error in a later curve must not leave a partial paste.
+            copies = [n.shifted(dx=dx, dy=dy).normalized() for n in source]
             self._push_undo()
-            new_indices: list[int] = []
-            for n in source:
-                self.notes.append(n.shifted(dx=dx, dy=dy).normalized())
-                new_indices.append(len(self.notes) - 1)
+            first_index = len(self.notes)
+            self.notes.extend(copies)
+            new_indices = list(range(first_index, first_index + len(copies)))
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(new_indices)}個のノートをドラッグ複製しました"
