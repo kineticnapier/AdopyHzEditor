@@ -8,7 +8,10 @@ from core.note_model import Note
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, float(value)))
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("numeric value must be finite")
+    return max(lo, min(hi, parsed))
 
 
 def _round_like_javascript(value: float) -> int:
