@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from core.note_model import Note, hz_to_midi, midi_to_hz
@@ -9,7 +10,10 @@ MIN_NOTE_DURATION = 0.001
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, float(value)))
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("numeric value must be finite")
+    return max(lo, min(hi, parsed))
 
 
 def _lerp(a: float, b: float, t: float) -> float:
@@ -243,13 +247,21 @@ class EditingMixin:
             if pitches:
                 pitch_delta = _clamp(pitch_delta, -min(pitches), 127.0 - max(pitches))
 
+            # Validate the requested duration before touching history or notes.
+            # max(MIN_NOTE_DURATION, NaN) silently turns NaN into a tiny note.
+            duration = None
+            if duration_value is not None:
+                parsed_duration = float(duration_value)
+                if not math.isfinite(parsed_duration):
+                    raise ValueError("numeric value must be finite")
+                duration = max(MIN_NOTE_DURATION, parsed_duration)
+
             align_start = min(n.start for n in notes)
             align_end = max(n.end for n in notes)
-            self._push_undo()
-            for i, n in zip(valid, notes):
+            updated: list[Note] = []
+            for n in notes:
                 edited = n.shifted(dx=time_delta, dy=pitch_delta).normalized()
-                if duration_value is not None:
-                    duration = max(MIN_NOTE_DURATION, float(duration_value))
+                if duration is not None:
                     end = min(self.duration, edited.start + duration)
                     if end <= edited.start:
                         end = min(self.duration, edited.start + MIN_NOTE_DURATION)
@@ -261,9 +273,18 @@ class EditingMixin:
                     end = max(align_end, edited.start + MIN_NOTE_DURATION)
                     end = min(self.duration, end)
                     edited = self._with_times(edited, edited.start, end)
-                self.notes[i] = edited
+                updated.append(edited)
 
+            # A no-op must not clear Redo, create an empty Undo step, or dirty
+            # the document. Build all notes first so errors are atomic too.
+            if updated == notes:
+                self._status = "ノートの一括編集で変更はありませんでした"
+                return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
+
+            self._push_undo()
+            for i, edited in zip(valid, updated):
+                self.notes[i] = edited
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(valid)}個のノートを一括編集しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
