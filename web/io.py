@@ -294,6 +294,15 @@ class IOMixin:
             # or the document. A malformed later note must not leave a partial
             # import or erase Redo.
             prepared = [note.normalized() for note in imported]
+            # Reject malformed MIDI notes before touching Undo/Redo or the document.
+            # Sorting NaN timestamps does not raise, so explicit checks are needed.
+            for note in prepared:
+                for value in (
+                    note.start, note.end, note.midi, note.midi_end,
+                    note.ctrl1_midi, note.ctrl2_midi, note.target_angle,
+                ):
+                    if value is not None and not math.isfinite(float(value)):
+                        raise ValueError("MIDI import contains a non-finite note value")
             merged_notes = sorted(
                 [*self.notes, *prepared],
                 key=lambda n: (n.start, n.midi, n.end),
