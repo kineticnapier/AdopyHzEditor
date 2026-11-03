@@ -334,11 +334,13 @@ class NoteMixin:
                 offset = max(0.0, self.duration - last)
             if offset <= 1e-9:
                 return {"notes": self._note_dicts(), "indices": [], "status": "右側に複製する空きがありません"}
+            # Prepare every copy before recording Undo or modifying notes.
+            # A failed conversion must not leave a partial duplicate.
+            copies = [n.with_time_offset(offset).normalized() for n in source]
             self._push_undo()
-            new_indices: list[int] = []
-            for n in source:
-                self.notes.append(n.with_time_offset(offset).normalized())
-                new_indices.append(len(self.notes) - 1)
+            first_index = len(self.notes)
+            self.notes.extend(copies)
+            new_indices = list(range(first_index, first_index + len(copies)))
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(new_indices)}個のノートを複製しました"
@@ -491,12 +493,13 @@ class NoteMixin:
                         )
                         base = self._snap_time(max(0.0, base - step))
                     base = _clamp(base, 0.0, max_base)
+            # Do not consume Redo or append only some notes if a clipboard
+            # item cannot be converted. Build the full paste first.
+            pasted_notes = [item.with_time_offset(base).normalized() for item in self._clipboard]
             self._push_undo()
-            new_indices: list[int] = []
-            for item in self._clipboard:
-                pasted = item.with_time_offset(base).normalized()
-                self.notes.append(pasted)
-                new_indices.append(len(self.notes) - 1)
+            first_index = len(self.notes)
+            self.notes.extend(pasted_notes)
+            new_indices = list(range(first_index, first_index + len(pasted_notes)))
             self.duration = max(self.duration, base + clipboard_end)
             self._dirty = True
             self._sync_notes_to_player()
