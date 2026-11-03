@@ -293,7 +293,10 @@ class NoteMixin:
             start = float(changes.get("start", n.start))
             end = float(changes.get("end", n.end))
             if "duration" in changes:
-                end = start + max(0.001, float(changes["duration"]))
+                duration = float(changes["duration"])
+                if not math.isfinite(duration):
+                    raise ValueError("numeric value must be finite")
+                end = start + max(0.001, duration)
             start = _clamp(start, 0.0, self.duration)
             end = _clamp(end, 0.0, self.duration)
             if end < start + 0.001:
@@ -305,7 +308,7 @@ class NoteMixin:
                 target = self._clamp_pitch(float(changes["midi"]))
                 updated = updated.with_pitch_offset(target - updated.midi)
             if "velocity" in changes:
-                v = max(0, min(127, int(round(float(changes["velocity"])))))
+                v = int(round(_clamp(changes["velocity"], 0.0, 127.0)))
                 u = updated.normalized()
                 updated = Note(u.start, u.end, u.midi, v, u.kind, u.midi_end, u.ctrl1_midi, u.ctrl2_midi, u.interpolation, u.target_angle).normalized()
             if updated == n:
