@@ -74,5 +74,64 @@ class EditingBoundsRound2Tests(unittest.TestCase):
         self.assertAlmostEqual(bridge.notes[1].start, 4.0)
 
 
+    def test_resize_at_time_bounds_does_not_pollute_undo_or_redo(self):
+        for note, edge, delta in (
+            (Note(0.0, 1.0, 60.0), "start", -2.0),
+            (Note(9.0, 10.0, 60.0), "end", 2.0),
+        ):
+            with self.subTest(edge=edge):
+                bridge = Bridge()
+                bridge.duration = 10.0
+                bridge.notes = [note.normalized()]
+                original = list(bridge.notes)
+                bridge._redo_stack.append(bridge._snapshot())
+                result = bridge.resize_notes([0], edge, delta)
+                self.assertIs(result["changed"], False)
+                self.assertEqual(bridge.notes, original)
+                self.assertFalse(bridge._dirty)
+                self.assertEqual(len(bridge._undo_stack), 0)
+                self.assertEqual(len(bridge._redo_stack), 1)
+
+    def test_resize_snapped_to_same_time_is_noop(self):
+        bridge = Bridge()
+        bridge.duration = 10.0
+        bridge.notes = [Note(1.0, 2.0, 60.0).normalized()]
+        bridge.settings.update(snapEnabled=True, bpm=120.0, snapDiv=1, offsetMs=0.0)
+        result = bridge.resize_notes([0], "start", 0.1)
+        self.assertIs(result["changed"], False)
+        self.assertEqual(bridge.notes[0].start, 1.0)
+        self.assertEqual(len(bridge._undo_stack), 0)
+        self.assertFalse(bridge._dirty)
+
+    def test_resize_real_change_keeps_single_undo_and_restores_saved_state(self):
+        bridge = Bridge()
+        bridge.duration = 10.0
+        bridge.notes = [Note(1.0, 2.0, 60.0).normalized()]
+        bridge._saved_checkpoint = bridge._document_checkpoint()
+        bridge._redo_stack.append(bridge._snapshot())
+        result = bridge.resize_notes([0], "start", 0.25)
+        self.assertIs(result["changed"], True)
+        self.assertAlmostEqual(bridge.notes[0].start, 1.25)
+        self.assertTrue(bridge._dirty)
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        bridge.undo()
+        self.assertAlmostEqual(bridge.notes[0].start, 1.0)
+        self.assertFalse(bridge._dirty)
+
+    def test_resize_mixed_selection_commits_only_when_one_note_moves(self):
+        bridge = Bridge()
+        bridge.duration = 10.0
+        bridge.notes = [
+            Note(0.0, 1.0, 60.0).normalized(),
+            Note(2.0, 3.0, 64.0).normalized(),
+        ]
+        result = bridge.resize_notes([0, 1], "start", -0.5)
+        self.assertIs(result["changed"], True)
+        self.assertEqual(bridge.notes[0].start, 0.0)
+        self.assertEqual(bridge.notes[1].start, 1.5)
+        self.assertEqual(len(bridge._undo_stack), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
