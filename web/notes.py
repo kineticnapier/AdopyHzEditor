@@ -300,12 +300,15 @@ class NoteMixin:
                 v = max(0, min(127, int(round(float(changes["velocity"])))))
                 u = updated.normalized()
                 updated = Note(u.start, u.end, u.midi, v, u.kind, u.midi_end, u.ctrl1_midi, u.ctrl2_midi, u.interpolation, u.target_angle).normalized()
+            if updated == n:
+                self._status = "ノートのプロパティは変更されませんでした"
+                return {"notes": self._note_dicts(), "index": i, "changed": False, "dirty": self._dirty, "status": self._status}
             self._push_undo()
             self.notes[i] = updated
             self._dirty = True
             self._sync_notes_to_player()
             self._status = "ノートのプロパティを更新しました"
-            return {"notes": self._note_dicts(), "index": i, "status": self._status}
+            return {"notes": self._note_dicts(), "index": i, "changed": True, "dirty": self._dirty, "status": self._status}
 
     def duplicate_notes(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
@@ -373,39 +376,51 @@ class NoteMixin:
             valid = sorted({int(i) for i in indices if 0 <= int(i) < len(self.notes) and self.notes[int(i)].is_curve})
             if not valid:
                 return {"notes": self._note_dicts(), "status": "カーブノートが選択されていません"}
-            self._push_undo()
             mode = self._normalize_setting("curveInterpolation", interpolation) if interpolation is not None else str(self.settings["curveInterpolation"])
-            for i in valid:
-                self.notes[i] = self.notes[i].with_interpolation(mode)
+            updated = [(i, self.notes[i].with_interpolation(mode)) for i in valid]
+            if all(self.notes[i] == note for i, note in updated):
+                self._status = "カーブの補間は変更されませんでした"
+                return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
+            self._push_undo()
+            for i, note in updated:
+                self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(valid)}個のカーブに補間を適用しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def apply_target_angle(self, indices: list[int], target_angle: float | None = None) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
                 return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
-            self._push_undo()
             angle = float(self._normalize_setting("targetAngle", target_angle)) if target_angle is not None else float(self.settings["targetAngle"])
-            for i in valid:
-                self.notes[i] = self.notes[i].with_target_angle(angle)
+            updated = [(i, self.notes[i].with_target_angle(angle)) for i in valid]
+            if all(self.notes[i] == note for i, note in updated):
+                self._status = "ノートの角度指定は変更されませんでした"
+                return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
+            self._push_undo()
+            for i, note in updated:
+                self.notes[i] = note
             self._dirty = True
             self._status = f"{len(valid)}個のノートに{angle:.6f}°を適用しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def clear_target_angle(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
                 return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+            updated = [(i, self.notes[i].with_target_angle(None)) for i in valid]
+            if all(self.notes[i] == note for i, note in updated):
+                self._status = "ノートの角度指定は既に解除されています"
+                return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
             self._push_undo()
-            for i in valid:
-                self.notes[i] = self.notes[i].with_target_angle(None)
+            for i, note in updated:
+                self.notes[i] = note
             self._dirty = True
             self._status = f"{len(valid)}個のノートから角度指定を解除しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def undo(self) -> dict[str, Any]:
         with self._lock:
