@@ -167,22 +167,6 @@ class IOMixin:
                 if value is not None and not math.isfinite(float(value)):
                     raise ValueError("project note contains a non-finite numeric value")
         prepared_settings=self._normalized_project_settings(settings)
-        prepared_audio=None
-        source_request=self._reserve_source_request()
-        if audio_path and Path(audio_path).exists():
-            with self._lock:self._busy=True
-            try:
-                # Respect the project's requested analysis source while keeping
-                # project replacement transactional. Supported Direct sources
-                # are restored as explicit-analysis pending rather than silently
-                # building CQT; unsupported sources alone fall back to CQT.
-                prepared_audio=self._prepare_requested_audio_path(
-                    audio_path,
-                    settings=prepared_settings,
-                )
-            finally:
-                with self._lock:self._busy=False
-
         # Validate audio-less workspace metadata before replacing the current
         # document or clearing its Undo/Redo history. Corrupt numeric fields in
         # an imported project must not leave the previous project half-loaded.
@@ -209,6 +193,22 @@ class IOMixin:
                     if workspace_midi_max <= workspace_midi_min:
                         workspace_midi_min = max(0, workspace_midi_max - 1)
             workspace_bounds = (workspace_duration, workspace_midi_min, workspace_midi_max)
+
+        source_request=self._reserve_source_request()
+        if audio_path and Path(audio_path).exists():
+            with self._lock:self._busy=True
+            try:
+                # Respect the project's requested analysis source while keeping
+                # project replacement transactional. Supported Direct sources
+                # are restored as explicit-analysis pending rather than silently
+                # building CQT; unsupported sources alone fall back to CQT.
+                prepared_audio=self._prepare_requested_audio_path(
+                    audio_path,
+                    settings=prepared_settings,
+                )
+            finally:
+                with self._lock:self._busy=False
+
 
         with self._lock:
             if source_request != self._source_generation:
