@@ -243,23 +243,35 @@ class NoteMixin:
                 raise ValueError("edge must be start or end")
             minimum = 0.001
             original = [self.notes[i].normalized() for i in valid]
-            self._push_undo()
-            for i, n in zip(valid, original):
+            updated: list[Note] = []
+            for n in original:
                 if edge_key == "start":
                     new_start = self._snap_time(n.start + float(delta_seconds))
                     new_start = min(new_start, n.end - minimum)
                     new_start = max(0.0, new_start)
-                    self.notes[i] = self._with_times(n, new_start, n.end)
+                    updated.append(self._with_times(n, new_start, n.end))
                 else:
                     new_end = self._snap_time(n.end + float(delta_seconds))
                     new_end = max(new_end, n.start + minimum)
                     new_end = min(float(self.duration), new_end)
-                    self.notes[i] = self._with_times(n, n.start, new_end)
+                    updated.append(self._with_times(n, n.start, new_end))
+            # A resize clamped at an edge (or snapped back to its original
+            # position) must not create an empty Undo step or clear Redo.
+            if updated == original:
+                self._status = "ノートの長さは変更されませんでした"
+                return {
+                    "notes": self._note_dicts(),
+                    "changed": False,
+                    "status": self._status,
+                }
+            self._push_undo()
+            for i, note in zip(valid, updated):
+                self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
             side = "左端" if edge_key == "start" else "右端"
             self._status = f"{len(valid)}個のノートの{side}を変更しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def set_note_properties(self, index: int, changes: dict[str, Any]) -> dict[str, Any]:
         """Set exact properties for one selected note from the inspector."""
