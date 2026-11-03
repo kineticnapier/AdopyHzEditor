@@ -167,6 +167,7 @@ class IOMixin:
                 if value is not None and not math.isfinite(float(value)):
                     raise ValueError("project note contains a non-finite numeric value")
         prepared_settings=self._normalized_project_settings(settings)
+        prepared_audio=None
         # Validate audio-less workspace metadata before replacing the current
         # document or clearing its Undo/Redo history. Corrupt numeric fields in
         # an imported project must not leave the previous project half-loaded.
