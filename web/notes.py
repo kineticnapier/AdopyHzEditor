@@ -459,25 +459,34 @@ class NoteMixin:
         with self._lock:
             if not self._clipboard:
                 return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "クリップボードは空です"}
-            self._push_undo()
             clipboard_end = max(item.normalized().end for item in self._clipboard)
-            max_base = max(0.0, self.duration - clipboard_end)
-            base = _clamp(at_time, 0.0, max_base)
-            if self.settings["snapEnabled"]:
-                base = self._snap_time(base)
-                if base > max_base + 1e-12:
-                    step = (
-                        60.0
-                        / max(1e-6, float(self.settings["bpm"]))
-                        / max(1, int(self.settings["snapDiv"]))
-                    )
-                    base = self._snap_time(max(0.0, base - step))
-                base = _clamp(base, 0.0, max_base)
+            if clipboard_end > self.duration:
+                # A clipboard from a longer document cannot fit in this one.
+                # Preserve the requested insertion position and grow the chart
+                # instead of silently pasting beyond its scrollable duration.
+                base = _clamp(at_time, 0.0, self.duration)
+                if self.settings["snapEnabled"]:
+                    base = self._snap_time(base)
+            else:
+                max_base = max(0.0, self.duration - clipboard_end)
+                base = _clamp(at_time, 0.0, max_base)
+                if self.settings["snapEnabled"]:
+                    base = self._snap_time(base)
+                    if base > max_base + 1e-12:
+                        step = (
+                            60.0
+                            / max(1e-6, float(self.settings["bpm"]))
+                            / max(1, int(self.settings["snapDiv"]))
+                        )
+                        base = self._snap_time(max(0.0, base - step))
+                    base = _clamp(base, 0.0, max_base)
+            self._push_undo()
             new_indices: list[int] = []
             for item in self._clipboard:
                 pasted = item.with_time_offset(base).normalized()
                 self.notes.append(pasted)
                 new_indices.append(len(self.notes) - 1)
+            self.duration = max(self.duration, base + clipboard_end)
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(new_indices)}個のノートを貼り付けました"
