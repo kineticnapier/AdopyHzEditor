@@ -77,6 +77,31 @@ class NonFiniteNoteInputTests(unittest.TestCase):
                     self.assert_unchanged(bridge, original)
                     sync.assert_not_called()
 
+    def test_curve_end_pitch_rejects_nonfinite_without_history(self):
+        for value in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=value):
+                bridge = self.make_bridge()
+                original = list(bridge.notes)
+                with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                    with self.assertRaisesRegex(ValueError, "finite"):
+                        bridge.add_note(2.0, 3.0, 60.0, kind="curve", end_midi=value)
+                self.assert_unchanged(bridge, original)
+                sync.assert_not_called()
+
+    def test_valid_curve_add_keeps_one_undo_step(self):
+        bridge = self.make_bridge()
+        with mock.patch.object(bridge, "_sync_notes_to_player"):
+            result = bridge.add_note(2.0, 3.0, 60.0, kind="curve", end_midi=72.0)
+        self.assertEqual(result["index"], 1)
+        self.assertTrue(bridge.notes[-1].is_curve)
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        self.assertTrue(bridge._dirty)
+        with mock.patch.object(bridge, "_sync_notes_to_player"):
+            bridge.undo()
+        self.assertEqual(len(bridge.notes), 1)
+        self.assertFalse(bridge._dirty)
+
     def test_finite_bounds_still_clamp(self):
         self.assertEqual(_clamp(-5.0, 0.0, 10.0), 0.0)
         self.assertEqual(_clamp(5.5, 0.0, 10.0), 5.5)
