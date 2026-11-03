@@ -159,7 +159,6 @@ class NoteMixin:
                 if b - a < 0.001:
                     a = max(0.0, b - max(0.001, min(0.02, self.duration)))
             p0 = self._snap_pitch(midi)
-            self._push_undo()
             if str(kind) == "curve":
                 p3 = self._snap_pitch(p0 if end_midi is None else end_midi)
                 c1, c2 = self._curve_controls(p0, p3)
@@ -176,6 +175,9 @@ class NoteMixin:
                 ).normalized()
             else:
                 note = Note(a, b, p0).normalized()
+            # Validate the entire note before changing Undo/Redo history.
+            # In particular, a curve end_midi may be NaN or Infinity.
+            self._push_undo()
             self.notes.append(note)
             self._dirty = True
             self._sync_notes_to_player()
