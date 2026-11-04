@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { decodeBase64Bytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "../src/editor/base64Payload.ts";
+import { decodeBase64Bytes, decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "../src/editor/base64Payload.ts";
 
 test("valid binary payloads preserve every byte", () => {
   assert.deepEqual(Array.from(decodeBase64Bytes("AAECA/8=") ?? []), [0, 1, 2, 3, 255]);
@@ -27,7 +27,7 @@ test("all three canvas spectrum decoders use safe base64 conversion", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   assert.match(source, /decodeSizedBase64Bytes\(payload\.data, payload\.rows \* payload\.cols\)/);
   assert.match(source, /function decodeFrequencyTracks[\s\S]*?decodePackedFrequencyTrackBytes\(payload\.data, payload\.pointCount\)/);
-  assert.match(source, /const directSpectrumCanvas[\s\S]*?decodeBase64Bytes\(payload\.data\)/);
+  assert.match(source, /const directSpectrumCanvas[\s\S]*?decodePackedDirectSpectrumBytes\(payload\.data, payload\.recordCount, payload\.timeBuckets, payload\.pitchBuckets\)/);
   assert.doesNotMatch(source, /\batob\(/);
 });
 
@@ -47,7 +47,7 @@ test("canvas rejects invalid Direct Spectrum dimensions before allocation", () =
   assert.match(section, /typeof payload\.timeBuckets !== "number"/);
   assert.match(section, /typeof payload\.pitchBuckets !== "number"/);
   assert.ok(section.indexOf("isValidDirectSpectrumSize(") < section.indexOf('document.createElement("canvas")'));
-  assert.ok(section.indexOf("decodeBase64Bytes(payload.data)") < section.indexOf('document.createElement("canvas")'));
+  assert.ok(section.indexOf("decodePackedDirectSpectrumBytes(payload.data, payload.recordCount, payload.timeBuckets, payload.pitchBuckets)") < section.indexOf('document.createElement("canvas")'));
 });
 
 test("frequency track decoder validates record count before allocating typed arrays", () => {
@@ -80,4 +80,27 @@ test("frequency-track count validation rejects invalid and oversized metadata", 
   assert.ok(section.indexOf("decodePackedFrequencyTrackBytes(payload.data, payload.pointCount)") <
     section.indexOf("new Uint32Array(count)"));
   assert.doesNotMatch(section, /Math\.min\(payload\.pointCount,\s*Math\.floor\(bytes\.byteLength/);
+});
+
+test("Direct Spectrum packed cells must match the declared record count and viewport", () => {
+  const one = Buffer.from([0, 0, 0, 0, 255]).toString("base64");
+  const two = Buffer.from([0, 0, 0, 0, 255, 1, 0, 0, 0, 128]).toString("base64");
+  assert.deepEqual(Array.from(decodePackedDirectSpectrumBytes(one, 1, 1, 1) ?? []), [0, 0, 0, 0, 255]);
+  assert.deepEqual(Array.from(decodePackedDirectSpectrumBytes(two, 2, 2, 1) ?? []), [0, 0, 0, 0, 255, 1, 0, 0, 0, 128]);
+  assert.equal(decodePackedDirectSpectrumBytes(one, 2, 2, 1), null);
+  assert.equal(decodePackedDirectSpectrumBytes(two, 1, 2, 1), null);
+  assert.equal(decodePackedDirectSpectrumBytes(one.slice(0, -2), 1, 1, 1), null);
+  assert.equal(decodePackedDirectSpectrumBytes("%%%", 1, 1, 1), null);
+  for (const count of [0, -1, 1.5, NaN, Infinity, 2, Number.MAX_SAFE_INTEGER])
+    assert.equal(decodePackedDirectSpectrumBytes(one, count, 1, 1), null, String(count));
+  assert.equal(decodePackedDirectSpectrumBytes(one, 1, 0, 1), null);
+  assert.equal(decodePackedDirectSpectrumBytes(one, 1, 4096, 2048), null);
+});
+
+test("Direct Spectrum validates count and bytes before allocating its canvas", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const section = source.slice(source.indexOf("const directSpectrumCanvas = useMemo"));
+  assert.match(section, /typeof payload\.recordCount !== "number"/);
+  assert.match(section, /decodePackedDirectSpectrumBytes\(payload\.data, payload\.recordCount, payload\.timeBuckets, payload\.pitchBuckets\)/);
+  assert.ok(section.indexOf("decodePackedDirectSpectrumBytes(") < section.indexOf('document.createElement("canvas")'));
 });
