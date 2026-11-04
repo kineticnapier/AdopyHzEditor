@@ -214,6 +214,6 @@ test("only unmodified Escape dismisses a dialog", () => {
 
 test("dialog Escape listener uses the modifier-aware check", () => {
   const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
-  assert.match(hook, /if \\(isPlainDialogEscape\\(event\\)\\)/);
-  assert.doesNotMatch(hook, /if \\(event\\.key === "Escape"\\)/);
+  assert.ok(hook.includes("if (isPlainDialogEscape(event))"));
+  assert.ok(!hook.includes('if (event.key === "Escape")'));
 });
