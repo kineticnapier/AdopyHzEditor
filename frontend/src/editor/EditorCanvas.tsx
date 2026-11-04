@@ -4,7 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSp
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
-import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "./base64Payload";
+import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
@@ -76,7 +76,7 @@ function colorFor(v: number, map: string): [number, number, number] {
 }
 function decodeSpectrum(payload: SpectrogramPayload | null) {
   if (!payload?.available || !payload.data || !payload.rows || !payload.cols) return null;
-  if (!Number.isSafeInteger(payload.rows) || !Number.isSafeInteger(payload.cols)) return null;
+  if (!isValidSpectrogramSize(payload.rows, payload.cols)) return null;
   const bytes = decodeSizedBase64Bytes(payload.data, payload.rows * payload.cols);
   if (!bytes) return null;
   return { ...payload, rows: payload.rows, cols: payload.cols, bytes };
