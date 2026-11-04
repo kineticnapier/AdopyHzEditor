@@ -85,7 +85,7 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (ctrl && !event.altKey && key === " ") return handled(a.stop);
   if (plain && key === " ") return handled(a.play);
   if (plain && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
-  if (plain && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
+  if (plain && !event.shiftKey && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
   // Tab and Shift+Tab intentionally retain native focus navigation.
   if (plain && key === "home") return handled(() => a.seekTo(0));
   if (plain && key === "1") return handled(() => a.mode("spec"));
