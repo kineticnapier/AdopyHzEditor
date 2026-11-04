@@ -78,14 +78,16 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (ctrl && key === "x") return handled(a.cut);
   if (ctrl && key === "v") return handled(a.paste);
   if (ctrl && key === "d") return handled(a.duplicate);
-  if (plain && key === "q") return handled(a.quantize);
+  // Shift+Q is not an assigned quantize shortcut; avoid accidental note edits.
+  if (plain && !event.shiftKey && key === "q") return handled(a.quantize);
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowleft") return handled(() => a.move(a.selected, -a.nudgeSeconds, 0));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowright") return handled(() => a.move(a.selected, a.nudgeSeconds, 0));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowup") return handled(() => a.move(a.selected, 0, 1));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowdown") return handled(() => a.move(a.selected, 0, -1));
   if (ctrl && !event.altKey && key === " ") return handled(a.stop);
   if (plain && key === " ") return handled(a.play);
-  if (plain && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
+  // Shift+Delete/Backspace are native modified chords, not editor deletion.
+  if (plain && !event.shiftKey && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
   if (plain && !event.shiftKey && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
   // Tab and Shift+Tab intentionally retain native focus navigation.
   if (plain && key === "home") return handled(() => a.seekTo(0));
