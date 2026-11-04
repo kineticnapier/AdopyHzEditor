@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { commitNumericEdit } from "../src/settings/numericInputModel.ts";
+import { isPlainDialogEscape } from "../src/dialogs/dialogFocus.ts";
 import { clampTimeViewChange, timelineSliderBounds, timelineSliderStart, timelineWindowInputMax } from "../src/editor/timelineNavigation.ts";
 import { clampPitchViewChange, hasEffectiveViewChange, pitchBottomToRevealNote } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
@@ -25,7 +26,19 @@ test("Timeline connects Escape cancellation to the synchronous blur path", () =>
   assert.match(source, /commitNumericEdit\(text, value, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
   assert.match(source, /cancelledRef\.current = false;/);
   assert.match(source, /onBlur=\{commit\}/);
-  assert.match(source, /event\.key === "Escape"[\s\S]*?cancelledRef\.current = true;[\s\S]*?event\.currentTarget\.blur\(\)/);
+  assert.match(source, /isPlainDialogEscape\(event\)[\s\S]*?cancelledRef\.current = true;[\s\S]*?event\.currentTarget\.blur\(\)/);
+});
+
+test("Timeline numeric fields ignore modified Escape while preserving plain Escape cancellation", () => {
+  const escape = { key: "Escape", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(isPlainDialogEscape(escape), true);
+  for (const modifier of ["ctrlKey", "metaKey", "altKey", "shiftKey"] as const) {
+    assert.equal(isPlainDialogEscape({ ...escape, [modifier]: true }), false, modifier);
+  }
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
+  assert.match(source, /import \{ isDialogCompositionKey, isPlainDialogEscape \} from "\.\.\/dialogs\/dialogFocus"/);
+  assert.match(source, /if \(isDialogCompositionKey\(event\.nativeEvent\)\) return;[\s\S]*?else if \(isPlainDialogEscape\(event\)\)/);
+  assert.doesNotMatch(source, /else if \(event\.key === "Escape"\)/);
 });
 
 test("Timeline slider cannot change the view when the entire chart fits", () => {
