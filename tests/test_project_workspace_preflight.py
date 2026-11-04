@@ -79,7 +79,9 @@ class ProjectWorkspacePreflightTests(unittest.TestCase):
         ):
             bridge.load_project_dialog()
         reserve.assert_called_once_with()
-        self.assertEqual(bridge._source_generation, generation_before + 1)
+        # The successful load reserves one request, then detaching the previous
+        # audio source invalidates its analysis generation once more.
+        self.assertEqual(bridge._source_generation, generation_before + 2)
 
     def test_non_finite_note_does_not_reserve_source_request(self):
         bridge = self.make_bridge()
