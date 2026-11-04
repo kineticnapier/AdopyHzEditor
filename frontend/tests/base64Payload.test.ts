@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { decodeBase64Bytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "../src/editor/base64Payload.ts";
+import { decodeBase64Bytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "../src/editor/base64Payload.ts";
 
 test("valid binary payloads preserve every byte", () => {
   assert.deepEqual(Array.from(decodeBase64Bytes("AAECA/8=") ?? []), [0, 1, 2, 3, 255]);
@@ -26,7 +26,7 @@ test("spectrum buffers must match their declared pixel count", () => {
 test("all three canvas spectrum decoders use safe base64 conversion", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   assert.match(source, /decodeSizedBase64Bytes\(payload\.data, payload\.rows \* payload\.cols\)/);
-  assert.match(source, /function decodeFrequencyTracks[\s\S]*?decodeBase64Bytes\(payload\.data\)/);
+  assert.match(source, /function decodeFrequencyTracks[\s\S]*?decodePackedFrequencyTrackBytes\(payload\.data, payload\.pointCount\)/);
   assert.match(source, /const directSpectrumCanvas[\s\S]*?decodeBase64Bytes\(payload\.data\)/);
   assert.doesNotMatch(source, /\batob\(/);
 });
@@ -57,4 +57,27 @@ test("frequency track decoder validates record count before allocating typed arr
   assert.match(section, /typeof payload\.pointCount !== "number"/);
   assert.match(section, /payload\.pointCount <= 0/);
   assert.ok(section.indexOf("Number.isSafeInteger(payload.pointCount)") < section.indexOf("new Uint32Array(count)"));
+});
+
+test("frequency-track binary length must match the declared point count", () => {
+  const one = Buffer.from(Array.from({ length: 18 }, (_, index) => index)).toString("base64");
+  const two = Buffer.from(Array.from({ length: 36 }, (_, index) => index)).toString("base64");
+  assert.deepEqual(Array.from(decodePackedFrequencyTrackBytes(one, 1) ?? []), Array.from({ length: 18 }, (_, index) => index));
+  assert.deepEqual(Array.from(decodePackedFrequencyTrackBytes(two, 2) ?? []), Array.from({ length: 36 }, (_, index) => index));
+  // Previously a short payload silently rendered only the available points.
+  assert.equal(decodePackedFrequencyTrackBytes(one, 2), null);
+  assert.equal(decodePackedFrequencyTrackBytes(two, 1), null);
+  assert.equal(decodePackedFrequencyTrackBytes(one.slice(0, -1), 1), null);
+});
+
+test("frequency-track count validation rejects invalid and oversized metadata", () => {
+  const one = Buffer.alloc(18).toString("base64");
+  for (const count of [0, -1, 1.5, NaN, Infinity, 30_001, Number.MAX_SAFE_INTEGER]) {
+    assert.equal(decodePackedFrequencyTrackBytes(one, count), null, String(count));
+  }
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const section = source.slice(source.indexOf("function decodeFrequencyTracks"), source.indexOf("function snapTime"));
+  assert.ok(section.indexOf("decodePackedFrequencyTrackBytes(payload.data, payload.pointCount)") <
+    section.indexOf("new Uint32Array(count)"));
+  assert.doesNotMatch(section, /Math\.min\(payload\.pointCount,\s*Math\.floor\(bytes\.byteLength/);
 });
