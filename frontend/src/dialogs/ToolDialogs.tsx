@@ -7,7 +7,7 @@ import type {
   ToolBackendApi,
 } from "./toolsBridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
-import { isDialogCompositionKey } from "./dialogFocus";
+import { isDialogCompositionKey, isPlainDialogEscape } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
@@ -134,7 +134,7 @@ function Num({
           // IME owns Enter/Escape while a composition is active.
           if (isDialogCompositionKey(event.nativeEvent)) return;
           if (event.key === "Enter") event.currentTarget.blur();
-          else if (event.key === "Escape") {
+          else if (isPlainDialogEscape(event)) {
             event.preventDefault();
             // Cancel this edit without closing the surrounding modal.
             event.stopPropagation();
