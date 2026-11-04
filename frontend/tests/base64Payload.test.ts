@@ -44,6 +44,8 @@ test("canvas rejects invalid Direct Spectrum dimensions before allocation", () =
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const section = source.slice(source.indexOf("const directSpectrumCanvas = useMemo"));
   assert.match(section, /isValidDirectSpectrumSize\(payload\.timeBuckets, payload\.pitchBuckets\)/);
+  assert.match(section, /typeof payload\.timeBuckets !== "number"/);
+  assert.match(section, /typeof payload\.pitchBuckets !== "number"/);
   assert.ok(section.indexOf("isValidDirectSpectrumSize(") < section.indexOf('document.createElement("canvas")'));
   assert.ok(section.indexOf("decodeBase64Bytes(payload.data)") < section.indexOf('document.createElement("canvas")'));
 });
@@ -52,6 +54,7 @@ test("frequency track decoder validates record count before allocating typed arr
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const section = source.slice(source.indexOf("function decodeFrequencyTracks"), source.indexOf("function snapTime"));
   assert.match(section, /Number\.isSafeInteger\(payload\.pointCount\)/);
+  assert.match(section, /typeof payload\.pointCount !== "number"/);
   assert.match(section, /payload\.pointCount <= 0/);
   assert.ok(section.indexOf("Number.isSafeInteger(payload.pointCount)") < section.indexOf("new Uint32Array(count)"));
 });
