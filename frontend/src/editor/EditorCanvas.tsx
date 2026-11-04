@@ -4,7 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSp
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
-import { decodeBase64Bytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "./base64Payload";
+import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
@@ -161,8 +161,8 @@ export default function EditorCanvas(props: Props) {
   }, [decoded, props.settings.colormap]);
   const directSpectrumCanvas = useMemo(() => {
     const payload=props.directSpectrum;
-    if (!payload?.data || typeof payload.timeBuckets !== "number" || typeof payload.pitchBuckets !== "number" || !isValidDirectSpectrumSize(payload.timeBuckets, payload.pitchBuckets)) return null;
-    const bytes=decodeBase64Bytes(payload.data);
+    if (!payload?.data || typeof payload.timeBuckets !== "number" || typeof payload.pitchBuckets !== "number" || typeof payload.recordCount !== "number" || !isValidDirectSpectrumSize(payload.timeBuckets, payload.pitchBuckets)) return null;
+    const bytes=decodePackedDirectSpectrumBytes(payload.data, payload.recordCount, payload.timeBuckets, payload.pitchBuckets);
     if(!bytes)return null;
     const canvas=document.createElement("canvas");canvas.width=payload.timeBuckets;canvas.height=payload.pitchBuckets;
     const maybeCtx=canvas.getContext("2d");if(!maybeCtx)return null;
