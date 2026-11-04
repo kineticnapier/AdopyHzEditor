@@ -4,6 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSp
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
+import { decodeBase64Bytes, decodeSizedBase64Bytes } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
@@ -75,13 +76,16 @@ function colorFor(v: number, map: string): [number, number, number] {
 }
 function decodeSpectrum(payload: SpectrogramPayload | null) {
   if (!payload?.available || !payload.data || !payload.rows || !payload.cols) return null;
-  const raw = atob(payload.data), bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+  if (!Number.isSafeInteger(payload.rows) || !Number.isSafeInteger(payload.cols)) return null;
+  const bytes = decodeSizedBase64Bytes(payload.data, payload.rows * payload.cols);
+  if (!bytes) return null;
   return { ...payload, rows: payload.rows, cols: payload.cols, bytes };
 }
 function decodeFrequencyTracks(payload: FrequencyTrackPayload | null) {
   if(!payload?.available||!payload.data||!payload.pointCount)return null;
-  const raw=atob(payload.data),bytes=Uint8Array.from(raw,c=>c.charCodeAt(0)),stride=18,count=Math.min(payload.pointCount,Math.floor(bytes.byteLength/stride)),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const bytes=decodeBase64Bytes(payload.data);
+  if(!bytes)return null;
+  const stride=18,count=Math.min(payload.pointCount,Math.floor(bytes.byteLength/stride)),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   const ids=new Uint32Array(count),times=new Float32Array(count),midis=new Float32Array(count),magnitudes=new Float32Array(count),durations=new Float32Array(count),flags=new Uint8Array(count);
   for(let i=0;i<count;i+=1){const offset=i*stride;ids[i]=view.getUint32(offset,true);times[i]=view.getFloat32(offset+4,true);midis[i]=view.getFloat32(offset+8,true);magnitudes[i]=view.getUint8(offset+12)/255;durations[i]=view.getFloat32(offset+13,true);flags[i]=view.getUint8(offset+17);}
   return{ids,times,midis,magnitudes,durations,flags,count};
@@ -160,7 +164,8 @@ export default function EditorCanvas(props: Props) {
     if(!payload?.data||!payload.timeBuckets||!payload.pitchBuckets)return null;
     const canvas=document.createElement("canvas");canvas.width=payload.timeBuckets;canvas.height=payload.pitchBuckets;
     const maybeCtx=canvas.getContext("2d");if(!maybeCtx)return null;
-    const bytes=Uint8Array.from(atob(payload.data),c=>c.charCodeAt(0));
+    const bytes=decodeBase64Bytes(payload.data);
+    if(!bytes)return null;
     const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),image=maybeCtx.createImageData(canvas.width,canvas.height);
     for(let offset=0;offset+5<=bytes.byteLength;offset+=5){
       const x=view.getUint16(offset,true),pitch=view.getUint16(offset+2,true),magnitude=view.getUint8(offset+4);
