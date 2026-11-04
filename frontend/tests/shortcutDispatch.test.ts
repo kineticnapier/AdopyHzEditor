@@ -57,6 +57,20 @@ test("unmodified editor keys keep their existing actions", () => {
   ]);
 });
 
+test("Shift+Delete, Shift+Backspace and Shift+Q never mutate notes", () => {
+  const { calls, press } = setup();
+  for (const key of ["Delete", "Backspace", "q"]) {
+    assert.equal(press(key, { shiftKey: true }), false, `Shift+${key}`);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(press("Delete"), true);
+  assert.equal(press("Backspace"), true);
+  assert.equal(press("q"), true);
+  // Shift+arrow navigation is intentionally assigned and must still work.
+  assert.equal(press("ArrowRight", { shiftKey: true }), true);
+  assert.deepEqual(calls, ["delete", "delete", "quantize", "seek:5"]);
+});
+
 test("F1 opens help only without modifiers and does not consume native chords", () => {
   const { calls, press } = setup();
   assert.equal(press("F1"), true);
