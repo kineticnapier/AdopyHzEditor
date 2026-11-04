@@ -83,6 +83,26 @@ test("unassigned Shift+Home and Shift+W/S do not seek or scroll pitch", () => {
   assert.deepEqual(calls, ["seekTo:0", 'view:{"pitchBottom":36}', 'view:{"pitchBottom":12}']);
 });
 
+test("unassigned Shift+Space, vertical arrows and mode keys preserve native behavior", () => {
+  const { calls, press } = setup();
+  for (const key of [" ", "ArrowUp", "ArrowDown", "1", "2", "3"]) {
+    assert.equal(press(key, { shiftKey: true }), false, `Shift+${key}`);
+  }
+  assert.deepEqual(calls, []);
+  for (const key of [" ", "ArrowUp", "ArrowDown", "1", "2", "3"]) {
+    assert.equal(press(key), true, key);
+  }
+  assert.equal(press("ArrowUp", { ctrlKey: true }), true);
+  assert.equal(press("ArrowDown", { ctrlKey: true }), true);
+  assert.equal(press("ArrowRight", { shiftKey: true }), true);
+  assert.equal(press("ArrowLeft", { shiftKey: true }), true);
+  assert.deepEqual(calls, [
+    "play", 'view:{"pitchBottom":25}', 'view:{"pitchBottom":23}',
+    "mode:spec", "mode:notes", "mode:both",
+    'view:{"pitchBottom":36}', 'view:{"pitchBottom":12}', "seek:5", "seek:-5",
+  ]);
+});
+
 test("F1 opens help only without modifiers and does not consume native chords", () => {
   const { calls, press } = setup();
   assert.equal(press("F1"), true);
