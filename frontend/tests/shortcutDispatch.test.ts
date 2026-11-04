@@ -71,6 +71,18 @@ test("Shift+Delete, Shift+Backspace and Shift+Q never mutate notes", () => {
   assert.deepEqual(calls, ["delete", "delete", "quantize", "seek:5"]);
 });
 
+test("unassigned Shift+Home and Shift+W/S do not seek or scroll pitch", () => {
+  const { calls, press } = setup();
+  for (const key of ["Home", "w", "s", "W", "S"]) {
+    assert.equal(press(key, { shiftKey: true }), false, `Shift+${key}`);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(press("Home"), true);
+  assert.equal(press("w"), true);
+  assert.equal(press("s"), true);
+  assert.deepEqual(calls, ["seekTo:0", 'view:{"pitchBottom":36}', 'view:{"pitchBottom":12}']);
+});
+
 test("F1 opens help only without modifiers and does not consume native chords", () => {
   const { calls, press } = setup();
   assert.equal(press("F1"), true);
