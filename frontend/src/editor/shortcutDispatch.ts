@@ -90,7 +90,7 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (plain && !event.shiftKey && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
   if (plain && !event.shiftKey && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
   // Tab and Shift+Tab intentionally retain native focus navigation.
-  if (plain && key === "home") return handled(() => a.seekTo(0));
+  if (plain && !event.shiftKey && key === "home") return handled(() => a.seekTo(0));
   if (plain && key === "1") return handled(() => a.mode("spec"));
   if (plain && key === "2") return handled(() => a.mode("notes"));
   if (plain && key === "3") return handled(() => a.mode("both"));
@@ -102,8 +102,8 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
     // Do not disable playback follow or enqueue set_view when already at the MIDI boundary.
     if (pitchBottom !== a.view.pitchBottom) a.updateView({ pitchBottom });
   };
-  if ((plain && key === "w") || (ctrl && !event.altKey && key === "arrowup")) return handled(() => scrollPitch(12));
-  if ((plain && key === "s") || (ctrl && !event.altKey && key === "arrowdown")) return handled(() => scrollPitch(-12));
+  if ((plain && !event.shiftKey && key === "w") || (ctrl && !event.altKey && key === "arrowup")) return handled(() => scrollPitch(12));
+  if ((plain && !event.shiftKey && key === "s") || (ctrl && !event.altKey && key === "arrowdown")) return handled(() => scrollPitch(-12));
   if (plain && key === "arrowup") return handled(() => scrollPitch(1));
   if (plain && key === "arrowdown") return handled(() => scrollPitch(-1));
 }
