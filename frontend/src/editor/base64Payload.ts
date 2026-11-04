@@ -11,6 +11,9 @@ export function decodeBase64Bytes(data: string): Uint8Array | null {
 /** Reject truncated or oversized image buffers before indexing their pixels. */
 export function decodeSizedBase64Bytes(data: string, expectedLength: number): Uint8Array | null {
   if (!Number.isSafeInteger(expectedLength) || expectedLength <= 0) return null;
+  // Python emits canonical base64. Reject oversized encoded data before atob allocates
+  // a potentially much larger buffer than the declared spectrum/track payload.
+  if (data.length > 4 * Math.ceil(expectedLength / 3)) return null;
   const bytes = decodeBase64Bytes(data);
   return bytes && bytes.byteLength === expectedLength ? bytes : null;
 }
