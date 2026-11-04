@@ -71,6 +71,7 @@ test("canvas Escape wires Track invalidation into the idle path only", () => {
   const end = source.indexOf("  useEffect(()=>{const canvas=", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
+  assert.match(handler, /if \(event\.key === "Escape" && !event\.ctrlKey && !event\.metaKey && !event\.altKey && !event\.shiftKey\) \{/);
   assert.match(handler, /if \(canvasEscapeAction\(drag !== null\) === "cancel-drag"\) \{[\s\S]*?return;\s*\}/);
   assert.match(handler, /clearIdleCanvasSelection\(clearTrackSelection, \(\) => props\.onSelect\(\[\]\)\)/);
   assert.equal(handler.match(/clearIdleCanvasSelection\(/g)?.length, 1);
