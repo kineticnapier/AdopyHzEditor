@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import { dialogFocusableSelector, dialogFocusRestorationTarget, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isTopmostDialog } from "./dialogFocus";
+import { dialogFocusableSelector, dialogFocusRestorationTarget, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isPlainDialogEscape, isTopmostDialog } from "./dialogFocus";
 
 export function useDialogAccessibility(onClose: () => void) {
   const dialogRef = useRef<HTMLElement>(null), titleId = useId(), closeRef = useRef(onClose);
@@ -14,7 +14,7 @@ export function useDialogAccessibility(onClose: () => void) {
     });
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isDialogCompositionKey(event) || !isTopmostDialog(dialog)) return;
-      if (event.key === "Escape") {
+      if (isPlainDialogEscape(event)) {
         event.preventDefault();
         closeRef.current();
         return;
