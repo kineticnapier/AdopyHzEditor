@@ -37,7 +37,8 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   const key = event.key.toLowerCase();
   const ctrl = event.ctrlKey || event.metaKey;
   const plain = !ctrl && !event.altKey;
-  const helpKey = plain && !event.shiftKey && key === "f1";
+  const unmodified = plain && !event.shiftKey;
+  const helpKey = unmodified && key === "f1";
   const handled = (action: () => void) => { event.preventDefault(); action(); };
 
   // AltGr can be reported as Ctrl+Alt, but is text input rather than a shortcut.
@@ -79,21 +80,21 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (ctrl && key === "v") return handled(a.paste);
   if (ctrl && key === "d") return handled(a.duplicate);
   // Shift+Q is not an assigned quantize shortcut; avoid accidental note edits.
-  if (plain && !event.shiftKey && key === "q") return handled(a.quantize);
+  if (unmodified && key === "q") return handled(a.quantize);
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowleft") return handled(() => a.move(a.selected, -a.nudgeSeconds, 0));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowright") return handled(() => a.move(a.selected, a.nudgeSeconds, 0));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowup") return handled(() => a.move(a.selected, 0, 1));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowdown") return handled(() => a.move(a.selected, 0, -1));
   if (ctrl && !event.altKey && key === " ") return handled(a.stop);
-  if (plain && key === " ") return handled(a.play);
+  if (unmodified && key === " ") return handled(a.play);
   // Shift+Delete/Backspace are native modified chords, not editor deletion.
-  if (plain && !event.shiftKey && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
-  if (plain && !event.shiftKey && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
+  if (unmodified && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
+  if (unmodified && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
   // Tab and Shift+Tab intentionally retain native focus navigation.
-  if (plain && !event.shiftKey && key === "home") return handled(() => a.seekTo(0));
-  if (plain && key === "1") return handled(() => a.mode("spec"));
-  if (plain && key === "2") return handled(() => a.mode("notes"));
-  if (plain && key === "3") return handled(() => a.mode("both"));
+  if (unmodified && key === "home") return handled(() => a.seekTo(0));
+  if (unmodified && key === "1") return handled(() => a.mode("spec"));
+  if (unmodified && key === "2") return handled(() => a.mode("notes"));
+  if (unmodified && key === "3") return handled(() => a.mode("both"));
   if (plain && key === "arrowleft") return handled(() => a.seek(event.shiftKey ? -5 : -1));
   if (plain && key === "arrowright") return handled(() => a.seek(event.shiftKey ? 5 : 1));
   // The shortcut must not request a viewport outside MIDI 0..127.
@@ -102,8 +103,8 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
     // Do not disable playback follow or enqueue set_view when already at the MIDI boundary.
     if (pitchBottom !== a.view.pitchBottom) a.updateView({ pitchBottom });
   };
-  if ((plain && !event.shiftKey && key === "w") || (ctrl && !event.altKey && key === "arrowup")) return handled(() => scrollPitch(12));
-  if ((plain && !event.shiftKey && key === "s") || (ctrl && !event.altKey && key === "arrowdown")) return handled(() => scrollPitch(-12));
-  if (plain && key === "arrowup") return handled(() => scrollPitch(1));
-  if (plain && key === "arrowdown") return handled(() => scrollPitch(-1));
+  if ((unmodified && key === "w") || (ctrl && !event.altKey && key === "arrowup")) return handled(() => scrollPitch(12));
+  if ((unmodified && key === "s") || (ctrl && !event.altKey && key === "arrowdown")) return handled(() => scrollPitch(-12));
+  if (unmodified && key === "arrowup") return handled(() => scrollPitch(1));
+  if (unmodified && key === "arrowdown") return handled(() => scrollPitch(-1));
 }
