@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { decodeBase64Bytes, decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "../src/editor/base64Payload.ts";
+import { decodeBase64Bytes, decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "../src/editor/base64Payload.ts";
 
 test("valid binary payloads preserve every byte", () => {
   assert.deepEqual(Array.from(decodeBase64Bytes("AAECA/8=") ?? []), [0, 1, 2, 3, 255]);
@@ -103,4 +103,19 @@ test("Direct Spectrum validates count and bytes before allocating its canvas", (
   assert.match(section, /typeof payload\.recordCount !== "number"/);
   assert.match(section, /decodePackedDirectSpectrumBytes\(payload\.data, payload\.recordCount, payload\.timeBuckets, payload\.pitchBuckets\)/);
   assert.ok(section.indexOf("decodePackedDirectSpectrumBytes(") < section.indexOf('document.createElement("canvas")'));
+});
+
+test("spectrogram dimensions are bounded before canvas allocation", () => {
+  for (const [rows, cols] of [[1, 1], [128, 1600], [2048, 4096], [1, 4096]])
+    assert.equal(isValidSpectrogramSize(rows, cols), true, `${rows}x${cols}`);
+  for (const [rows, cols] of [[0, 10], [-1, 10], [1.5, 10], [NaN, 10],
+    [Infinity, 10], [2049, 1], [1, 4097], [1e9, 1e9], [Number.MAX_SAFE_INTEGER, 1]])
+    assert.equal(isValidSpectrogramSize(rows, cols), false, `${rows}x${cols}`);
+});
+
+test("spectrogram rejects invalid dimensions before decoding base64", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const section = source.slice(source.indexOf("function decodeSpectrum"), source.indexOf("function decodeFrequencyTracks"));
+  assert.match(section, /isValidSpectrogramSize\(payload\.rows, payload\.cols\)/);
+  assert.ok(section.indexOf("isValidSpectrogramSize(") < section.indexOf("decodeSizedBase64Bytes("));
 });
