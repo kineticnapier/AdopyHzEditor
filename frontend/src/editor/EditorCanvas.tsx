@@ -4,7 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSp
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
-import { decodeBase64Bytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "./base64Payload";
+import { decodeBase64Bytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
@@ -83,9 +83,9 @@ function decodeSpectrum(payload: SpectrogramPayload | null) {
 }
 function decodeFrequencyTracks(payload: FrequencyTrackPayload | null) {
   if (!payload?.available || !payload.data || typeof payload.pointCount !== "number" || !Number.isSafeInteger(payload.pointCount) || payload.pointCount <= 0) return null;
-  const bytes=decodeBase64Bytes(payload.data);
+  const bytes=decodePackedFrequencyTrackBytes(payload.data, payload.pointCount);
   if(!bytes)return null;
-  const stride=18,count=Math.min(payload.pointCount,Math.floor(bytes.byteLength/stride)),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const stride=18,count=payload.pointCount,view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   const ids=new Uint32Array(count),times=new Float32Array(count),midis=new Float32Array(count),magnitudes=new Float32Array(count),durations=new Float32Array(count),flags=new Uint8Array(count);
   for(let i=0;i<count;i+=1){const offset=i*stride;ids[i]=view.getUint32(offset,true);times[i]=view.getFloat32(offset+4,true);midis[i]=view.getFloat32(offset+8,true);magnitudes[i]=view.getUint8(offset+12)/255;durations[i]=view.getFloat32(offset+13,true);flags[i]=view.getUint8(offset+17);}
   return{ids,times,midis,magnitudes,durations,flags,count};
