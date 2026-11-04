@@ -4,7 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSp
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
-import { decodeBase64Bytes, decodeSizedBase64Bytes } from "./base64Payload";
+import { decodeBase64Bytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
@@ -82,7 +82,7 @@ function decodeSpectrum(payload: SpectrogramPayload | null) {
   return { ...payload, rows: payload.rows, cols: payload.cols, bytes };
 }
 function decodeFrequencyTracks(payload: FrequencyTrackPayload | null) {
-  if(!payload?.available||!payload.data||!payload.pointCount)return null;
+  if (!payload?.available || !payload.data || !Number.isSafeInteger(payload.pointCount) || payload.pointCount <= 0) return null;
   const bytes=decodeBase64Bytes(payload.data);
   if(!bytes)return null;
   const stride=18,count=Math.min(payload.pointCount,Math.floor(bytes.byteLength/stride)),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -161,11 +161,11 @@ export default function EditorCanvas(props: Props) {
   }, [decoded, props.settings.colormap]);
   const directSpectrumCanvas = useMemo(() => {
     const payload=props.directSpectrum;
-    if(!payload?.data||!payload.timeBuckets||!payload.pitchBuckets)return null;
-    const canvas=document.createElement("canvas");canvas.width=payload.timeBuckets;canvas.height=payload.pitchBuckets;
-    const maybeCtx=canvas.getContext("2d");if(!maybeCtx)return null;
+    if (!payload?.data || !isValidDirectSpectrumSize(payload.timeBuckets, payload.pitchBuckets)) return null;
     const bytes=decodeBase64Bytes(payload.data);
     if(!bytes)return null;
+    const canvas=document.createElement("canvas");canvas.width=payload.timeBuckets;canvas.height=payload.pitchBuckets;
+    const maybeCtx=canvas.getContext("2d");if(!maybeCtx)return null;
     const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),image=maybeCtx.createImageData(canvas.width,canvas.height);
     for(let offset=0;offset+5<=bytes.byteLength;offset+=5){
       const x=view.getUint16(offset,true),pitch=view.getUint16(offset+2,true),magnitude=view.getUint8(offset+4);
