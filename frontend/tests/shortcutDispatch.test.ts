@@ -57,6 +57,20 @@ test("unmodified editor keys keep their existing actions", () => {
   ]);
 });
 
+test("F1 opens help only without modifiers and does not consume native chords", () => {
+  const { calls, press } = setup();
+  assert.equal(press("F1"), true);
+  for (const mods of [
+    { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true },
+    { ctrlKey: true, shiftKey: true }, { altKey: true, shiftKey: true },
+  ]) {
+    assert.equal(press("F1", mods), false);
+    assert.equal(press("F1", { ...mods, repeat: true }), false);
+  }
+  assert.equal(press("F1", { repeat: true }), true);
+  assert.deepEqual(calls, ["help"]);
+});
+
 test("Home seeks to exactly zero and modified Home remains native", () => {
   const { calls, press } = setup();
   assert.equal(press("Home"), true);
