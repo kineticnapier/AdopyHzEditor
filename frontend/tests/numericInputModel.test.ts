@@ -45,9 +45,9 @@ test("settings numeric input ignores IME keys and disabled blur", () => {
   assert.ok(disabled >= 0 && commit > disabled, "disabled blur must not commit an old value");
   const composition = input.indexOf("if (isDialogCompositionKey(e.nativeEvent)) return;");
   const enter = input.indexOf('if (e.key === "Enter")');
-  const escape = input.indexOf('else if (e.key === "Escape")');
+  const escape = input.indexOf("else if (isPlainDialogEscape(e))");
   assert.ok(composition >= 0 && enter > composition && escape > enter,
-    "IME composition must be checked before Enter/Escape handling");
+    "IME composition must be checked before plain Escape handling");
   assert.match(input.slice(escape), /e\.stopPropagation\(\)/,
     "cancelled numeric Escape must not bubble to editor shortcuts");
 });
