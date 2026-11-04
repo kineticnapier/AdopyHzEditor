@@ -160,3 +160,22 @@ test("settings numeric input tracks actual edits separately from focus", () => {
   assert.match(component, /commitNumericEdit\([\s\S]*?step === 1,\s*editedRef\.current,/);
   assert.match(component, /if \(disabled\) \{[\s\S]*?editedRef\.current = false;/);
 });
+
+test("tool-dialog whole-step inputs normalize values before sending them to the API", () => {
+  // The tool dialog uses the same integer conversion as SettingsPanel.
+  // A decimal value in a whole-step field must not reach the backend unchanged.
+  assert.equal(commitNumericEdit("2.5", 1, 0, 127, false, true, true), 2);
+  assert.equal(commitNumericEdit("3.5", 1, 0, 127, false, true, true), 4);
+  assert.equal(commitNumericEdit("-1.5", 0, -64, 64, false, true, true), -2);
+  // Fractional fields, untouched values, and cancelled edits remain unchanged.
+  assert.equal(commitNumericEdit("2.5", 1, 0, 127, false, false, true), 2.5);
+  assert.equal(commitNumericEdit("2.5", 2.5, 0, 127, false, true, false), 2.5);
+  assert.equal(commitNumericEdit("7", 5, 0, 127, true, true, true), 5);
+
+  const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function Num(");
+  const end = source.indexOf("\nfunction LoadFailure(", start);
+  assert.ok(start >= 0 && end > start, "tool-dialog numeric input exists");
+  const input = source.slice(start, end);
+  assert.match(input, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
+});
