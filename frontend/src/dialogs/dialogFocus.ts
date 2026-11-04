@@ -25,6 +25,11 @@ export function isDialogTabbable(item: HTMLElement): boolean {
   return visibility === undefined || visibility === "visible";
 }
 
+/** A modified Escape is not a request to dismiss the dialog. */
+export function isPlainDialogEscape(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">): boolean {
+  return event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+}
+
 /** Escape/Tab belong to the IME while a composition is in progress.
  * Some Windows IMEs emit keyCode 229 even when isComposing is false.
  */
