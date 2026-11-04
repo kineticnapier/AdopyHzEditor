@@ -441,7 +441,7 @@ export default function EditorCanvas(props: Props) {
     if(indices.length)await props.onDelete(indices);
   }
   function onCanvasKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
       event.preventDefault();
       if (canvasEscapeAction(drag !== null) === "cancel-drag") {
         setDrag(null);
