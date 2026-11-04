@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { dialogFocusableSelector, dialogFocusRestorationTarget, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isTopmostDialog } from "../src/dialogs/dialogFocus.ts";
+import { dialogFocusableSelector, dialogFocusRestorationTarget, dialogTabDestination, isDialogCompositionKey, isDialogTabbable, isPlainDialogEscape, isTopmostDialog } from "../src/dialogs/dialogFocus.ts";
 
 const items = [{ focus() {} }, { focus() {} }, { focus() {} }];
 
@@ -199,4 +199,21 @@ test("dialog cleanup does not steal focus from a still-open modal", () => {
 
   const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
   assert.match(hook, /dialogFocusRestorationTarget\(previous, dialog\)\?\.focus\(\)/);
+});
+
+
+test("only unmodified Escape dismisses a dialog", () => {
+  const escape = { key: "Escape", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(isPlainDialogEscape(escape), true);
+  for (const modifier of ["ctrlKey", "metaKey", "altKey", "shiftKey"] as const) {
+    assert.equal(isPlainDialogEscape({ ...escape, [modifier]: true }), false, modifier);
+  }
+  assert.equal(isPlainDialogEscape({ ...escape, key: "Tab" }), false);
+  assert.equal(isPlainDialogEscape({ ...escape, key: "Enter" }), false);
+});
+
+test("dialog Escape listener uses the modifier-aware check", () => {
+  const hook = readFileSync(new URL("../src/dialogs/useDialogAccessibility.ts", import.meta.url), "utf8");
+  assert.match(hook, /if \\(isPlainDialogEscape\\(event\\)\\)/);
+  assert.doesNotMatch(hook, /if \\(event\\.key === "Escape"\\)/);
 });
