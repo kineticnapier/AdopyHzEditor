@@ -34,14 +34,14 @@ for (const file of dialogFiles) {
 test("numeric dialog inputs leave composition keys to the IME", () => {
   for (const file of dialogFiles) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8").replace(/\r\n/g, "\n");
-    assert.match(source, /import \{ isDialogCompositionKey \} from "\.\/dialogFocus";/);
+    assert.match(source, /import \{ isDialogCompositionKey, isPlainDialogEscape \} from "\.\/dialogFocus";/);
     const start = source.indexOf("function Num({");
     const end = source.indexOf("\n}\n", start);
     assert.ok(start >= 0 && end > start, "numeric component exists");
     const component = source.slice(start, end + 2);
     // The local handler runs before the window-level dialog focus handler.
     assert.match(component, /onKeyDown=\{\(event\) => \{[\s\S]*?if \(isDialogCompositionKey\(event\.nativeEvent\)\) return;[\s\S]*?if \(event\.key === "Enter"\)/);
-    assert.match(component, /else if \(event\.key === "Escape"\)/);
+    assert.match(component, /else if \(isPlainDialogEscape\(event\)\)/);
   }
 });
 
@@ -221,4 +221,14 @@ test("both tool and ADOFAI dialogs distinguish focus from actual edits", () => {
     }
     assert.match(component, /editedRef\.current = false;\s*setEditing\(false\);/);
   }
+});
+
+
+test("settings numeric input also ignores modified Escape", () => {
+  const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8");
+  assert.ok(source.includes('import { isDialogCompositionKey, isPlainDialogEscape } from "../dialogs/dialogFocus";'));
+  const start = source.indexOf("function NumberInput(");
+  assert.ok(start >= 0);
+  const component = source.slice(start, source.indexOf("function Select(", start));
+  assert.ok(component.includes("else if (isPlainDialogEscape(e))"));
 });
