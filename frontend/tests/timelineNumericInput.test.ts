@@ -19,7 +19,7 @@ test("timeline numeric field checks IME before Enter/Escape and contains keyboar
   const field = source.slice(start);
   const composition = field.indexOf("if (isDialogCompositionKey(event.nativeEvent)) return;");
   const enter = field.indexOf('if (event.key === "Enter")');
-  const escape = field.indexOf('else if (event.key === "Escape")');
+  const escape = field.indexOf("else if (isPlainDialogEscape(event))");
   assert.ok(composition >= 0 && composition < enter && enter < escape,
     "IME check must run before numeric Enter/Escape handlers");
   assert.match(field.slice(enter, escape), /event\.preventDefault\(\);[\s\S]*event\.stopPropagation\(\);[\s\S]*event\.currentTarget\.blur\(\)/,
