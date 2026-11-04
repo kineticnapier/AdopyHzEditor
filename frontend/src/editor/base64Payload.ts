@@ -29,3 +29,11 @@ export function decodePackedFrequencyTrackBytes(data: string, pointCount: number
   if (!Number.isSafeInteger(pointCount) || pointCount <= 0 || pointCount > 30_000) return null;
   return decodeSizedBase64Bytes(data, pointCount * 18);
 }
+
+/** Reject truncated, oversized or inconsistent packed Direct Spectrum cells.
+ * Each occupied cell has a 2-byte time, 2-byte pitch and 1-byte magnitude. */
+export function decodePackedDirectSpectrumBytes(data: string, recordCount: number, width: number, height: number): Uint8Array | null {
+  if (!isValidDirectSpectrumSize(width, height) ||
+      !Number.isSafeInteger(recordCount) || recordCount <= 0 || recordCount > width * height) return null;
+  return decodeSizedBase64Bytes(data, recordCount * 5);
+}
