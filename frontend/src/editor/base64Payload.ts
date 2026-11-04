@@ -22,3 +22,10 @@ export function isValidDirectSpectrumSize(width: number, height: number): boolea
     Number.isSafeInteger(height) && height > 0 && height <= 2048 &&
     width * height <= 65_000;
 }
+
+/** Reject incomplete or inconsistent packed frequency-track responses.
+ * The backend emits exactly 18 bytes per point, capped at 30,000 points. */
+export function decodePackedFrequencyTrackBytes(data: string, pointCount: number): Uint8Array | null {
+  if (!Number.isSafeInteger(pointCount) || pointCount <= 0 || pointCount > 30_000) return null;
+  return decodeSizedBase64Bytes(data, pointCount * 18);
+}
