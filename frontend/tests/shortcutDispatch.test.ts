@@ -250,6 +250,7 @@ test("modified Escape does not clear either selection", () => {
   assert.equal(press("Escape", { ctrlKey: true }), false);
   assert.equal(press("Escape", { altKey: true }), false);
   assert.equal(press("Escape", { metaKey: true }), false);
+  assert.equal(press("Escape", { shiftKey: true }), false);
   assert.deepEqual(calls, []);
 });
 
