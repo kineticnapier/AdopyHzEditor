@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { commitNumericEdit } from "../settings/numericInputModel";
-import { isDialogCompositionKey } from "../dialogs/dialogFocus";
+import { isDialogCompositionKey, isPlainDialogEscape } from "../dialogs/dialogFocus";
 import { timelineSliderBounds, timelineSliderStart, timelineWindowInputMax } from "./timelineNavigation";
 import type { PlaybackState, ViewState } from "./bridge";
 
@@ -68,7 +68,7 @@ function CommitNumber({id,label,value,min,max,step,onCommit}:{id?:string;label:s
           event.preventDefault();
           event.stopPropagation();
           event.currentTarget.blur();
-        } else if (event.key === "Escape") {
+        } else if (isPlainDialogEscape(event)) {
           event.preventDefault();
           event.stopPropagation();
           cancelledRef.current = true;
