@@ -82,7 +82,7 @@ function decodeSpectrum(payload: SpectrogramPayload | null) {
   return { ...payload, rows: payload.rows, cols: payload.cols, bytes };
 }
 function decodeFrequencyTracks(payload: FrequencyTrackPayload | null) {
-  if (!payload?.available || !payload.data || !Number.isSafeInteger(payload.pointCount) || payload.pointCount <= 0) return null;
+  if (!payload?.available || !payload.data || typeof payload.pointCount !== "number" || !Number.isSafeInteger(payload.pointCount) || payload.pointCount <= 0) return null;
   const bytes=decodeBase64Bytes(payload.data);
   if(!bytes)return null;
   const stride=18,count=Math.min(payload.pointCount,Math.floor(bytes.byteLength/stride)),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -161,7 +161,7 @@ export default function EditorCanvas(props: Props) {
   }, [decoded, props.settings.colormap]);
   const directSpectrumCanvas = useMemo(() => {
     const payload=props.directSpectrum;
-    if (!payload?.data || !isValidDirectSpectrumSize(payload.timeBuckets, payload.pitchBuckets)) return null;
+    if (!payload?.data || typeof payload.timeBuckets !== "number" || typeof payload.pitchBuckets !== "number" || !isValidDirectSpectrumSize(payload.timeBuckets, payload.pitchBuckets)) return null;
     const bytes=decodeBase64Bytes(payload.data);
     if(!bytes)return null;
     const canvas=document.createElement("canvas");canvas.width=payload.timeBuckets;canvas.height=payload.pitchBuckets;
