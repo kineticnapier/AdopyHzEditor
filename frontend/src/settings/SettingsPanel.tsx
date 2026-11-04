@@ -12,7 +12,7 @@ import type {
 } from "../editor/EditorCanvas";
 import { midiLabel, midiToHz } from "../editor/musicMath";
 import { commitNumericEdit } from "./numericInputModel";
-import { isDialogCompositionKey } from "../dialogs/dialogFocus";
+import { isDialogCompositionKey, isPlainDialogEscape } from "../dialogs/dialogFocus";
 import { selectionIdentityKey } from "./selectionIdentity";
 
 type Page = "inspector" | "settings";
@@ -953,7 +953,7 @@ function NumberInput({
           // Enter/Escape are owned by the IME until composition ends.
           if (isDialogCompositionKey(e.nativeEvent)) return;
           if (e.key === "Enter") e.currentTarget.blur();
-          else if (e.key === "Escape") {
+          else if (isPlainDialogEscape(e)) {
             e.preventDefault();
             e.stopPropagation();
             cancelledRef.current = true;
