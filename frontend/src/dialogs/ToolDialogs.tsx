@@ -111,7 +111,7 @@ function Num({
       setText(String(fallback));
       return;
     }
-    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current, false, editedRef.current);
+    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current, step === 1, editedRef.current);
     cancelledRef.current = false;
     editedRef.current = false;
     setEditing(false);
