@@ -14,3 +14,11 @@ export function decodeSizedBase64Bytes(data: string, expectedLength: number): Ui
   const bytes = decodeBase64Bytes(data);
   return bytes && bytes.byteLength === expectedLength ? bytes : null;
 }
+
+/** Backend viewport queries cap Direct Spectrum at 4096x2048 and 65,000 cells.
+ * Validate untrusted dimensions before creating a canvas during React render. */
+export function isValidDirectSpectrumSize(width: number, height: number): boolean {
+  return Number.isSafeInteger(width) && width > 0 && width <= 4096 &&
+    Number.isSafeInteger(height) && height > 0 && height <= 2048 &&
+    width * height <= 65_000;
+}
