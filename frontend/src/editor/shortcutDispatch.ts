@@ -37,6 +37,7 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   const key = event.key.toLowerCase();
   const ctrl = event.ctrlKey || event.metaKey;
   const plain = !ctrl && !event.altKey;
+  const helpKey = plain && !event.shiftKey && key === "f1";
   const handled = (action: () => void) => { event.preventDefault(); action(); };
 
   // AltGr can be reported as Ctrl+Alt, but is text input rather than a shortcut.
@@ -51,7 +52,7 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   // Held file shortcuts must not queue duplicate saves or native dialogs.
   // Consume repeats to avoid falling through to the browser shortcut.
   if (event.repeat && (
-    key === "f1" ||
+    helpKey ||
     (ctrl && !event.altKey &&
       (key === "s" || (!event.shiftKey && ["o", "l", "i", "m", "e"].includes(key))))
   )) {
@@ -59,7 +60,7 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
     return;
   }
 
-  if (key === "f1") return handled(a.openHelp);
+  if (helpKey) return handled(a.openHelp);
   if (ctrl && key === "o") return handled(a.openAudio);
   if (ctrl && event.shiftKey && key === "s")
     return handled(() => { commitFocusedEditBeforeSave(event); a.saveProjectAs(); });
