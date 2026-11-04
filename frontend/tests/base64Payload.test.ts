@@ -15,6 +15,24 @@ test("malformed base64 returns null instead of crashing canvas render", () => {
   }
 });
 
+test("oversized encoded payload is rejected before base64 decoding", () => {
+  const previousAtob = globalThis.atob;
+  let decoded = false;
+  globalThis.atob = (value: string) => {
+    decoded = true;
+    return previousAtob(value);
+  };
+  try {
+    // A corrupt response must not allocate a decoded buffer far larger than metadata.
+    assert.equal(decodeSizedBase64Bytes("AQID".repeat(1024), 3), null);
+    assert.equal(decoded, false);
+  } finally {
+    globalThis.atob = previousAtob;
+  }
+  // Canonical data at the declared size still decodes normally.
+  assert.deepEqual(Array.from(decodeSizedBase64Bytes("AQID", 3) ?? []), [1, 2, 3]);
+});
+
 test("spectrum buffers must match their declared pixel count", () => {
   assert.equal(decodeSizedBase64Bytes("AQID", 2), null);
   assert.equal(decodeSizedBase64Bytes("AQID", 4), null);
