@@ -131,6 +131,57 @@ class ProjectWorkspacePreflightTests(unittest.TestCase):
                 self.assertFalse(bridge._dirty)
                 sync.assert_not_called()
 
+    def test_audio_preparation_failure_keeps_document_and_invalidates_older_request(self):
+        bridge = self.make_bridge()
+        checkpoint_before = bridge._document_checkpoint()
+        project_path_before = bridge.project_path
+        audio_path_before = bridge.audio_path
+        status_before = bridge._status
+        source_generation_before = bridge._source_generation
+        analysis_generation_before = bridge._analysis_generation
+        with (
+            mock.patch.object(bridge, "_dialog", return_value="with-audio.adopyhz"),
+            mock.patch.object(
+                web_io,
+                "load_project",
+                return_value=("audio.wav", [Note(3.0, 4.0, 72.0)], {}),
+            ),
+            mock.patch.object(web_io.Path, "exists", return_value=True),
+            mock.patch.object(
+                bridge,
+                "_prepare_requested_audio_path",
+                side_effect=ValueError("audio preparation failed"),
+            ) as prepare,
+            mock.patch.object(
+                bridge, "_reserve_source_request", wraps=bridge._reserve_source_request,
+            ) as reserve,
+            mock.patch.object(bridge, "_sync_notes_to_player") as sync,
+        ):
+            with self.assertRaisesRegex(ValueError, "audio preparation failed"):
+                bridge.load_project_dialog()
+
+        prepare.assert_called_once()
+        reserve.assert_called_once_with()
+        sync.assert_not_called()
+        self.assertEqual(bridge._document_checkpoint(), checkpoint_before)
+        self.assertEqual(bridge.project_path, project_path_before)
+        self.assertEqual(bridge.audio_path, audio_path_before)
+        self.assertEqual(bridge._status, status_before)
+        self.assertEqual(len(bridge._undo_stack), 0)
+        self.assertEqual(len(bridge._redo_stack), 1)
+        self.assertFalse(bridge._dirty)
+        self.assertFalse(bridge._busy)
+        # Source reservations use last-started-request-wins semantics even when
+        # preparation fails. An older request must not later replace the document.
+        self.assertEqual(bridge._source_generation, source_generation_before + 1)
+        self.assertEqual(bridge._analysis_generation, analysis_generation_before + 1)
+        self.assertFalse(
+            bridge._commit_prepared_audio(
+                "older.wav", None, None, source_generation=source_generation_before,
+            )
+        )
+        self.assertEqual(bridge._document_checkpoint(), checkpoint_before)
+
     def test_valid_workspace_metadata_restores_bounds_and_clears_history(self):
         bridge = self.make_bridge()
         settings = {
