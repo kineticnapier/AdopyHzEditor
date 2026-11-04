@@ -20,7 +20,11 @@ for (const file of dialogFiles) {
     assert.match(component, /value=\{text\}/);
     assert.match(component, /onChange=\{\(event\) => \{ editedRef\.current = true; setText\(event\.target\.value\); \}\}/);
     assert.match(component, /onBlur=\{commit\}/);
-    assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, false, editedRef\.current\)/);
+    if (file.includes("ToolDialogs.tsx")) {
+      assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
+    } else {
+      assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, false, editedRef\.current\)/);
+    }
     assert.match(component, /cancelledRef\.current = true/);
     assert.match(component, /event\.stopPropagation\(\)/);
     assert.doesNotMatch(component, /Number\(event\.target\.value\)/);
@@ -210,7 +214,11 @@ test("both tool and ADOFAI dialogs distinguish focus from actual edits", () => {
     assert.match(component, /const editedRef = useRef\(false\)/);
     assert.match(component, /onFocus=\{\(\) => \{ cancelledRef\.current = false; editedRef\.current = false; setEditing\(true\); \}\}/);
     assert.match(component, /onChange=\{\(event\) => \{ editedRef\.current = true; setText\(event\.target\.value\); \}\}/);
-    assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, false, editedRef\.current\)/);
+    if (file.includes("ToolDialogs.tsx")) {
+      assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
+    } else {
+      assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, false, editedRef\.current\)/);
+    }
     assert.match(component, /editedRef\.current = false;\s*setEditing\(false\);/);
   }
 });
