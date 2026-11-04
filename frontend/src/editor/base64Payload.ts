@@ -15,6 +15,14 @@ export function decodeSizedBase64Bytes(data: string, expectedLength: number): Ui
   return bytes && bytes.byteLength === expectedLength ? bytes : null;
 }
 
+/** Keep untrusted spectrogram dimensions bounded before base64 decoding and canvas allocation.
+ * The backend limits time columns to 4096; cap pitch rows to avoid huge canvases. */
+export function isValidSpectrogramSize(rows: number, cols: number): boolean {
+  return Number.isSafeInteger(rows) && rows > 0 && rows <= 2048 &&
+    Number.isSafeInteger(cols) && cols > 0 && cols <= 4096 &&
+    rows * cols <= 8_388_608;
+}
+
 /** Backend viewport queries cap Direct Spectrum at 4096x2048 and 65,000 cells.
  * Validate untrusted dimensions before creating a canvas during React render. */
 export function isValidDirectSpectrumSize(width: number, height: number): boolean {
