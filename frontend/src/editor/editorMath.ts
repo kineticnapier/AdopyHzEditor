@@ -136,13 +136,24 @@ export function buildSegmentSpatialIndex(
   segments: ScreenSegment[],
   cellSize = 24,
   padding = 8,
+  viewport?: { width: number; height: number },
 ): SegmentSpatialIndex {
   const size = Math.max(1, cellSize), buckets = new Map<string, number[]>();
+  // Index only cells reachable by the pointer. A segment can extend far beyond
+  // the visible canvas after zooming, so indexing its full bounds can hang.
+  if (viewport && (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) ||
+      viewport.width <= 0 || viewport.height <= 0)) return { cellSize: size, buckets };
+  const minX = viewport ? Math.floor(-padding / size) : -Infinity;
+  const maxX = viewport ? Math.floor((viewport.width + padding) / size) : Infinity;
+  const minY = viewport ? Math.floor(-padding / size) : -Infinity;
+  const maxY = viewport ? Math.floor((viewport.height + padding) / size) : Infinity;
   segments.forEach((segment, index) => {
-    const left = Math.floor((Math.min(segment.ax, segment.bx) - padding) / size);
-    const right = Math.floor((Math.max(segment.ax, segment.bx) + padding) / size);
-    const top = Math.floor((Math.min(segment.ay, segment.by) - padding) / size);
-    const bottom = Math.floor((Math.max(segment.ay, segment.by) + padding) / size);
+    if (![segment.ax, segment.ay, segment.bx, segment.by].every(Number.isFinite)) return;
+    const left = Math.max(minX, Math.floor((Math.min(segment.ax, segment.bx) - padding) / size));
+    const right = Math.min(maxX, Math.floor((Math.max(segment.ax, segment.bx) + padding) / size));
+    const top = Math.max(minY, Math.floor((Math.min(segment.ay, segment.by) - padding) / size));
+    const bottom = Math.min(maxY, Math.floor((Math.max(segment.ay, segment.by) + padding) / size));
+    if (left > right || top > bottom) return;
     for (let x = left; x <= right; x += 1) for (let y = top; y <= bottom; y += 1) {
       const key = `${x}:${y}`, bucket = buckets.get(key);
       if (bucket) bucket.push(index); else buckets.set(key, [index]);
