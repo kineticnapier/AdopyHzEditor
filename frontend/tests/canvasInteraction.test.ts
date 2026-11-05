@@ -155,7 +155,19 @@ test("cancel resets the throttle so reentering the canvas reports immediately", 
   assert.equal(scheduled.size, 0);
 });
 
-test("canvas invalidates pending hover reports when view or document data changes", () => {
+test("canvas clears pending and displayed Track hover when view or document data changes", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
-  assert.match(source, /useEffect\(\(\) => \{ cursorReporterRef\.current\.cancel\(\); \}, \[props\.notes, props\.frequencyTracks, props\.view, size\]\)/);
+  const start = source.indexOf("// View/data changes invalidate hover coordinates");
+  const end = source.indexOf("const wheelPitchAccumulatorRef", start);
+  assert.ok(start >= 0 && end > start);
+  const effect = source.slice(start, end);
+  assert.match(effect, /cursorReporterRef\.current\.cancel\(\)/);
+  assert.match(effect, /props\.onTrackHover\?\.\(null\)/);
+  assert.match(effect, /\[props\.notes, props\.frequencyTracks, props\.view, size\]/);
+  assert.ok(effect.indexOf("cursorReporterRef.current.cancel()") < effect.indexOf("props.onTrackHover?.(null)"));
+});
+
+test("App connects Canvas Track hover to the displayed hover state", () => {
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(source, /onTrackHover=\{setHoveredTrack\}/);
 });
