@@ -163,6 +163,12 @@ export function directSpectrumVisibleCrop(
     crop.sw > 0 && crop.sh > 0 && crop.dw > 0 && crop.dh > 0 ? crop : null;
 }
 
+/** Reject invalid packed Frequency Track samples before hover indexing or Canvas drawing. */
+export function isValidTrackSample(time: number, midi: number, magnitude: number, duration: number): boolean {
+  return [time, midi, magnitude, duration].every(Number.isFinite) &&
+    magnitude >= 0 && magnitude <= 1 && duration >= 0;
+}
+
 export type NoteTimeIndex = { order: number[]; starts: number[]; maxEnds: number[] };
 
 export function buildNoteTimeIndex(notes: NoteDto[]): NoteTimeIndex {
