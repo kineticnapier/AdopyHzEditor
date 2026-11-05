@@ -269,8 +269,13 @@ export default function EditorCanvas(props: Props) {
     const timelineTicks=boundedTimelineTickRange(props.view.start,props.view.windowSeconds,secStep);
     for(let i=0;i<timelineTicks.count;i+=1){const t=(timelineTicks.first+i*timelineTicks.stride)*secStep,x=coords.x(t);if(!Number.isFinite(x))continue;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.strokeStyle="rgba(255,255,255,.075)";ctx.stroke();}
     if(props.settings.gridEnabled){
-      const beat=60/Math.max(1e-6,props.settings.bpm),offset=props.settings.offsetMs/1000,{first,last,stride}=boundedGridRange(props.view.start,props.view.windowSeconds,beat,offset);
-      for(let k=first;k<=last;k+=stride){const x=coords.x(offset+k*beat);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.strokeStyle=k%4===0?"rgba(255,230,120,.38)":"rgba(255,255,255,.17)";ctx.stroke();}
+      const beat=60/Math.max(1e-6,props.settings.bpm),offset=props.settings.offsetMs/1000;
+      const beatGrid=boundedGridRange(props.view.start,props.view.windowSeconds,beat,offset);
+      for(let i=0;i<beatGrid.count;i+=1){
+        const k=beatGrid.first+i*beatGrid.stride,x=coords.x(offset+k*beat);
+        if(!Number.isFinite(x))continue;
+        ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.strokeStyle=k%4===0?"rgba(255,230,120,.38)":"rgba(255,255,255,.17)";ctx.stroke();
+      }
     }
 
     const alpha=props.view.mode==="spec"?.42:props.view.mode==="notes"?.92:.68;
