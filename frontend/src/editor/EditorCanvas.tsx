@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
+import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
@@ -266,7 +266,8 @@ export default function EditorCanvas(props: Props) {
       if(midi%12===0){ctx.fillStyle="rgba(235,240,245,.68)";ctx.font="11px Segoe UI,sans-serif";ctx.fillText(`C${Math.floor(midi/12)-1}`,5,Math.max(12,y-3));}
     }
     const secStep=props.view.windowSeconds<=5?.25:props.view.windowSeconds<=20?1:props.view.windowSeconds<=60?5:10;
-    for(let t=Math.floor(props.view.start/secStep)*secStep;t<=props.view.start+props.view.windowSeconds+secStep;t+=secStep){const x=coords.x(t);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.strokeStyle="rgba(255,255,255,.075)";ctx.stroke();}
+    const timelineTicks=boundedTimelineTickRange(props.view.start,props.view.windowSeconds,secStep);
+    for(let i=0;i<timelineTicks.count;i+=1){const t=(timelineTicks.first+i*timelineTicks.stride)*secStep,x=coords.x(t);if(!Number.isFinite(x))continue;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.strokeStyle="rgba(255,255,255,.075)";ctx.stroke();}
     if(props.settings.gridEnabled){
       const beat=60/Math.max(1e-6,props.settings.bpm),offset=props.settings.offsetMs/1000,{first,last,stride}=boundedGridRange(props.view.start,props.view.windowSeconds,beat,offset);
       for(let k=first;k<=last;k+=stride){const x=coords.x(offset+k*beat);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.strokeStyle=k%4===0?"rgba(255,230,120,.38)":"rgba(255,255,255,.17)";ctx.stroke();}
