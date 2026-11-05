@@ -1,6 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramPitchVisibleCrop, spectrogramTimeCrop } from "../src/editor/editorMath.ts";
+import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop } from "../src/editor/editorMath.ts";
+
+
+test("Direct Spectrum crop maps time and pitch overlap without stretching", () => {
+  const crop = directSpectrumVisibleCrop(0, 12, 60, 72, 3, 6, 62, 6, 1200, 600, 600, 300);
+  assert.deepEqual(crop, { sx: 300, sy: 200, sw: 600, sh: 300, dx: 0, dy: 0, dw: 600, dh: 300 });
+  const upper = directSpectrumVisibleCrop(0, 12, 60, 72, 3, 6, 68, 8, 1200, 600, 600, 400);
+  assert.deepEqual(upper, { sx: 300, sy: 0, sw: 600, sh: 200, dx: 0, dy: 200, dw: 600, dh: 200 });
+  assert.equal(directSpectrumVisibleCrop(0, 12, 60, 72, 20, 6, 62, 6, 1200, 600, 600, 300), null);
+  assert.equal(directSpectrumVisibleCrop(0, 12, 60, 72, 3, 6, 80, 6, 1200, 600, 600, 300), null);
+});
+
+test("Direct Spectrum crop rejects non-finite and overflowing metadata before canvas drawing", () => {
+  const valid = [0, 12, 60, 72, 3, 6, 62, 6, 1200, 600, 600, 300] as const;
+  for (let index = 0; index < valid.length; index += 1) {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      const input: number[] = [...valid];
+      input[index] = bad;
+      assert.equal(directSpectrumVisibleCrop(...(input as unknown as Parameters<typeof directSpectrumVisibleCrop>)), null, `index ${index} / ${bad}`);
+    }
+  }
+  assert.equal(directSpectrumVisibleCrop(-1e308, 1e308, 60, 72, 0, 12, 62, 6, 1200, 600, 600, 300), null);
+  assert.equal(directSpectrumVisibleCrop(0, 12, -1e308, 1e308, 3, 6, 62, 6, 1200, 600, 600, 300), null);
+  assert.equal(directSpectrumVisibleCrop(0, 12, 60, 72, 1e308, 1e308, 62, 6, 1200, 600, 600, 300), null);
+  assert.equal(directSpectrumVisibleCrop(0, 12, 60, 72, 3, 6, -1e308, 1e308, 1200, 600, 600, 300), null);
+  assert.equal(directSpectrumVisibleCrop(0, 12, 60, 72, 3, 6, 62, 6, 0, 600, 600, 300), null);
+  assert.equal(directSpectrumVisibleCrop(0, 12, 60, 72, 3, 6, 62, 6, 1200.5, 600, 600, 300), null);
+  assert.equal(directSpectrumVisibleCrop(0, 12, 60, 72, 3, 6, 62, 6, 1200, 600, 0, 300), null);
+});
+
+test("Direct Spectrum canvas uses validated crop rectangles", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /const crop = directSpectrumVisibleCrop\(/);
+  assert.match(source, /if \(crop\) \{[\s\S]*?ctx\.drawImage\(directSpectrumCanvas,crop\.sx,crop\.sy,crop\.sw,crop\.sh,crop\.dx,crop\.dy,crop\.dw,crop\.dh\)/);
+});
 
 const curve = { start: 0, end: 100, midi: 0, velocity: 100, kind: "curve" as const, midi_end: 0, ctrl1_midi: 127, ctrl2_midi: 127 };
 
