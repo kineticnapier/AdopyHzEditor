@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop } from "../src/editor/editorMath.ts";
+import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, isValidTrackSample } from "../src/editor/editorMath.ts";
 
 
 test("Direct Spectrum crop maps time and pitch overlap without stretching", () => {
@@ -35,6 +35,29 @@ test("Direct Spectrum canvas uses validated crop rectangles", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   assert.match(source, /const crop = directSpectrumVisibleCrop\(/);
   assert.match(source, /if \(crop\) \{[\s\S]*?ctx\.drawImage\(directSpectrumCanvas,crop\.sx,crop\.sy,crop\.sw,crop\.sh,crop\.dx,crop\.dy,crop\.dw,crop\.dh\)/);
+});
+
+test("Frequency Track samples reject invalid packed float values and durations", () => {
+  assert.equal(isValidTrackSample(1, 69, .5, .1), true);
+  assert.equal(isValidTrackSample(0, 0, 0, 0), true);
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    for (let field = 0; field < 4; field += 1) {
+      const sample = [1, 69, .5, .1];
+      sample[field] = bad;
+      assert.equal(isValidTrackSample(...(sample as [number, number, number, number])), false);
+    }
+  }
+  assert.equal(isValidTrackSample(1, 69, .5, -.1), false);
+  assert.equal(isValidTrackSample(1, 69, -1, .1), false);
+  assert.equal(isValidTrackSample(1, 69, 2, .1), false);
+});
+
+test("Frequency Track drawing and hover index ignore invalid samples and broken predecessor links", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /if \(!validTrackPoint\(i\)\) continue;/);
+  assert.match(source, /const connected = valid && i > 0 && validTrackPoint\(i - 1\)/);
+  assert.match(source, /const connected = i > 0 && validTrackPoint\(i - 1\)/);
+  assert.match(source, /if\(\(decodedTracks\.flags\[i\]&1\)===0&&i>0&&validTrackPoint\(i-1\)/);
 });
 
 const curve = { start: 0, end: 100, midi: 0, velocity: 100, kind: "curve" as const, midi_end: 0, ctrl1_midi: 127, ctrl2_midi: 127 };
