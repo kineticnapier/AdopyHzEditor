@@ -76,19 +76,24 @@ export function spectrogramPitchVisibleCrop(
   viewBottom: number, viewTop: number, destinationHeight: number,
 ) {
   if (![rows, midiMin, pitchStep, viewBottom, viewTop, destinationHeight].every(Number.isFinite) ||
-      rows <= 0 || pitchStep <= 0 || viewTop <= viewBottom || destinationHeight <= 0) return null;
+      !Number.isSafeInteger(rows) || rows <= 0 || pitchStep <= 0 ||
+      viewTop <= viewBottom || destinationHeight <= 0) return null;
   const sourceBottom = midiMin - pitchStep / 2;
   const sourceTop = midiMin + (rows - .5) * pitchStep;
+  const sourceSpan = sourceTop - sourceBottom;
+  const viewSpan = viewTop - viewBottom;
+  if (![sourceBottom, sourceTop, sourceSpan, viewSpan].every(Number.isFinite) ||
+      sourceSpan <= 0 || viewSpan <= 0) return null;
   const visibleBottom = Math.max(viewBottom, sourceBottom);
   const visibleTop = Math.min(viewTop, sourceTop);
   if (visibleTop <= visibleBottom) return null;
   const { sy, sh } = spectrogramPitchCrop(rows, midiMin, pitchStep, visibleBottom, visibleTop);
-  const viewSpan = viewTop - viewBottom;
-  return {
+  const crop = {
     sy, sh,
     dy: (viewTop - visibleTop) / viewSpan * destinationHeight,
     dh: (visibleTop - visibleBottom) / viewSpan * destinationHeight,
   };
+  return Object.values(crop).every(Number.isFinite) && crop.sh > 0 && crop.dh > 0 ? crop : null;
 }
 
 export function spectrogramTimeCrop(
