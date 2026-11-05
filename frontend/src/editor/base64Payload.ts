@@ -1,5 +1,6 @@
 /** Decode untrusted backend base64 without throwing during React render. */
 export function decodeBase64Bytes(data: string): Uint8Array | null {
+  if (typeof data !== "string") return null;
   try {
     const raw = atob(data);
     return Uint8Array.from(raw, (char) => char.charCodeAt(0));
@@ -10,7 +11,7 @@ export function decodeBase64Bytes(data: string): Uint8Array | null {
 
 /** Reject truncated or oversized image buffers before indexing their pixels. */
 export function decodeSizedBase64Bytes(data: string, expectedLength: number): Uint8Array | null {
-  if (!Number.isSafeInteger(expectedLength) || expectedLength <= 0) return null;
+  if (typeof data !== "string" || !Number.isSafeInteger(expectedLength) || expectedLength <= 0) return null;
   // Python emits canonical base64. Reject oversized encoded data before atob allocates
   // a potentially much larger buffer than the declared spectrum/track payload.
   if (data.length > 4 * Math.ceil(expectedLength / 3)) return null;
