@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isNoteNavigationKey, reconcileKeyboardNote } from "../src/editor/noteKeyboardNavigation.ts";
+import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "../src/editor/noteKeyboardNavigation.ts";
 
 const key = (name: string, mods: Partial<Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey">> = {}) => ({
   key: name, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods,
@@ -40,4 +40,24 @@ test("clearing or replacing a document drops a stale keyboard cursor", () => {
   assert.equal(reconcileKeyboardNote(4, [4], [4], [4], 2, true), null);
   assert.equal(reconcileKeyboardNote(4, [4], null, [1], 2, true), 1);
   assert.equal(reconcileKeyboardNote(1, [1], null, [1], 2, true), 1);
+});
+
+
+test("Shift+arrows select a contiguous time-ordered range even when indices differ", () => {
+  const order = [4, 1, 3, 0, 2];
+  assert.deepEqual(keyboardRangeSelection(order, 1, 0), [0, 1, 3]);
+  assert.deepEqual(keyboardRangeSelection(order, 0, 1), [0, 1, 3]);
+});
+
+test("reversing Shift+arrow shrinks the selection toward its anchor", () => {
+  const order = [4, 1, 3, 0, 2];
+  assert.deepEqual(keyboardRangeSelection(order, 1, 0), [0, 1, 3]);
+  assert.deepEqual(keyboardRangeSelection(order, 1, 3), [1, 3]);
+  assert.deepEqual(keyboardRangeSelection(order, 1, 1), [1]);
+});
+
+test("keyboard range selection handles an invalid anchor or active note", () => {
+  assert.deepEqual(keyboardRangeSelection([2, 0, 1], 99, 0), [0]);
+  assert.deepEqual(keyboardRangeSelection([2, 0, 1], 0, 99), []);
+  assert.deepEqual(keyboardRangeSelection([], 0, 1), []);
 });
