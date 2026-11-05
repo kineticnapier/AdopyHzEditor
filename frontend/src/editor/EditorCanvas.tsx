@@ -128,7 +128,12 @@ export default function EditorCanvas(props: Props) {
   useEffect(() => () => cursorReporterRef.current.cancel(), []);
   // View/data changes invalidate hover coordinates captured by a delayed report.
   // This also covers document replacement without unmounting the canvas.
-  useEffect(() => { cursorReporterRef.current.cancel(); }, [props.notes, props.frequencyTracks, props.view, size]);
+  useEffect(() => {
+    cursorReporterRef.current.cancel();
+    // A previously displayed Track is no longer tied to the current coordinates.
+    // Do not leave it visible until the pointer moves again.
+    props.onTrackHover?.(null);
+  }, [props.notes, props.frequencyTracks, props.view, size]);
   const wheelPitchAccumulatorRef = useRef<WheelPitchAccumulator>({ modifier: null, remainder: 0 });
   const lastSelectionRef = useRef(props.selected);
   const lastNotesRef = useRef(props.notes);
