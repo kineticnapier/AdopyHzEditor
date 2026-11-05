@@ -42,6 +42,8 @@ export function createTrailingReporter<T>(
 ) {
   let lastReport = -Infinity;
   let timer: number | null = null;
+  // Ignore callbacks that were queued before a cancellation or replacement.
+  let timerGeneration = 0;
   let pending: { value: T; emit: (value: T) => void } | null = null;
   const flush = () => {
     timer = null;
@@ -57,13 +59,20 @@ export function createTrailingReporter<T>(
       const remaining = intervalMs - (now() - lastReport);
       if (remaining <= 0) {
         if (timer !== null) cancelTimer(timer);
+        timerGeneration += 1;
         flush();
       } else if (timer === null) {
-        timer = schedule(flush, remaining);
+        const generation = ++timerGeneration;
+        timer = schedule(() => {
+          if (generation !== timerGeneration) return;
+          timerGeneration += 1;
+          flush();
+        }, remaining);
       }
     },
     cancel() {
       if (timer !== null) cancelTimer(timer);
+      timerGeneration += 1;
       timer = null;
       pending = null;
       // A new pointer session must report its first position immediately.
