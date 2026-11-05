@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
+import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, contextMenuDeleteIndices, isValidTrackSample, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
@@ -202,12 +202,22 @@ export default function EditorCanvas(props: Props) {
       midi: (py:number) => bottom+(height-py)/height*visible,
     };
   }, [props.view, size]);
+  // Packed float32 Track samples may contain NaN/Infinity. Never pass those
+  // samples to Canvas or let them contribute to pointer hit testing.
+  const validTrackPoint = (i: number) =>
+    decodedTracks !== null && i >= 0 && i < decodedTracks.count &&
+    isValidTrackSample(decodedTracks.times[i], decodedTracks.midis[i], decodedTracks.magnitudes[i], decodedTracks.durations[i]) &&
+    Number.isFinite(coords.x(decodedTracks.times[i])) && Number.isFinite(coords.y(decodedTracks.midis[i]));
   const trackHitIndex = useMemo(() => {
     if (!decodedTracks) return null;
     const segments = Array.from({ length: decodedTracks.count }, (_, i) => {
-      const connected = (decodedTracks.flags[i] & 1) === 0 && i > 0 && decodedTracks.ids[i] === decodedTracks.ids[i - 1];
+      const valid = validTrackPoint(i);
+      const connected = valid && i > 0 && validTrackPoint(i - 1) &&
+        (decodedTracks.flags[i] & 1) === 0 && decodedTracks.ids[i] === decodedTracks.ids[i - 1];
       const a = connected ? i - 1 : i;
-      return { ax: coords.x(decodedTracks.times[a]), ay: coords.y(decodedTracks.midis[a]), bx: coords.x(decodedTracks.times[i]), by: coords.y(decodedTracks.midis[i]) };
+      return valid
+        ? { ax: coords.x(decodedTracks.times[a]), ay: coords.y(decodedTracks.midis[a]), bx: coords.x(decodedTracks.times[i]), by: coords.y(decodedTracks.midis[i]) }
+        : { ax: NaN, ay: NaN, bx: NaN, by: NaN };
     });
     return { segments, index: buildSegmentSpatialIndex(segments, 24, 8, size) };
   }, [coords, decodedTracks, size]);
@@ -252,8 +262,11 @@ export default function EditorCanvas(props: Props) {
     if(decodedTracks&&props.view.mode!=="notes"){
       ctx.save();ctx.lineCap="round";ctx.lineJoin="round";
       for(let i=0;i<decodedTracks.count;i+=1){
+        if (!validTrackPoint(i)) continue;
         const trackId=decodedTracks.ids[i],selectedTrack=selectedTrackSet.has(trackId),x=coords.x(decodedTracks.times[i]),y=coords.y(decodedTracks.midis[i]),m=decodedTracks.magnitudes[i],duration=decodedTracks.durations[i],strength=Math.sqrt(m),durationWeight=Math.max(.25,Math.min(1,duration/.2));
-        if((decodedTracks.flags[i]&1)!==0||i===0||decodedTracks.ids[i]!==decodedTracks.ids[i-1]){ctx.beginPath();ctx.arc(x,y,selectedTrack?Math.max(1.7,2.2*strength):Math.max(.65,1.3*strength),0,Math.PI*2);ctx.fillStyle=selectedTrack?"rgba(255,235,95,.98)":`rgba(155,245,255,${(.12+.58*strength)*durationWeight})`;ctx.fill();continue;}
+        const connected = i > 0 && validTrackPoint(i - 1) &&
+          (decodedTracks.flags[i] & 1) === 0 && trackId === decodedTracks.ids[i - 1];
+        if(!connected){ctx.beginPath();ctx.arc(x,y,selectedTrack?Math.max(1.7,2.2*strength):Math.max(.65,1.3*strength),0,Math.PI*2);ctx.fillStyle=selectedTrack?"rgba(255,235,95,.98)":`rgba(155,245,255,${(.12+.58*strength)*durationWeight})`;ctx.fill();continue;}
         const averageStrength=Math.sqrt((m+decodedTracks.magnitudes[i-1])/2);
         ctx.beginPath();ctx.moveTo(coords.x(decodedTracks.times[i-1]),coords.y(decodedTracks.midis[i-1]));ctx.lineTo(x,y);
         ctx.strokeStyle=selectedTrack?"rgba(255,235,95,.98)":`rgba(135,240,255,${(.16+.76*averageStrength)*durationWeight})`;ctx.lineWidth=selectedTrack?2.8+.8*averageStrength:.65+1.75*averageStrength+Math.min(1.1,duration*.55);ctx.stroke();
@@ -342,7 +355,7 @@ export default function EditorCanvas(props: Props) {
     const candidates = trackHitIndex ? nearbySegmentIndices(trackHitIndex.index, px, py) : [];
     for(const i of candidates){
       const bx=coords.x(decodedTracks.times[i]),by=coords.y(decodedTracks.midis[i]);let distance=(px-bx)**2+(py-by)**2,midi=decodedTracks.midis[i],magnitude=decodedTracks.magnitudes[i];
-      if((decodedTracks.flags[i]&1)===0&&i>0&&decodedTracks.ids[i]===decodedTracks.ids[i-1]){
+      if((decodedTracks.flags[i]&1)===0&&i>0&&validTrackPoint(i-1)&&decodedTracks.ids[i]===decodedTracks.ids[i-1]){
         const segment=trackHitIndex!.segments[i],ax=segment.ax,ay=segment.ay,dx=bx-ax,dy=by-ay,length=Math.max(1e-9,dx*dx+dy*dy),fraction=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/length)),qx=ax+dx*fraction,qy=ay+dy*fraction;
         distance=(px-qx)**2+(py-qy)**2;midi=decodedTracks.midis[i-1]+(decodedTracks.midis[i]-decodedTracks.midis[i-1])*fraction;magnitude=decodedTracks.magnitudes[i-1]+(decodedTracks.magnitudes[i]-decodedTracks.magnitudes[i-1])*fraction;
       }
