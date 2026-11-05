@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramTimeCrop } from "../src/editor/editorMath.ts";
+import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramPitchVisibleCrop, spectrogramTimeCrop } from "../src/editor/editorMath.ts";
 
 const curve = { start: 0, end: 100, midi: 0, velocity: 100, kind: "curve" as const, midi_end: 0, ctrl1_midi: 127, ctrl2_midi: 127 };
 
@@ -19,6 +19,28 @@ test("spectrogram crop honors sub-semitone pitch steps", () => {
   const crop = spectrogramPitchCrop(8, 60, .25, 60, 61);
   assert.equal(crop.sy, 3.5);
   assert.equal(crop.sh, 4);
+});
+
+test("CQT pitch crop clips source and destination together at the upper edge", () => {
+  const crop = spectrogramPitchVisibleCrop(8, 60, 1, 64, 70, 600);
+  assert.deepEqual(crop, { sy: 0, sh: 3.5, dy: 250, dh: 350 });
+});
+
+test("CQT pitch crop clips source and destination together at the lower edge", () => {
+  const crop = spectrogramPitchVisibleCrop(8, 60, 1, 55, 62, 700);
+  assert.deepEqual(crop, { sy: 5.5, sh: 2.5, dy: 0, dh: 250 });
+});
+
+test("CQT pitch crop preserves fractional rows and rejects disjoint ranges", () => {
+  const crop = spectrogramPitchVisibleCrop(8, 60, 1, 67.4, 67.6, 600);
+  assert.ok(crop);
+  assert.ok(Math.abs(crop.sy) < 1e-9);
+  assert.ok(Math.abs(crop.sh - .1) < 1e-9);
+  assert.ok(Math.abs(crop.dy - 300) < 1e-9);
+  assert.ok(Math.abs(crop.dh - 300) < 1e-9);
+  assert.equal(spectrogramPitchVisibleCrop(8, 60, 1, 80, 90, 600), null);
+  assert.equal(spectrogramPitchVisibleCrop(8, 60, 1, 50, 59.5, 600), null);
+  assert.equal(spectrogramPitchVisibleCrop(8, 60, 1, 64, 70, 0), null);
 });
 
 test("CQT stale viewport crop keeps absolute time position while scrolling right", () => {
