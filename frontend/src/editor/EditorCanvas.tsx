@@ -357,6 +357,8 @@ export default function EditorCanvas(props: Props) {
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
     if(event.button!==0 || !canStartCanvasGesture(activePointerIdRef.current))return;
     cursorReporterRef.current.cancel();
+    // Dragging does not update hover, so invalidate the last displayed Track now.
+    props.onTrackHover?.(null);
     event.currentTarget.focus({ preventScroll: true });
     keyboardSelectionRef.current = null;
     setKeyboardNote(null);
