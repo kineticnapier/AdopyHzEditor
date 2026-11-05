@@ -229,3 +229,15 @@ test("superseded timer callbacks cannot emit a later pending position early", ()
   currentCallback();
   assert.deepEqual(emitted, ["first", "immediate", "new pending"]);
 });
+
+test("pointer down clears the displayed Track hover before starting a gesture", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onPointerDown(");
+  const end = source.indexOf("function onPointerMove(", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  const cancel = handler.indexOf("cursorReporterRef.current.cancel();");
+  const clear = handler.indexOf("props.onTrackHover?.(null);", cancel);
+  const capture = handler.indexOf("setPointerCapture(", cancel);
+  assert.ok(cancel >= 0 && clear > cancel && capture > clear);
+});
