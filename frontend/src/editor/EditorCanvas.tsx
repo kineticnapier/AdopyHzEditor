@@ -126,6 +126,9 @@ export default function EditorCanvas(props: Props) {
   const activePointerIdRef = useRef<number | null>(null);
   const cursorReporterRef = useRef(createTrailingReporter<{ time: number; midi: number; track: TrackHoverInfo | null }>(50));
   useEffect(() => () => cursorReporterRef.current.cancel(), []);
+  // View/data changes invalidate hover coordinates captured by a delayed report.
+  // This also covers document replacement without unmounting the canvas.
+  useEffect(() => { cursorReporterRef.current.cancel(); }, [props.notes, props.frequencyTracks, props.view, size]);
   const wheelPitchAccumulatorRef = useRef<WheelPitchAccumulator>({ modifier: null, remainder: 0 });
   const lastSelectionRef = useRef(props.selected);
   const lastNotesRef = useRef(props.notes);
