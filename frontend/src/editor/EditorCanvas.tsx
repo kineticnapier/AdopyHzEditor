@@ -199,8 +199,8 @@ export default function EditorCanvas(props: Props) {
       const a = connected ? i - 1 : i;
       return { ax: coords.x(decodedTracks.times[a]), ay: coords.y(decodedTracks.midis[a]), bx: coords.x(decodedTracks.times[i]), by: coords.y(decodedTracks.midis[i]) };
     });
-    return { segments, index: buildSegmentSpatialIndex(segments) };
-  }, [coords, decodedTracks]);
+    return { segments, index: buildSegmentSpatialIndex(segments, 24, 8, size) };
+  }, [coords, decodedTracks, size]);
 
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
