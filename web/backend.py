@@ -346,6 +346,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         elif direct_pending:
             self.midi_min, self.midi_max = 0, 127
             self.pitch_step = 1.0
+        self._rebase_history_to_current_source(self.duration)
         # Project loading and audio replacement must preserve notes beyond the
         # decoded/analysed audio duration, without retaining an old document's
         # unrelated duration.
@@ -820,6 +821,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                         self.player.set_virtual_duration(self.duration)
                         self.midi_min, self.midi_max = 0, 127
                         self.pitch_step = 1.0
+                        self._rebase_history_to_current_source(float(store.duration))
                         self.view["mode"] = "both" if self.notes else "spec"
                         self._status = (
                             f"Vorbis Direct: {stats['storedBins']} bins "
@@ -862,6 +864,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                 self.midi_min = int(spec.midi_min)
                 self.midi_max = int(spec.midi_max)
                 self.pitch_step = float(spec.pitch_step)
+                self._rebase_history_to_current_source(float(spec.duration))
                 self.player.set_virtual_duration(self.duration)
                 self._status = (
                     "Vorbis Direct はこの音源で使えないため、CQTで解析しました"
