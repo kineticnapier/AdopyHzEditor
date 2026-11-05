@@ -129,6 +129,40 @@ export function spectrogramTimeCrop(
 }
 
 
+
+/** Clip packed Direct Spectrum cells to both the time and pitch viewport.
+ * Untrusted metadata and overflow must not reach canvas drawImage. */
+export function directSpectrumVisibleCrop(
+  sourceStart: number, sourceEnd: number, sourceBottom: number, sourceTop: number,
+  viewStart: number, viewWindowSeconds: number, viewBottom: number, viewHeight: number,
+  sourceWidth: number, sourceHeight: number, destinationWidth: number, destinationHeight: number,
+) {
+  const values = [sourceStart, sourceEnd, sourceBottom, sourceTop, viewStart, viewWindowSeconds,
+    viewBottom, viewHeight, sourceWidth, sourceHeight, destinationWidth, destinationHeight];
+  if (!values.every(Number.isFinite) || !Number.isSafeInteger(sourceWidth) ||
+      !Number.isSafeInteger(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0 ||
+      destinationWidth <= 0 || destinationHeight <= 0 || viewWindowSeconds <= 0 || viewHeight <= 0) return null;
+  const sourceTimeSpan = sourceEnd - sourceStart, sourcePitchSpan = sourceTop - sourceBottom;
+  const viewEnd = viewStart + viewWindowSeconds, viewTop = viewBottom + viewHeight;
+  if (![sourceTimeSpan, sourcePitchSpan, viewEnd, viewTop].every(Number.isFinite) ||
+      sourceTimeSpan <= 0 || sourcePitchSpan <= 0) return null;
+  const timeStart = Math.max(viewStart, sourceStart), timeEnd = Math.min(viewEnd, sourceEnd);
+  const pitchBottom = Math.max(viewBottom, sourceBottom), pitchTop = Math.min(viewTop, sourceTop);
+  if (timeEnd <= timeStart || pitchTop <= pitchBottom) return null;
+  const crop = {
+    sx: (timeStart - sourceStart) / sourceTimeSpan * sourceWidth,
+    sy: (sourceTop - pitchTop) / sourcePitchSpan * sourceHeight,
+    sw: (timeEnd - timeStart) / sourceTimeSpan * sourceWidth,
+    sh: (pitchTop - pitchBottom) / sourcePitchSpan * sourceHeight,
+    dx: (timeStart - viewStart) / viewWindowSeconds * destinationWidth,
+    dy: (viewTop - pitchTop) / viewHeight * destinationHeight,
+    dw: (timeEnd - timeStart) / viewWindowSeconds * destinationWidth,
+    dh: (pitchTop - pitchBottom) / viewHeight * destinationHeight,
+  };
+  return Object.values(crop).every(Number.isFinite) &&
+    crop.sw > 0 && crop.sh > 0 && crop.dw > 0 && crop.dh > 0 ? crop : null;
+}
+
 export type NoteTimeIndex = { order: number[]; starts: number[]; maxEnds: number[] };
 
 export function buildNoteTimeIndex(notes: NoteDto[]): NoteTimeIndex {
