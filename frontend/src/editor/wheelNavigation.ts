@@ -42,7 +42,8 @@ function boundedTimeStart(start: number, windowSeconds: number, durationSeconds?
 
 function panTime(view: ViewState, units: number, durationSeconds?: number): Partial<ViewState> | null {
   const start = boundedTimeStart(view.start + units * view.windowSeconds * .08, view.windowSeconds, durationSeconds);
-  return start === view.start ? null : { start };
+  // An unbounded pan can overflow when no finite duration is available.
+  return !Number.isFinite(start) || start === view.start ? null : { start };
 }
 
 /** Horizontal gestures pan in their actual direction; vertical wheel controls retain existing behavior. */
@@ -60,6 +61,13 @@ export function wheelViewChange(
       pitchAccumulator.remainder = 0;
     }
   };
+  // Invalid wheel or viewport numbers must not reach the optimistic view or backend.
+  if (![deltaX, deltaY, view.start, view.windowSeconds, view.pitchBottom, view.visibleNotes].every(Number.isFinite) ||
+      view.windowSeconds <= 0 || view.visibleNotes <= 0 ||
+      (anchor !== undefined && ![anchor.timeRatio, anchor.pitchRatio].every(Number.isFinite))) {
+    resetPitchAccumulator();
+    return null;
+  }
   if (deltaX === 0 && deltaY === 0) return null;
 
   // Trackpads may report both axes; the dominant axis determines the action.
@@ -124,13 +132,15 @@ export function wheelViewChange(
     // Use reciprocal zoom factors so an equal reverse gesture restores the viewport.
     const requestedWindowSeconds = view.windowSeconds * Math.pow(.85, -units);
     const windowSeconds = durationSeconds === undefined || !Number.isFinite(durationSeconds)
-      ? requestedWindowSeconds
+      ? Math.max(.2, requestedWindowSeconds)
       : Math.max(.2, Math.min(Math.max(.2, durationSeconds), requestedWindowSeconds));
-    if (!anchor && durationSeconds === undefined) return { windowSeconds };
+    if (!Number.isFinite(windowSeconds)) return null;
+    if (!anchor && durationSeconds === undefined) return windowSeconds === view.windowSeconds ? null : { windowSeconds };
     const requestedStart = anchor
       ? view.start + anchor.timeRatio * (view.windowSeconds - windowSeconds)
       : view.start;
     const start = boundedTimeStart(requestedStart, windowSeconds, durationSeconds);
+    if (!Number.isFinite(start)) return null;
     return windowSeconds === view.windowSeconds && start === view.start
       ? null : { windowSeconds, start };
   }
