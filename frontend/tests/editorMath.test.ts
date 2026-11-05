@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop } from "../src/editor/editorMath.ts";
+import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, contextMenuDeleteIndices, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop } from "../src/editor/editorMath.ts";
 
 
 test("Direct Spectrum crop maps time and pitch overlap without stretching", () => {
@@ -245,4 +245,27 @@ test("context menu deletes only the pointed note, never the full selection", () 
   assert.deepEqual(contextMenuDeleteIndices(3), [3]);
   assert.deepEqual(contextMenuDeleteIndices(null), []);
   assert.deepEqual(selection, [0, 2, 4]);
+});
+
+test("timeline second ticks retain ordinary viewport alignment", () => {
+  assert.deepEqual(boundedTimelineTickRange(20, 12, 1), { first: 20, stride: 1, count: 13 });
+});
+
+test("timeline second ticks are bounded and aligned for long recordings", () => {
+  const range = boundedTimelineTickRange(123.4, 36_000, 10);
+  assert.ok(range.count > 0 && range.count <= 600);
+  assert.ok(range.stride > 1);
+  assert.equal(range.first % range.stride, 0);
+});
+
+test("timeline ticks reject invalid and unrepresentable ranges", () => {
+  for (const [start, window, step] of [
+    [NaN, 12, 1], [0, Infinity, 1], [0, 12, 0], [1e18, 3600, 10],
+  ]) assert.equal(boundedTimelineTickRange(start, window, step).count, 0);
+});
+
+test("canvas iterates a bounded timeline tick count", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /boundedTimelineTickRange\(props\.view\.start,props\.view\.windowSeconds,secStep\)/);
+  assert.doesNotMatch(source, /for\s*\(let t=Math\.floor\(props\.view\.start\/secStep\)/);
 });
