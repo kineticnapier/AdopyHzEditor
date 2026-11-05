@@ -304,7 +304,10 @@ export function boundedTimelineTickRange(
   if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || to < from) return empty;
   const total = to - from + 1;
   if (!Number.isSafeInteger(total) || total <= 0) return empty;
-  const stride = Math.max(1, Math.ceil(total / cap));
+  // Keep tick spacing stable while panning: rounded viewport endpoints can
+  // change the apparent tick count by one even when zoom is unchanged.
+  const stride = Math.max(1, Math.ceil((Math.ceil(windowSeconds / step) + 2) / cap));
+  if (!Number.isSafeInteger(stride)) return empty;
   // Keep the grid aligned to the same absolute ticks while panning.
   const first = Math.floor(from / stride) * stride;
   if (!Number.isSafeInteger(first)) return empty;
@@ -326,7 +329,10 @@ export function boundedGridRange(start: number, windowSeconds: number, beat: num
   if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || last < first) return empty;
   const total = last - first + 1;
   if (!Number.isSafeInteger(total) || total <= 0) return empty;
-  const stride = Math.max(1, Math.ceil(total / cap));
+  // Derive the stride from zoom, not rounded viewport endpoints. Otherwise
+  // scrolling near a decimation boundary changes every displayed beat line.
+  const stride = Math.max(1, Math.ceil((Math.ceil(windowSeconds / beat) + 2) / cap));
+  if (!Number.isSafeInteger(stride)) return empty;
   // Align decimated beats to the global grid, not the current viewport edge.
   // Otherwise panning by one beat flips every other visible line at stride=2.
   const alignedFirst = Math.ceil(first / stride) * stride;
