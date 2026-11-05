@@ -72,6 +72,21 @@ test("CQT viewport zoom maps the overlapping source interval to the correct dest
   assert.deepEqual(zoomOut, { sx: 0, sw: 1200, dx: 0, dw: 600 });
 });
 
+test("CQT time crop rejects non-finite and overflowing metadata before canvas drawing", () => {
+  const valid: [number, number, number, number, number, number] = [0, 12, 3, 6, 1200, 1200];
+  for (let index = 0; index < valid.length; index += 1) {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      const input: typeof valid = [...valid];
+      input[index] = bad;
+      assert.equal(spectrogramTimeCrop(...input), null, `index ${index} / ${bad}`);
+    }
+  }
+  assert.equal(spectrogramTimeCrop(-1e308, 1e308, 0, 12, 1200, 1200), null);
+  assert.equal(spectrogramTimeCrop(0, 12, 1e308, 1e308, 1200, 1200), null);
+  assert.equal(spectrogramTimeCrop(0, 12, 0, 12, Number.MIN_VALUE, 1200), null);
+  assert.deepEqual(spectrogramTimeCrop(...valid), { sx: 300, sw: 600, dx: 0, dw: 1200 });
+});
+
 test("grid rendering is bounded for extreme BPM and zoom", () => {
   const range = boundedGridRange(0, 3600, 60 / 999999, 0);
   assert.ok(range.count <= 2000);
