@@ -323,6 +323,6 @@ test("extreme Ctrl wheel zoom stays within the backend's duration and 0.2s limit
 
 test("overflowing unbounded pan is ignored instead of passing Infinity to set_view", () => {
   assert.equal(wheelViewChange(wheel(Infinity, 0), view), null);
-  assert.equal(wheelViewChange(wheel(0, 1e308), view), null);
+  assert.equal(wheelViewChange(wheel(0, 1e308), { ...view, windowSeconds: 1e308 }), null);
   assert.deepEqual(wheelViewChange(wheel(0, 120), view), { start: 20.96 });
 });
