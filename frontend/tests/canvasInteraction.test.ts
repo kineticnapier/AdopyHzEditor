@@ -171,3 +171,61 @@ test("App connects Canvas Track hover to the displayed hover state", () => {
   const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(source, /onTrackHover=\{setHoveredTrack\}/);
 });
+
+test("stale timer callbacks cannot flush a new pointer session", () => {
+  let now = 100, nextId = 0;
+  const scheduled = new Map<number, () => void>();
+  const emitted: string[] = [];
+  const reporter = createTrailingReporter<string>(
+    50, () => now,
+    callback => { const id = ++nextId; scheduled.set(id, callback); return id; },
+    id => { scheduled.delete(id); },
+  );
+  const emit = (value: string) => emitted.push(value);
+  reporter.report("first", emit);
+  now = 110;
+  reporter.report("old pending", emit);
+  const staleCallback = scheduled.get(1);
+  assert.ok(staleCallback);
+  reporter.cancel();
+  now = 120;
+  reporter.report("new first", emit);
+  now = 125;
+  reporter.report("new pending", emit);
+  staleCallback();
+  assert.deepEqual(emitted, ["first", "new first"]);
+  const currentCallback = scheduled.get(2);
+  assert.ok(currentCallback);
+  now = 170;
+  currentCallback();
+  staleCallback();
+  assert.deepEqual(emitted, ["first", "new first", "new pending"]);
+});
+
+test("superseded timer callbacks cannot emit a later pending position early", () => {
+  let now = 100, nextId = 0;
+  const scheduled = new Map<number, () => void>();
+  const emitted: string[] = [];
+  const reporter = createTrailingReporter<string>(
+    50, () => now,
+    callback => { const id = ++nextId; scheduled.set(id, callback); return id; },
+    id => { scheduled.delete(id); },
+  );
+  const emit = (value: string) => emitted.push(value);
+  reporter.report("first", emit);
+  now = 110;
+  reporter.report("old pending", emit);
+  const supersededCallback = scheduled.get(1);
+  assert.ok(supersededCallback);
+  now = 150;
+  reporter.report("immediate", emit);
+  now = 155;
+  reporter.report("new pending", emit);
+  supersededCallback();
+  assert.deepEqual(emitted, ["first", "immediate"]);
+  const currentCallback = scheduled.get(2);
+  assert.ok(currentCallback);
+  now = 200;
+  currentCallback();
+  assert.deepEqual(emitted, ["first", "immediate", "new pending"]);
+});
