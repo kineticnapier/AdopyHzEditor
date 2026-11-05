@@ -83,6 +83,28 @@ test("track spatial index keeps long, crossing, and point segments discoverable"
   assert.deepEqual(nearbySegmentIndices(index, 250, 250), []);
 });
 
+test("track hover index bounds extreme and offscreen segments to the visible canvas", () => {
+  const segments = [
+    { ax: -1e9, ay: 40, bx: 1e9, by: 40 }, // crosses the viewport
+    { ax: 1e9, ay: 40, bx: 1e9 + 1, by: 40 }, // entirely outside
+    { ax: NaN, ay: 40, bx: 60, by: 40 },
+    { ax: Infinity, ay: 40, bx: 60, by: 40 },
+    { ax: -3, ay: 10, bx: -3, by: 10 }, // within pointer tolerance
+  ];
+  const index = buildSegmentSpatialIndex(segments, 24, 8, { width: 120, height: 80 });
+  assert.ok(index.buckets.size <= 48, `unexpected bucket count: ${index.buckets.size}`);
+  assert.ok(nearbySegmentIndices(index, 60, 40).includes(0));
+  assert.ok(nearbySegmentIndices(index, 0, 10).includes(4));
+  assert.ok([...index.buckets.values()].every(indices => indices.every(i => i === 0 || i === 4)));
+  assert.deepEqual(nearbySegmentIndices(index, 60, 60), []);
+});
+
+test("track hover index refuses invalid viewport dimensions", () => {
+  const segments = [{ ax: -1e9, ay: 40, bx: 1e9, by: 40 }];
+  for (const width of [0, NaN, Infinity, -1])
+    assert.equal(buildSegmentSpatialIndex(segments, 24, 8, { width, height: 80 }).buckets.size, 0);
+});
+
 test("keyboard note navigation follows time order and clamps at both ends", () => {
   const order = [2, 0, 1];
   assert.equal(adjacentNoteIndex(order, null, 1), 2);
