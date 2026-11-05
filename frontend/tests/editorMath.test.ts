@@ -178,6 +178,24 @@ test("beat grid retains ordinary ticks and bounds long recordings", () => {
   assert.ok(long.first + (long.count - 1) * long.stride <= long.last);
 });
 
+test("beat grid decimation stays at the same density while panning at a boundary", () => {
+  const left = boundedGridRange(0, 3998.9, 1, 0);
+  const shifted = boundedGridRange(.5, 3998.9, 1, 0);
+  assert.equal(left.stride, 3);
+  assert.equal(shifted.stride, left.stride);
+  assert.equal(shifted.first, left.first);
+  assert.ok(left.count <= 2000 && shifted.count <= 2000);
+});
+
+test("timeline decimation stays at the same density while panning at a boundary", () => {
+  const left = boundedTimelineTickRange(0, 11989, 10);
+  const shifted = boundedTimelineTickRange(5, 11989, 10);
+  assert.equal(left.stride, 3);
+  assert.equal(shifted.stride, left.stride);
+  assert.equal(shifted.first, left.first);
+  assert.ok(left.count <= 600 && shifted.count <= 600);
+});
+
 test("decimated beat grid stays phase-aligned when the viewport pans", () => {
   const first = boundedGridRange(1, 3998, 1, 0);
   const shifted = boundedGridRange(2, 3998, 1, 0);
