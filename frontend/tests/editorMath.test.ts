@@ -121,6 +121,30 @@ test("track hover index bounds extreme and offscreen segments to the visible can
   assert.deepEqual(nearbySegmentIndices(index, 60, 79), []);
 });
 
+test("diagonal Track hover index follows the visible line rather than filling its bounding box", () => {
+  const index = buildSegmentSpatialIndex(
+    [{ ax: -1e9, ay: -1e9, bx: 1e9, by: 1e9 }],
+    24, 8, { width: 4096, height: 2048 },
+  );
+  assert.ok(index.buckets.size < 1000, `diagonal indexed too many cells: ${index.buckets.size}`);
+  assert.ok(nearbySegmentIndices(index, 1000, 1000).includes(0));
+  assert.deepEqual(nearbySegmentIndices(index, 1000, 1700), []);
+  for (const bucket of index.buckets.values()) assert.equal(bucket.length, new Set(bucket).size);
+});
+
+test("clipped diagonal and point Track segments retain near-line and edge hover candidates", () => {
+  const index = buildSegmentSpatialIndex([
+    { ax: -1e9, ay: -1e9, bx: 1e9, by: 1e9 },
+    { ax: -200, ay: 50, bx: 300, by: 50 },
+    { ax: 20, ay: 20, bx: 20, by: 20 },
+  ], 24, 8, { width: 120, height: 80 });
+  for (const [x, y] of [[0, 5], [24, 30], [48, 55], [72, 72]]) {
+    assert.ok(nearbySegmentIndices(index, x, y).includes(0), `missing diagonal near ${x},${y}`);
+  }
+  assert.ok(nearbySegmentIndices(index, 120, 50).includes(1));
+  assert.ok(nearbySegmentIndices(index, 20, 20).includes(2));
+});
+
 test("track hover index refuses invalid viewport dimensions", () => {
   const segments = [{ ax: -1e9, ay: 40, bx: 1e9, by: 40 }];
   for (const width of [0, NaN, Infinity, -1])
