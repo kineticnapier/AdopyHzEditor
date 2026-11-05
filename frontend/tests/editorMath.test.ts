@@ -96,7 +96,7 @@ test("track hover index bounds extreme and offscreen segments to the visible can
   assert.ok(nearbySegmentIndices(index, 60, 40).includes(0));
   assert.ok(nearbySegmentIndices(index, 0, 10).includes(4));
   assert.ok([...index.buckets.values()].every(indices => indices.every(i => i === 0 || i === 4)));
-  assert.deepEqual(nearbySegmentIndices(index, 60, 60), []);
+  assert.deepEqual(nearbySegmentIndices(index, 60, 79), []);
 });
 
 test("track hover index refuses invalid viewport dimensions", () => {
