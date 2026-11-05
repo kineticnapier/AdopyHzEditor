@@ -7,7 +7,7 @@ import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -118,12 +118,14 @@ function resizeNote(note: NoteDto, edge: "start" | "end", delta: number, setting
 }
 
 export default function EditorCanvas(props: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null), playheadRef = useRef<HTMLCanvasElement>(null), containerRef = useRef<HTMLDivElement>(null), lastCursorReport = useRef(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null), playheadRef = useRef<HTMLCanvasElement>(null), containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 500 });
   const [drag, setDrag] = useState<DragState | null>(null);
   const [keyboardNote, setKeyboardNote] = useState<number | null>(null);
   const keyboardSelectionRef = useRef<number[] | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
+  const cursorReporterRef = useRef(createTrailingReporter<{ time: number; midi: number; track: TrackHoverInfo | null }>(50));
+  useEffect(() => () => cursorReporterRef.current.cancel(), []);
   const wheelPitchAccumulatorRef = useRef<WheelPitchAccumulator>({ modifier: null, remainder: 0 });
   const lastSelectionRef = useRef(props.selected);
   const lastNotesRef = useRef(props.notes);
@@ -348,6 +350,7 @@ export default function EditorCanvas(props: Props) {
   function clearTrackSelection(){props.onTrackSelectionChange({ids:[],range:null,useRange:false});}
   function onPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
     if(event.button!==0 || !canStartCanvasGesture(activePointerIdRef.current))return;
+    cursorReporterRef.current.cancel();
     event.currentTarget.focus({ preventScroll: true });
     keyboardSelectionRef.current = null;
     setKeyboardNote(null);
@@ -389,9 +392,11 @@ export default function EditorCanvas(props: Props) {
     if(activePointerIdRef.current!==null && !isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
     const p=eventPosition(event);
     if(drag){setDrag({...drag,nowTime:p.time,nowMidi:p.midi});return;}
-    const now=performance.now();
     const track=hoveredTrack(p.x,p.y);
-    if(now-lastCursorReport.current>=50){lastCursorReport.current=now;props.onCursorMove?.(p.time,p.midi);props.onTrackHover?.(track);}
+    cursorReporterRef.current.report({time:p.time,midi:p.midi,track}, value => {
+      props.onCursorMove?.(value.time,value.midi);
+      props.onTrackHover?.(value.track);
+    });
     if(event.ctrlKey&&event.altKey&&props.selected.length){event.currentTarget.style.cursor="crosshair";return;}
     const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
     event.currentTarget.style.cursor=hit!==null&&!event.altKey&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":track?"pointer":"crosshair";
@@ -434,6 +439,7 @@ export default function EditorCanvas(props: Props) {
   }
   function cancelDrag(event:ReactPointerEvent<HTMLCanvasElement>){
     if(!isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
+    cursorReporterRef.current.cancel();
     activePointerIdRef.current = null;
     releaseCanvasPointerCapture(event.currentTarget, event.pointerId);
     setDrag(null);
@@ -476,7 +482,7 @@ export default function EditorCanvas(props: Props) {
   }
   useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const handler=(event:WheelEvent)=>{event.preventDefault();const rect=canvas.getBoundingClientRect(),changes=wheelViewChange(event,props.view,{timeRatio:Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),pitchRatio:Math.max(0,Math.min(1,(rect.bottom-event.clientY)/Math.max(1,rect.height)))},wheelPitchAccumulatorRef.current,props.playback.duration);if(changes)void props.onView(changes)};canvas.addEventListener("wheel",handler,{passive:false});return()=>canvas.removeEventListener("wheel",handler)},[props.onView,props.view,props.playback.duration]);
   return <div className="canvas-wrap" ref={containerRef}>
-    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>props.onTrackHover?.(null)} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
+    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>{cursorReporterRef.current.cancel();props.onTrackHover?.(null)}} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
     <span id="editor-keyboard-help" className="sr-only">左右矢印で時間順にノートを選択します。Shiftと矢印で複数選択、Escapeで選択解除します。F1で操作方法を確認できます。</span>
     <span id="editor-selection-status" className="sr-only" aria-live="polite">{keyboardNote === null ? "" : (()=>{const note=props.notes[keyboardNote];return note ? `${keyboardNote + 1}番目の${(note.kind??"note")==="curve"?"カーブノート":"ノート"}、開始${note.start.toFixed(3)}秒、${midiLabel(note.midi)}、選択${props.selected.length}件` : ""})()}</span>
