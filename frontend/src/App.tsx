@@ -56,6 +56,7 @@ import {
   runWithErrorFeedback,
 } from "./api/requestCoordinator";
 import type { ToolBackendApi } from "./api/toolsBridge";
+import { createSelectionMutationGuard } from "./editor/selectionMutationGuard";
 
 const defaultSettings: EditorSettings = {
   volume: 85,
@@ -208,7 +209,8 @@ export default function App() {
   const viewRequests = useRef(new LatestRequestGate());
   const playbackRequests = useRef(new LatestRequestGate());
   const trackSelectionRequests = useRef(new LatestRequestGate());
-  const deletingSelection = useRef("");
+  // Cut/delete indices go stale once the first request is queued.
+  const destructiveSelection = useRef(createSelectionMutationGuard());
   const documentGeneration = useRef(0);
   const analysisIdentity = useRef("");
   const pendingSaveGuard = useRef(new AsyncActionGuard());
@@ -929,26 +931,19 @@ export default function App() {
       );
   }
   async function deleteNotes(indices = selected) {
-    if (!api || !indices.length) return;
-    const key = [...indices].sort((a, b) => a - b).join(",");
-    if (deletingSelection.current === key) return;
-    deletingSelection.current = key;
-    try {
-      await queuedMutation(
-        () => api.delete_notes(indices),
-        () => [],
-      );
-    } finally {
-      if (deletingSelection.current === key) deletingSelection.current = "";
-    }
+    if (!api) return;
+    await destructiveSelection.current.run(indices, () => queuedMutation(
+      () => api.delete_notes(indices),
+      () => [],
+    ));
   }
   async function cutRange(indices: number[], start: number, end: number) {
-    if (api && indices.length)
-      await queuedMutation(
-        () => api.cut_notes_range(indices, start, end),
-        (r) => r.indices ?? [],
-        (r) => r.changed !== false,
-      );
+    if (!api) return;
+    await destructiveSelection.current.run(indices, () => queuedMutation(
+      () => api.cut_notes_range(indices, start, end),
+      (r) => r.indices ?? [],
+      (r) => r.changed !== false,
+    ));
   }
   async function duplicate() {
     if (api && selected.length)
@@ -987,12 +982,13 @@ export default function App() {
     }
   }
   async function cutSelected() {
-    if (api)
-      await queuedMutation(
-        () => api.cut_notes(selected),
-        () => [],
-        (r) => r.changed !== false,
-      );
+    if (!api) return;
+    const indices = selected;
+    await destructiveSelection.current.run(indices, () => queuedMutation(
+      () => api.cut_notes(indices),
+      () => [],
+      (r) => r.changed !== false,
+    ));
   }
   async function pasteAtPlayback() {
     if (api)
