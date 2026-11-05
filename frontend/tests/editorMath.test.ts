@@ -43,6 +43,24 @@ test("CQT pitch crop preserves fractional rows and rejects disjoint ranges", () 
   assert.equal(spectrogramPitchVisibleCrop(8, 60, 1, 64, 70, 0), null);
 });
 
+test("CQT pitch crop rejects non-finite and overflowing metadata before canvas drawing", () => {
+  const valid: [number, number, number, number, number, number] = [8, 60, 1, 64, 70, 600];
+  for (let index = 0; index < valid.length; index += 1) {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      const input: typeof valid = [...valid];
+      input[index] = bad;
+      assert.equal(spectrogramPitchVisibleCrop(...input), null, `index ${index} / ${bad}`);
+    }
+  }
+  assert.equal(spectrogramPitchVisibleCrop(8, 60, 1e308, 64, 70, 600), null);
+  assert.equal(spectrogramPitchVisibleCrop(8, 1e308, 1e308, 64, 70, 600), null);
+  assert.equal(spectrogramPitchVisibleCrop(8, 60, 1, -1e308, 1e308, 600), null);
+  assert.equal(spectrogramPitchVisibleCrop(8, 60, Number.MIN_VALUE, 64, 70, 600), null);
+  assert.equal(spectrogramPitchVisibleCrop(8.5, 60, 1, 64, 70, 600), null);
+  assert.equal(spectrogramPitchVisibleCrop(Number.MAX_SAFE_INTEGER + 1, 60, 1, 64, 70, 600), null);
+  assert.deepEqual(spectrogramPitchVisibleCrop(...valid), { sy: 0, sh: 3.5, dy: 250, dh: 350 });
+});
+
 test("CQT stale viewport crop keeps absolute time position while scrolling right", () => {
   const crop = spectrogramTimeCrop(0, 12, .96, 12, 1200, 1200);
   assert.ok(crop);
