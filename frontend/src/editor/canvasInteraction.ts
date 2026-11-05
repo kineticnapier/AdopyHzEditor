@@ -66,6 +66,8 @@ export function createTrailingReporter<T>(
       if (timer !== null) cancelTimer(timer);
       timer = null;
       pending = null;
+      // A new pointer session must report its first position immediately.
+      lastReport = -Infinity;
     },
   };
 }
