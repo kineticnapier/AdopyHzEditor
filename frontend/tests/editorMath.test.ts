@@ -146,6 +146,31 @@ test("grid rendering is bounded for extreme BPM and zoom", () => {
   assert.ok(range.stride > 1);
 });
 
+test("beat grid retains ordinary ticks and bounds long recordings", () => {
+  assert.deepEqual(boundedGridRange(0, 12, 1, 0),
+    { first: 0, last: 12, stride: 1, count: 13 });
+  const long = boundedGridRange(123.4, 36_000, 1, 0);
+  assert.ok(long.count > 0 && long.count <= 2000);
+  assert.ok(long.stride > 1);
+  assert.ok(long.first + (long.count - 1) * long.stride <= long.last);
+});
+
+test("beat grid rejects unsafe ticks and non-finite intermediate values", () => {
+  for (const [start, window, beat, offset] of [
+    [1e18, 3600, 1, 0], [0, 12, 0, 0], [0, 12, -1, 0],
+    [0, 12, NaN, 0], [0, 12, 1, Infinity],
+    [0, 12, Number.MIN_VALUE, 0], [1e308, 1e308, 1, 0],
+  ]) {
+    assert.equal(boundedGridRange(start, window, beat, offset).count, 0);
+  }
+});
+
+test("canvas iterates beat ticks by bounded count, not floating-point additions", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /for\s*\(let i=0;i<beatGrid\.count;i\+=1\)/);
+  assert.doesNotMatch(source, /for\s*\(let k=first;k<=last;k\+=stride\)/);
+});
+
 test("time index excludes notes outside the pointer time", () => {
   const notes = Array.from({length:1000},(_,i)=>({start:i,end:i+.25,midi:60,velocity:100}));
   const candidates=noteCandidatesAt(buildNoteTimeIndex(notes),500.1);
