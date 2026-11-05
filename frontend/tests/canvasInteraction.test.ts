@@ -134,3 +134,28 @@ test("canvas wires trailing reports and cancels them on pointer leave and unmoun
   assert.match(source, /onPointerLeave=\{\(\)=>\{cursorReporterRef\.current\.cancel\(\);props\.onTrackHover\?\.\(null\)\}\}/);
   assert.match(source, /useEffect\(\(\) => \(\) => cursorReporterRef\.current\.cancel\(\), \[\]\)/);
 });
+
+test("cancel resets the throttle so reentering the canvas reports immediately", () => {
+  let now = 100, nextId = 0;
+  const scheduled = new Map<number, () => void>();
+  const emitted: string[] = [];
+  const reporter = createTrailingReporter<string>(
+    50, () => now,
+    callback => { const id = ++nextId; scheduled.set(id, callback); return id; },
+    id => { scheduled.delete(id); },
+  );
+  reporter.report("initial", value => emitted.push(value));
+  now = 110;
+  reporter.report("old pending", value => emitted.push(value));
+  assert.equal(scheduled.size, 1);
+  reporter.cancel();
+  now = 115;
+  reporter.report("new session", value => emitted.push(value));
+  assert.deepEqual(emitted, ["initial", "new session"]);
+  assert.equal(scheduled.size, 0);
+});
+
+test("canvas invalidates pending hover reports when view or document data changes", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /useEffect\(\(\) => \{ cursorReporterRef\.current\.cancel\(\); \}, \[props\.notes, props\.frequencyTracks, props\.view, size\]\)/);
+});
