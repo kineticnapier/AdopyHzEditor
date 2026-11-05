@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramTimeCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
+import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
@@ -217,12 +217,10 @@ export default function EditorCanvas(props: Props) {
       const dataStart=decoded.start??0,dataEnd=decoded.end??decoded.duration;
       const timeCrop=spectrogramTimeCrop(dataStart,dataEnd,props.view.start,props.view.windowSeconds,decoded.cols,w);
       const top=props.view.pitchBottom+props.view.visibleNotes-.5,bottom=props.view.pitchBottom-.5;
-      const {sy,sh}=spectrogramPitchCrop(decoded.rows,decoded.midiMin,decoded.pitchStep??1,bottom,top);
-      const sourceBottom=decoded.midiMin,sourceTop=decoded.midiMin+(decoded.rows-1)*(decoded.pitchStep??1),visibleBottom=Math.max(bottom,sourceBottom),visibleTop=Math.min(top,sourceTop);
-      if(timeCrop&&visibleTop>visibleBottom){
-        const dy=(top-visibleTop)/Math.max(1,props.view.visibleNotes)*h,dh=(visibleTop-visibleBottom)/Math.max(1,props.view.visibleNotes)*h;
+      const pitchCrop=spectrogramPitchVisibleCrop(decoded.rows,decoded.midiMin,decoded.pitchStep??1,bottom,top,h);
+      if(timeCrop&&pitchCrop){
         ctx.save(); ctx.globalAlpha=props.view.mode==="spec"?1:.7; ctx.imageSmoothingEnabled=props.settings.displayMode==="smooth";
-        ctx.drawImage(spectrumCanvas,timeCrop.sx,sy,timeCrop.sw,sh,timeCrop.dx,dy,timeCrop.dw,dh); ctx.restore();
+        ctx.drawImage(spectrumCanvas,timeCrop.sx,pitchCrop.sy,timeCrop.sw,pitchCrop.sh,timeCrop.dx,pitchCrop.dy,timeCrop.dw,pitchCrop.dh); ctx.restore();
       }
     }
     if(directSpectrumCanvas&&props.directSpectrum&&props.view.mode!=="notes"){
