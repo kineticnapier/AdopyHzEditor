@@ -99,22 +99,28 @@ export function spectrogramTimeCrop(
   sourceCols: number,
   destinationWidth: number,
 ) {
-  const sourceSpan = Math.max(0, sourceEnd - sourceStart);
-  const viewSpan = Math.max(0, viewWindowSeconds);
-  if (sourceSpan <= 1e-12 || viewSpan <= 1e-12 || sourceCols <= 0 || destinationWidth <= 0) return null;
+  // Invalid metadata must not reach CanvasRenderingContext2D.drawImage.
+  if (![sourceStart, sourceEnd, viewStart, viewWindowSeconds, sourceCols, destinationWidth].every(Number.isFinite) ||
+      !Number.isSafeInteger(sourceCols)) return null;
+  const sourceSpan = sourceEnd - sourceStart;
+  const viewSpan = viewWindowSeconds;
+  if (!Number.isFinite(sourceSpan) || sourceSpan <= 1e-12 || viewSpan <= 1e-12 ||
+      sourceCols <= 0 || destinationWidth <= 0) return null;
 
   const viewEnd = viewStart + viewSpan;
+  if (!Number.isFinite(viewEnd)) return null;
   const overlapStart = Math.max(sourceStart, viewStart);
   const overlapEnd = Math.min(sourceEnd, viewEnd);
   if (overlapEnd <= overlapStart) return null;
 
   const overlap = overlapEnd - overlapStart;
-  return {
+  const crop = {
     sx: (overlapStart - sourceStart) / sourceSpan * sourceCols,
     sw: overlap / sourceSpan * sourceCols,
     dx: (overlapStart - viewStart) / viewSpan * destinationWidth,
     dw: overlap / viewSpan * destinationWidth,
   };
+  return Object.values(crop).every(Number.isFinite) && crop.sw > 0 && crop.dw > 0 ? crop : null;
 }
 
 
