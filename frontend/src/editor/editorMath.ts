@@ -63,8 +63,32 @@ export function noteIntersects(note: NoteDto, x1: number, x2: number, y1: number
 export function spectrogramPitchCrop(rows: number, midiMin: number, pitchStep: number, viewBottom: number, viewTop: number) {
   const step = Math.max(1e-9, pitchStep), bottom = midiMin - step / 2, top = midiMin + (rows - .5) * step;
   const sy = Math.max(0, (top - viewTop) / (top - bottom) * rows);
-  const sh = Math.max(1, Math.min(rows - sy, (viewTop - viewBottom) / (top - bottom) * rows));
+  const sh = Math.max(0, Math.min(rows - sy, (viewTop - viewBottom) / (top - bottom) * rows));
   return { sy, sh };
+}
+
+
+/** Map only the visible pitch overlap to matching source and canvas rectangles.
+ * Using the full viewport for source cropping stretches the spectrogram when
+ * the pitch view extends above or below the available spectrum bins. */
+export function spectrogramPitchVisibleCrop(
+  rows: number, midiMin: number, pitchStep: number,
+  viewBottom: number, viewTop: number, destinationHeight: number,
+) {
+  if (![rows, midiMin, pitchStep, viewBottom, viewTop, destinationHeight].every(Number.isFinite) ||
+      rows <= 0 || pitchStep <= 0 || viewTop <= viewBottom || destinationHeight <= 0) return null;
+  const sourceBottom = midiMin - pitchStep / 2;
+  const sourceTop = midiMin + (rows - .5) * pitchStep;
+  const visibleBottom = Math.max(viewBottom, sourceBottom);
+  const visibleTop = Math.min(viewTop, sourceTop);
+  if (visibleTop <= visibleBottom) return null;
+  const { sy, sh } = spectrogramPitchCrop(rows, midiMin, pitchStep, visibleBottom, visibleTop);
+  const viewSpan = viewTop - viewBottom;
+  return {
+    sy, sh,
+    dy: (viewTop - visibleTop) / viewSpan * destinationHeight,
+    dh: (visibleTop - visibleBottom) / viewSpan * destinationHeight,
+  };
 }
 
 export function spectrogramTimeCrop(
