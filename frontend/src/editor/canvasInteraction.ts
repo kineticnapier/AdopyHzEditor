@@ -30,3 +30,42 @@ export function releaseCanvasPointerCapture(
   canvas.releasePointerCapture(pointerId);
   return true;
 }
+
+/** Report immediately at most once per interval, then deliver the final pointer position.
+ * Without a trailing report, a pointer that stops during the throttle window can
+ * leave the displayed Track and cursor position stale until the next movement. */
+export function createTrailingReporter<T>(
+  intervalMs: number,
+  now: () => number = () => performance.now(),
+  schedule: (callback: () => void, delayMs: number) => number = (callback, delayMs) => window.setTimeout(callback, delayMs),
+  cancelTimer: (id: number) => void = id => window.clearTimeout(id),
+) {
+  let lastReport = -Infinity;
+  let timer: number | null = null;
+  let pending: { value: T; emit: (value: T) => void } | null = null;
+  const flush = () => {
+    timer = null;
+    const current = pending;
+    pending = null;
+    if (!current) return;
+    lastReport = now();
+    current.emit(current.value);
+  };
+  return {
+    report(value: T, emit: (value: T) => void) {
+      pending = { value, emit };
+      const remaining = intervalMs - (now() - lastReport);
+      if (remaining <= 0) {
+        if (timer !== null) cancelTimer(timer);
+        flush();
+      } else if (timer === null) {
+        timer = schedule(flush, remaining);
+      }
+    },
+    cancel() {
+      if (timer !== null) cancelTimer(timer);
+      timer = null;
+      pending = null;
+    },
+  };
+}
