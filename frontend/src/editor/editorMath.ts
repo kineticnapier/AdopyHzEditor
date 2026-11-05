@@ -283,6 +283,29 @@ export function adjacentNoteIndex(order: number[], current: number | null, direc
   return order[Math.max(0, Math.min(order.length - 1, position + direction))];
 }
 
+/** Cap timeline second ticks so long recordings cannot stall Canvas redraws.
+ * Use an index-based loop: adding a tiny step to a huge timestamp can stop advancing. */
+export function boundedTimelineTickRange(
+  start: number, windowSeconds: number, step: number, maxLines = 600,
+) {
+  const empty = { first: 0, stride: 1, count: 0 };
+  const cap = Math.floor(maxLines);
+  if (![start, windowSeconds, step, maxLines].every(Number.isFinite) ||
+      windowSeconds <= 0 || step <= 0 || cap <= 0) return empty;
+  const end = start + windowSeconds;
+  if (!Number.isFinite(end)) return empty;
+  const from = Math.floor(start / step), to = Math.ceil(end / step);
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || to < from) return empty;
+  const total = to - from + 1;
+  if (!Number.isSafeInteger(total) || total <= 0) return empty;
+  const stride = Math.max(1, Math.ceil(total / cap));
+  // Keep the grid aligned to the same absolute ticks while panning.
+  const first = Math.floor(from / stride) * stride;
+  if (!Number.isSafeInteger(first)) return empty;
+  const count = Math.min(cap, Math.floor((to - first) / stride) + 1);
+  return { first, stride, count };
+}
+
 export function boundedGridRange(start: number, windowSeconds: number, beat: number, offset: number, maxLines = 2000) {
   const first = Math.floor((start - offset) / beat), last = Math.ceil((start + windowSeconds - offset) / beat);
   const total = Math.max(0, last - first + 1), stride = Math.max(1, Math.ceil(total / Math.max(1, maxLines)));
