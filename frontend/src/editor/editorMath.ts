@@ -306,10 +306,23 @@ export function boundedTimelineTickRange(
   return { first, stride, count };
 }
 
+/** Bound beat-grid work even for invalid or unrepresentable view/BPM values.
+ * The caller must iterate by count, not by repeatedly adding stride to a large tick. */
 export function boundedGridRange(start: number, windowSeconds: number, beat: number, offset: number, maxLines = 2000) {
-  const first = Math.floor((start - offset) / beat), last = Math.ceil((start + windowSeconds - offset) / beat);
-  const total = Math.max(0, last - first + 1), stride = Math.max(1, Math.ceil(total / Math.max(1, maxLines)));
-  return { first, last, stride, count: total ? Math.floor((last - first) / stride) + 1 : 0 };
+  const empty = { first: 0, last: -1, stride: 1, count: 0 };
+  const cap = Math.floor(maxLines);
+  if (![start, windowSeconds, beat, offset, maxLines].every(Number.isFinite) ||
+      windowSeconds <= 0 || beat <= 0 || cap <= 0) return empty;
+  const end = start + windowSeconds;
+  const from = (start - offset) / beat, to = (end - offset) / beat;
+  if (![end, from, to].every(Number.isFinite)) return empty;
+  const first = Math.floor(from), last = Math.ceil(to);
+  if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || last < first) return empty;
+  const total = last - first + 1;
+  if (!Number.isSafeInteger(total) || total <= 0) return empty;
+  const stride = Math.max(1, Math.ceil(total / cap));
+  const count = Math.min(cap, Math.floor((last - first) / stride) + 1);
+  return { first, last, stride, count };
 }
 
 /** Right-click acts on the note under the pointer; Delete acts on the selection. */
