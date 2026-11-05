@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -75,4 +75,62 @@ test("canvas Escape wires Track invalidation into the idle path only", () => {
   assert.match(handler, /if \(canvasEscapeAction\(drag !== null\) === "cancel-drag"\) \{[\s\S]*?return;\s*\}/);
   assert.match(handler, /clearIdleCanvasSelection\(clearTrackSelection, \(\) => props\.onSelect\(\[\]\)\)/);
   assert.equal(handler.match(/clearIdleCanvasSelection\(/g)?.length, 1);
+});
+
+test("cursor reporting delivers the final position after the throttle interval", () => {
+  let now = 100, nextId = 0;
+  const scheduled = new Map<number, { callback: () => void; delay: number }>();
+  const emitted: string[] = [];
+  const reporter = createTrailingReporter<string>(
+    50,
+    () => now,
+    (callback, delay) => {
+      const id = ++nextId;
+      scheduled.set(id, { callback, delay });
+      return id;
+    },
+    id => { scheduled.delete(id); },
+  );
+  reporter.report("first", value => emitted.push(value));
+  assert.deepEqual(emitted, ["first"]);
+  now = 120;
+  reporter.report("intermediate", value => emitted.push(value));
+  now = 130;
+  reporter.report("final", value => emitted.push(value));
+  assert.deepEqual(emitted, ["first"]);
+  assert.equal(scheduled.size, 1);
+  const [id, timer] = [...scheduled][0];
+  assert.equal(timer.delay, 30);
+  now = 150;
+  scheduled.delete(id);
+  timer.callback();
+  assert.deepEqual(emitted, ["first", "final"]);
+  assert.equal(scheduled.size, 0);
+});
+
+test("leaving the canvas cancels pending cursor and Track hover reports", () => {
+  let now = 100, nextId = 0;
+  const scheduled = new Map<number, () => void>();
+  const emitted: string[] = [];
+  const reporter = createTrailingReporter<string>(
+    50, () => now,
+    callback => { const id = ++nextId; scheduled.set(id, callback); return id; },
+    id => { scheduled.delete(id); },
+  );
+  reporter.report("initial", value => emitted.push(value));
+  now = 110;
+  reporter.report("stale", value => emitted.push(value));
+  assert.equal(scheduled.size, 1);
+  reporter.cancel();
+  assert.equal(scheduled.size, 0);
+  now = 200;
+  reporter.report("new", value => emitted.push(value));
+  assert.deepEqual(emitted, ["initial", "new"]);
+});
+
+test("canvas wires trailing reports and cancels them on pointer leave and unmount", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /cursorReporterRef\.current\.report\(/);
+  assert.match(source, /onPointerLeave=\{\(\)=>\{cursorReporterRef\.current\.cancel\(\);props\.onTrackHover\?\.\(null\)\}\}/);
+  assert.match(source, /useEffect\(\(\) => \(\) => cursorReporterRef\.current\.cancel\(\), \[\]\)/);
 });
