@@ -327,8 +327,12 @@ export function boundedGridRange(start: number, windowSeconds: number, beat: num
   const total = last - first + 1;
   if (!Number.isSafeInteger(total) || total <= 0) return empty;
   const stride = Math.max(1, Math.ceil(total / cap));
-  const count = Math.min(cap, Math.floor((last - first) / stride) + 1);
-  return { first, last, stride, count };
+  // Align decimated beats to the global grid, not the current viewport edge.
+  // Otherwise panning by one beat flips every other visible line at stride=2.
+  const alignedFirst = Math.ceil(first / stride) * stride;
+  if (!Number.isSafeInteger(alignedFirst) || alignedFirst > last) return empty;
+  const count = Math.min(cap, Math.floor((last - alignedFirst) / stride) + 1);
+  return { first: alignedFirst, last, stride, count };
 }
 
 /** Right-click acts on the note under the pointer; Delete acts on the selection. */

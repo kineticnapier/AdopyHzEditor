@@ -178,6 +178,22 @@ test("beat grid retains ordinary ticks and bounds long recordings", () => {
   assert.ok(long.first + (long.count - 1) * long.stride <= long.last);
 });
 
+test("decimated beat grid stays phase-aligned when the viewport pans", () => {
+  const first = boundedGridRange(1, 3998, 1, 0);
+  const shifted = boundedGridRange(2, 3998, 1, 0);
+  assert.equal(first.stride, 2);
+  assert.equal(shifted.stride, 2);
+  assert.ok(first.first % first.stride === 0);
+  assert.equal(shifted.first, first.first);
+  assert.ok(first.count <= 2000 && shifted.count <= 2000);
+  assert.ok(first.first + (first.count - 1) * first.stride <= first.last);
+  assert.ok(shifted.first + (shifted.count - 1) * shifted.stride <= shifted.last);
+  const offset = boundedGridRange(1.25, 3998, 1, .25);
+  assert.equal(offset.first, first.first);
+  const negative = boundedGridRange(-3, 3998, 1, 0);
+  assert.ok(negative.first % negative.stride === 0);
+});
+
 test("beat grid rejects unsafe ticks and non-finite intermediate values", () => {
   for (const [start, window, beat, offset] of [
     [1e18, 3600, 1, 0], [0, 12, 0, 0], [0, 12, -1, 0],
