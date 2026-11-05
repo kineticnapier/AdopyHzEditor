@@ -171,6 +171,46 @@ export function buildSegmentSpatialIndex(
   const maxX = viewport ? Math.floor((viewport.width + padding) / size) : Infinity;
   const minY = viewport ? Math.floor(-padding / size) : -Infinity;
   const maxY = viewport ? Math.floor((viewport.height + padding) / size) : Infinity;
+  // A diagonal crossing the viewport must not occupy its entire bounding box.
+  // Walk the clipped line instead; neighboring cells retain the 8px hit margin.
+  if (viewport) {
+    const radius = Math.ceil((Math.max(0, padding) + size / 4) / size);
+    segments.forEach((segment, index) => {
+      if (![segment.ax, segment.ay, segment.bx, segment.by].every(Number.isFinite)) return;
+      const dx = segment.bx - segment.ax, dy = segment.by - segment.ay;
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+      // Liang-Barsky clipping to the visible rectangle, including hit padding.
+      let from = 0, to = 1;
+      for (const [p, q] of [
+        [-dx, segment.ax + padding], [dx, viewport.width + padding - segment.ax],
+        [-dy, segment.ay + padding], [dy, viewport.height + padding - segment.ay],
+      ]) {
+        if (p === 0) { if (q < 0) return; continue; }
+        const t = q / p;
+        if (p < 0) from = Math.max(from, t); else to = Math.min(to, t);
+        if (from > to) return;
+      }
+      const startX = segment.ax + dx * from, startY = segment.ay + dy * from;
+      const endX = segment.ax + dx * to, endY = segment.ay + dy * to;
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(endX - startX), Math.abs(endY - startY)) / (size / 2)));
+      const visited = new Set<string>();
+      for (let step = 0; step <= steps; step += 1) {
+        const t = step / steps;
+        const cx = Math.floor((startX + (endX - startX) * t) / size);
+        const cy = Math.floor((startY + (endY - startY) * t) / size);
+        for (let x = Math.max(minX, cx - radius); x <= Math.min(maxX, cx + radius); x += 1) {
+          for (let y = Math.max(minY, cy - radius); y <= Math.min(maxY, cy + radius); y += 1) {
+            const key = `${x}:${y}`;
+            if (visited.has(key)) continue;
+            visited.add(key);
+            const bucket = buckets.get(key);
+            if (bucket) bucket.push(index); else buckets.set(key, [index]);
+          }
+        }
+      }
+    });
+    return { cellSize: size, buckets };
+  }
   segments.forEach((segment, index) => {
     if (![segment.ax, segment.ay, segment.bx, segment.by].every(Number.isFinite)) return;
     const left = Math.max(minX, Math.floor((Math.min(segment.ax, segment.bx) - padding) / size));
