@@ -6,7 +6,7 @@ import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
-import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
+import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
@@ -123,6 +123,7 @@ export default function EditorCanvas(props: Props) {
   const [drag, setDrag] = useState<DragState | null>(null);
   const [keyboardNote, setKeyboardNote] = useState<number | null>(null);
   const keyboardSelectionRef = useRef<number[] | null>(null);
+  const keyboardAnchorRef = useRef<number | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
   const cursorReporterRef = useRef(createTrailingReporter<{ time: number; midi: number; track: TrackHoverInfo | null }>(50));
   useEffect(() => () => cursorReporterRef.current.cancel(), []);
@@ -142,6 +143,11 @@ export default function EditorCanvas(props: Props) {
     keyboardSelectionRef.current = null;
     const previous = lastSelectionRef.current;
     const notesChanged = lastNotesRef.current !== props.notes;
+    const sameSelection = (a: readonly number[] | null, b: readonly number[]) =>
+      a !== null && a.length === b.length && a.every((index, i) => index === b[i]);
+    // A mouse/inspector selection or document edit starts a new keyboard range.
+    if (notesChanged || !(sameSelection(expected, props.selected) || sameSelection(previous, props.selected)))
+      keyboardAnchorRef.current = null;
     lastSelectionRef.current = props.selected;
     lastNotesRef.current = props.notes;
     setKeyboardNote(focused =>
@@ -380,6 +386,7 @@ export default function EditorCanvas(props: Props) {
     props.onTrackHover?.(null);
     event.currentTarget.focus({ preventScroll: true });
     keyboardSelectionRef.current = null;
+    keyboardAnchorRef.current = null;
     setKeyboardNote(null);
     event.currentTarget.setPointerCapture(event.pointerId);
     activePointerIdRef.current = event.pointerId;
@@ -486,6 +493,7 @@ export default function EditorCanvas(props: Props) {
         return;
       }
       keyboardSelectionRef.current = [];
+      keyboardAnchorRef.current = null;
       setKeyboardNote(null);
       clearIdleCanvasSelection(clearTrackSelection, () => props.onSelect([]));
       return;
@@ -494,9 +502,14 @@ export default function EditorCanvas(props: Props) {
     if (!keyboardOrder.length) return;
     event.preventDefault();
     const delta = event.key === "ArrowRight" ? 1 : -1;
-    const next = adjacentNoteIndex(keyboardOrder, keyboardNote ?? props.selected.at(-1) ?? null, delta);
+    const current = keyboardNote ?? props.selected.at(-1) ?? null;
+    const next = adjacentNoteIndex(keyboardOrder, current, delta);
     if (next === null) return;
-    const nextSelection = event.shiftKey ? Array.from(new Set([...props.selected, next])).sort((a, b) => a - b) : [next];
+    // Shift extends/shrinks one anchored range, rather than permanently unioning
+    // every note ever visited by the keyboard focus.
+    const anchor = event.shiftKey ? (keyboardAnchorRef.current ?? current ?? next) : null;
+    const nextSelection = anchor === null ? [next] : keyboardRangeSelection(keyboardOrder, anchor, next);
+    keyboardAnchorRef.current = anchor;
     keyboardSelectionRef.current = nextSelection;
     setKeyboardNote(next);
     props.onSelect(nextSelection);
