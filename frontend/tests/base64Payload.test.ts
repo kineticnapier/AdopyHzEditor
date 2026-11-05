@@ -15,6 +15,25 @@ test("malformed base64 returns null instead of crashing canvas render", () => {
   }
 });
 
+test("non-string API payloads are rejected without calling atob", () => {
+  const previousAtob = globalThis.atob;
+  let decodeCalls = 0;
+  globalThis.atob = (value: string) => {
+    decodeCalls += 1;
+    return previousAtob(value);
+  };
+  try {
+    for (const invalid of [undefined, null, 0, 123, {}, []]) {
+      const payload = invalid as unknown as string;
+      assert.equal(decodeBase64Bytes(payload), null, String(invalid));
+      assert.equal(decodeSizedBase64Bytes(payload, 3), null, String(invalid));
+    }
+    assert.equal(decodeCalls, 0);
+  } finally {
+    globalThis.atob = previousAtob;
+  }
+});
+
 test("oversized encoded payload is rejected before base64 decoding", () => {
   const previousAtob = globalThis.atob;
   let decoded = false;
