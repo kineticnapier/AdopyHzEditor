@@ -290,3 +290,39 @@ test("Alt wheel clears fractional carry when arriving at minimum visible notes",
   assert.deepEqual(wheelViewChange(wheel(0, 30, { altKey: true }), { ...nearNarrow, ...outward }, undefined, carry),
     { visibleNotes: 7, pitchBottom: nearNarrow.pitchBottom });
 });
+
+test("non-finite wheel inputs never publish a view update or retain pitch carry", () => {
+  const accumulator = { modifier: "shift", remainder: .75 } as import("../src/editor/wheelNavigation.ts").WheelPitchAccumulator;
+  for (const event of [
+    wheel(Infinity, 0), wheel(-Infinity, 0), wheel(NaN, 0),
+    wheel(0, Infinity, { ctrlKey: true }), wheel(0, NaN, { shiftKey: true }),
+  ]) {
+    assert.equal(wheelViewChange(event, view, undefined, accumulator, 60), null);
+    assert.equal(accumulator.modifier, null);
+    assert.equal(accumulator.remainder, 0);
+    accumulator.modifier = "shift";
+    accumulator.remainder = .75;
+  }
+  assert.equal(wheelViewChange(wheel(0, 120, { ctrlKey: true }), view,
+    { timeRatio: NaN, pitchRatio: .5 }, undefined, 60), null);
+});
+
+test("extreme Ctrl wheel zoom stays within the backend's duration and 0.2s limits", () => {
+  const anchor = { timeRatio: .5, pitchRatio: .5 };
+  assert.deepEqual(wheelViewChange(wheel(0, 1_200_000, { ctrlKey: true }),
+    view, anchor, undefined, 60), { windowSeconds: 60, start: 0 });
+  const zoomIn = wheelViewChange(wheel(0, -1_200_000, { ctrlKey: true }),
+    view, anchor, undefined, 60);
+  assert.ok(zoomIn?.windowSeconds !== undefined && zoomIn.start !== undefined);
+  assert.equal(zoomIn.windowSeconds, .2);
+  assert.ok(Number.isFinite(zoomIn.start));
+  assert.deepEqual(wheelViewChange(wheel(0, -1_200_000, { ctrlKey: true }), view),
+    { windowSeconds: .2 });
+  assert.equal(wheelViewChange(wheel(0, 1_200_000, { ctrlKey: true }), view), null);
+});
+
+test("overflowing unbounded pan is ignored instead of passing Infinity to set_view", () => {
+  assert.equal(wheelViewChange(wheel(Infinity, 0), view), null);
+  assert.equal(wheelViewChange(wheel(0, 1e308), view), null);
+  assert.deepEqual(wheelViewChange(wheel(0, 120), view), { start: 20.96 });
+});
