@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
+import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
@@ -235,20 +235,18 @@ export default function EditorCanvas(props: Props) {
     }
     if(directSpectrumCanvas&&props.directSpectrum&&props.view.mode!=="notes"){
       const payload=props.directSpectrum;
-      const viewStart=props.view.start,viewEnd=viewStart+props.view.windowSeconds;
-      const viewBottom=props.view.pitchBottom-.5,viewTop=viewBottom+props.view.visibleNotes;
-      const sourceStart=payload.startTime??viewStart,sourceEnd=payload.endTime??viewEnd;
-      const sourceBottom=payload.minMidi??viewBottom,sourceTop=payload.maxMidi??viewTop;
-      const timeStart=Math.max(viewStart,sourceStart),timeEnd=Math.min(viewEnd,sourceEnd);
-      const pitchBottom=Math.max(viewBottom,sourceBottom),pitchTop=Math.min(viewTop,sourceTop);
-      if(timeEnd>timeStart&&pitchTop>pitchBottom){
-        const sourceTimeSpan=Math.max(1e-6,sourceEnd-sourceStart),sourcePitchSpan=Math.max(1e-6,sourceTop-sourceBottom);
-        const sx=(timeStart-sourceStart)/sourceTimeSpan*directSpectrumCanvas.width,sw=(timeEnd-timeStart)/sourceTimeSpan*directSpectrumCanvas.width;
-        const sy=(sourceTop-pitchTop)/sourcePitchSpan*directSpectrumCanvas.height,sh=(pitchTop-pitchBottom)/sourcePitchSpan*directSpectrumCanvas.height;
-        const dx=(timeStart-viewStart)/Math.max(.001,props.view.windowSeconds)*w,dw=(timeEnd-timeStart)/Math.max(.001,props.view.windowSeconds)*w;
-        const dy=(viewTop-pitchTop)/Math.max(1,props.view.visibleNotes)*h,dh=(pitchTop-pitchBottom)/Math.max(1,props.view.visibleNotes)*h;
+      const viewBottom = props.view.pitchBottom - .5;
+      const crop = directSpectrumVisibleCrop(
+        payload.startTime ?? props.view.start,
+        payload.endTime ?? props.view.start + props.view.windowSeconds,
+        payload.minMidi ?? viewBottom,
+        payload.maxMidi ?? viewBottom + props.view.visibleNotes,
+        props.view.start, props.view.windowSeconds, viewBottom, props.view.visibleNotes,
+        directSpectrumCanvas.width, directSpectrumCanvas.height, w, h,
+      );
+      if (crop) {
         ctx.save();ctx.globalAlpha=(props.settings.spectrumOpacity/100)*(props.view.mode==="spec"?1:.82);ctx.imageSmoothingEnabled=false;
-        ctx.drawImage(directSpectrumCanvas,sx,sy,sw,sh,dx,dy,dw,dh);ctx.restore();
+        ctx.drawImage(directSpectrumCanvas,crop.sx,crop.sy,crop.sw,crop.sh,crop.dx,crop.dy,crop.dw,crop.dh);ctx.restore();
       }
     }
     if(decodedTracks&&props.view.mode!=="notes"){
