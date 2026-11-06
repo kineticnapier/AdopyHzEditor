@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -358,4 +358,28 @@ test("canvas clears captured drag on page exit even if its own blur never fires"
   const release = handler.indexOf("releaseCanvasPointerCapture(canvasRef.current, pointerId);");
   const cancel = handler.indexOf("setDrag(null);");
   assert.ok(reset >= 0 && release > reset && cancel > release);
+});
+
+test("resizing a canvas cancels only a live gesture with changed dimensions", () => {
+  const before = { width: 800, height: 500 };
+  assert.equal(shouldCancelCanvasGestureForResize(null, before, { width: 900, height: 500 }), false);
+  assert.equal(shouldCancelCanvasGestureForResize(7, before, { width: 800, height: 500 }), false);
+  assert.equal(shouldCancelCanvasGestureForResize(7, before, { width: 900, height: 500 }), true);
+  assert.equal(shouldCancelCanvasGestureForResize(7, before, { width: 800, height: 480 }), true);
+});
+
+test("ResizeObserver cancels the captured edit before applying a new canvas size", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const observer = new ResizeObserver(");
+  const end = source.indexOf("observer.observe(el);", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /const previous = observedCanvasSizeRef\.current;/);
+  assert.match(handler, /observedCanvasSizeRef\.current = next;/);
+  assert.match(handler, /if \(shouldCancelCanvasGestureForResize\(activePointerIdRef\.current, previous, next\)\)/);
+  const reset = handler.indexOf("activePointerIdRef.current = null;");
+  const release = handler.indexOf("releaseCanvasPointerCapture(canvasRef.current, pointerId);");
+  const cancel = handler.indexOf("setDrag(null);");
+  const resize = handler.indexOf("setSize(next);");
+  assert.ok(reset >= 0 && release > reset && cancel > release && resize > cancel);
 });
