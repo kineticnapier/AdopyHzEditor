@@ -211,7 +211,7 @@ export default function App() {
   const viewRequests = useRef(new LatestRequestGate());
   const playbackRequests = useRef(new LatestRequestGate());
   const trackSelectionRequests = useRef(new LatestRequestGate());
-  const deletingSelection = useRef("");
+  const deletingSelection = useRef(new AsyncActionGuard());
   const documentGeneration = useRef(0);
   const analysisIdentity = useRef("");
   const pendingSaveGuard = useRef(new AsyncActionGuard());
@@ -940,17 +940,14 @@ export default function App() {
   }
   async function deleteNotes(indices = selected) {
     if (!api || !indices.length) return;
-    const key = [...indices].sort((a, b) => a - b).join(",");
-    if (deletingSelection.current === key) return;
-    deletingSelection.current = key;
-    try {
+    // Even disjoint index sets become stale after an earlier deletion shifts notes.
+    // Do not queue another delete until the first request has settled.
+    await deletingSelection.current.run(async () => {
       await queuedMutation(
         () => api.delete_notes(indices),
         () => [],
       );
-    } finally {
-      if (deletingSelection.current === key) deletingSelection.current = "";
-    }
+    });
   }
   async function cutRange(indices: number[], start: number, end: number) {
     if (api && indices.length)
