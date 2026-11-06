@@ -49,14 +49,19 @@ test("unrelated Canvas renders must not discard uncommitted wheel movement", () 
   assert.equal(resetEffect[1].replace(/\s/g, ""), "[props.view]");
 });
 
-test("Canvas and App use synchronous optimistic view snapshots for wheel bursts", () => {
+test("Canvas connects the stable wheel listener to current view and callback refs", () => {
   const canvas = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(canvas, /const wheelViewRef = useRef\(props\.view\)/);
-  assert.match(canvas, /wheelViewChange\(\s*event,\s*wheelViewRef\.current/);
-  assert.match(canvas, /wheelViewRef\.current = \{\s*\.\.\.wheelViewRef\.current,\s*\.\.\.changes\s*\}/);
-  assert.match(app, /const latestView = useRef\(view\)/);
-  assert.match(app, /const currentView = latestView\.current;[\s\S]*?clampPitchViewChange\(currentView, changes\)/);
-  assert.match(app, /hasEffectiveViewChange\(currentView, normalized\)/);
-  assert.match(app, /latestView\.current = next;\s*setView\(next\)/);
+  assert.match(canvas, /const wheelViewRef = useRef\\(props\\.view\\)/);
+  assert.match(canvas, /const wheelOnViewRef = useRef\\(props\\.onView\\)/);
+  assert.match(canvas, /wheelOnViewRef\\.current = props\\.onView/);
+  assert.match(canvas, /wheelDurationRef\\.current = props\\.playback\\.duration/);
+  assert.match(canvas, /createCanvasWheelHandler\\(\\{[\\s\\S]*?view: wheelViewRef,[\\s\\S]*?onView: wheelOnViewRef/);
+  assert.match(canvas, /canvas\\.addEventListener\\("wheel", handler, \\{ passive: false \\}\\)/);
+  assert.match(canvas, /canvas\\.removeEventListener\\("wheel", handler\\)/);
+  assert.match(canvas, /canvas\\.removeEventListener\\("wheel", handler\\);\\s*\\}, \\[\\]\\)/);
+  assert.match(app, /const latestView = useRef\\(view\\)/);
+  assert.match(app, /const currentView = latestView\\.current;[\\s\\S]*?clampPitchViewChange\\(currentView, changes\\)/);
+  assert.match(app, /hasEffectiveViewChange\\(currentView, normalized\\)/);
+  assert.match(app, /latestView\\.current = next;\\s*setView\\(next\\)/);
 });
