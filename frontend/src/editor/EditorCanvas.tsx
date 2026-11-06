@@ -7,7 +7,7 @@ import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, createTrailingReporter } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -127,6 +127,17 @@ export default function EditorCanvas(props: Props) {
   const activePointerIdRef = useRef<number | null>(null);
   const cursorReporterRef = useRef(createTrailingReporter<{ time: number; midi: number; track: TrackHoverInfo | null }>(50));
   useEffect(() => () => cursorReporterRef.current.cancel(), []);
+  useEffect(() => observeCanvasPageExit(window, document, () => {
+    // Window blur (Alt+Tab, browser chrome) need not blur the focused canvas.
+    // Do not allow a captured drag to resume after returning to this page.
+    const pointerId = activePointerIdRef.current;
+    if (pointerId === null) return;
+    cursorReporterRef.current.cancel();
+    activePointerIdRef.current = null;
+    if (canvasRef.current) releaseCanvasPointerCapture(canvasRef.current, pointerId);
+    setDrag(null);
+  }), []);
+
   // View/data changes invalidate hover coordinates captured by a delayed report.
   // This also covers document replacement without unmounting the canvas.
   useEffect(() => {

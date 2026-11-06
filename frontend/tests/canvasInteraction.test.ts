@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -327,4 +327,35 @@ test("wheel input cannot move the viewport while a canvas pointer gesture is act
   const dispatch = handler.indexOf("props.onView(changes)", compute);
   assert.ok(prevent >= 0 && guard > prevent && reset > guard && stop > reset);
   assert.ok(compute > stop && dispatch > compute);
+});
+
+test("window blur and page hiding cancel a canvas gesture, with cleanup", () => {
+  const windowTarget = new EventTarget();
+  const documentTarget = Object.assign(new EventTarget(), { visibilityState: "visible" });
+  let cancellations = 0;
+  const dispose = observeCanvasPageExit(windowTarget, documentTarget, () => { cancellations += 1; });
+  documentTarget.dispatchEvent(new Event("visibilitychange"));
+  assert.equal(cancellations, 0);
+  windowTarget.dispatchEvent(new Event("blur"));
+  assert.equal(cancellations, 1);
+  documentTarget.visibilityState = "hidden";
+  documentTarget.dispatchEvent(new Event("visibilitychange"));
+  assert.equal(cancellations, 2);
+  dispose();
+  windowTarget.dispatchEvent(new Event("blur"));
+  documentTarget.dispatchEvent(new Event("visibilitychange"));
+  assert.equal(cancellations, 2);
+});
+
+test("canvas clears captured drag on page exit even if its own blur never fires", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("useEffect(() => observeCanvasPageExit(window, document,");
+  const end = source.indexOf("}), []);", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /if \(pointerId === null\) return;/);
+  const reset = handler.indexOf("activePointerIdRef.current = null;");
+  const release = handler.indexOf("releaseCanvasPointerCapture(canvasRef.current, pointerId);");
+  const cancel = handler.indexOf("setDrag(null);");
+  assert.ok(reset >= 0 && release > reset && cancel > release);
 });

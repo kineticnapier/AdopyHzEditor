@@ -55,6 +55,26 @@ export function shouldSuppressCanvasNonArrowKeyDuringPointerGesture(
   ].includes(key);
 }
 
+type PageExitEventTarget = Pick<EventTarget, "addEventListener" | "removeEventListener">;
+
+/** Cancel an active canvas gesture when the window loses focus or the page is hidden. */
+export function observeCanvasPageExit(
+  windowTarget: PageExitEventTarget,
+  documentTarget: PageExitEventTarget & { readonly visibilityState: string },
+  cancelGesture: () => void,
+): () => void {
+  const onWindowBlur = () => cancelGesture();
+  const onVisibilityChange = () => {
+    if (documentTarget.visibilityState === "hidden") cancelGesture();
+  };
+  windowTarget.addEventListener("blur", onWindowBlur);
+  documentTarget.addEventListener("visibilitychange", onVisibilityChange);
+  return () => {
+    windowTarget.removeEventListener("blur", onWindowBlur);
+    documentTarget.removeEventListener("visibilitychange", onVisibilityChange);
+  };
+}
+
 /** Report immediately at most once per interval, then deliver the final pointer position.
  * Without a trailing report, a pointer that stops during the throttle window can
  * leave the displayed Track and cursor position stale until the next movement. */
