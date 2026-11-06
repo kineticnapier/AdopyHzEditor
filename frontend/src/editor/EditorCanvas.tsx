@@ -7,7 +7,7 @@ import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -120,6 +120,7 @@ function resizeNote(note: NoteDto, edge: "start" | "end", delta: number, setting
 export default function EditorCanvas(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null), playheadRef = useRef<HTMLCanvasElement>(null), containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 500 });
+  const observedCanvasSizeRef = useRef(size);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [keyboardNote, setKeyboardNote] = useState<number | null>(null);
   const keyboardSelectionRef = useRef<number[] | null>(null);
@@ -205,7 +206,22 @@ export default function EditorCanvas(props: Props) {
 
   useEffect(() => {
     const el = containerRef.current; if (!el) return;
-    const observer = new ResizeObserver(([entry]) => {const next={ width: Math.max(1,entry.contentRect.width), height: Math.max(1,entry.contentRect.height) };setSize(next);props.onViewportSize?.(next)});
+    const observer = new ResizeObserver(([entry]) => {
+      const next = { width: Math.max(1, entry.contentRect.width), height: Math.max(1, entry.contentRect.height) };
+      const previous = observedCanvasSizeRef.current;
+      observedCanvasSizeRef.current = next;
+      // A resize changes the coordinate mapping while a drag retains its start position.
+      // Cancel before publishing the new size so the drag cannot commit with mixed coordinates.
+      if (shouldCancelCanvasGestureForResize(activePointerIdRef.current, previous, next)) {
+        const pointerId = activePointerIdRef.current;
+        cursorReporterRef.current.cancel();
+        activePointerIdRef.current = null;
+        if (canvasRef.current) releaseCanvasPointerCapture(canvasRef.current, pointerId);
+        setDrag(null);
+      }
+      setSize(next);
+      props.onViewportSize?.(next);
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, [props.onViewportSize]);
