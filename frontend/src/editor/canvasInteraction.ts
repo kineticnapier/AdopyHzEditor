@@ -40,6 +40,21 @@ export function shouldSuppressCanvasArrowDuringPointerGesture(
     (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown");
 }
 
+/** While the canvas owns a pointer gesture, other editor shortcuts must not
+ * mutate the captured note indices (or replace the document). Escape still
+ * cancels the gesture; Tab and modifier keys keep their native behavior.
+ * Arrow keys are handled separately by shouldSuppressCanvasArrowDuringPointerGesture.
+ */
+export function shouldSuppressCanvasNonArrowKeyDuringPointerGesture(
+  key: string, activePointerId: number | null,
+): boolean {
+  if (activePointerId === null) return false;
+  return ![
+    "Escape", "Tab", "Control", "Shift", "Alt", "Meta",
+    "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+  ].includes(key);
+}
+
 /** Report immediately at most once per interval, then deliver the final pointer position.
  * Without a trailing report, a pointer that stops during the throttle window can
  * leave the displayed Track and cursor position stale until the next movement. */
