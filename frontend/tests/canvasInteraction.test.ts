@@ -269,6 +269,8 @@ test("context-menu deletion is blocked while another pointer owns a drag", () =>
   const end = source.indexOf("function onCanvasKeyDown(", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
-  assert.match(handler, /event\.preventDefault\(\);\s*if \(!canStartCanvasGesture\(activePointerIdRef\.current\)\) return;/);
-  assert.ok(handler.indexOf("!canStartCanvasGesture") < handler.indexOf("props.onDelete("));
+  const prevent = handler.indexOf("event.preventDefault();");
+  const guard = handler.indexOf("if (!canStartCanvasGesture(activePointerIdRef.current)) return;");
+  const deletion = handler.indexOf("props.onDelete(");
+  assert.ok(prevent >= 0 && guard > prevent && deletion > guard);
 });
