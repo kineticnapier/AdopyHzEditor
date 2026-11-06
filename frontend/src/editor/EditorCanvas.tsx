@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, contextMenuDeleteIndices, isValidTrackSample, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
@@ -478,6 +478,16 @@ export default function EditorCanvas(props: Props) {
     releaseCanvasPointerCapture(event.currentTarget, event.pointerId);
     setDrag(null);
   }
+  function onCanvasBlur(event: ReactFocusEvent<HTMLCanvasElement>) {
+    // Tab or an external focus change ends the gesture before window shortcuts
+    // can act on the note indices captured at pointer down.
+    const pointerId = activePointerIdRef.current;
+    if (pointerId === null) return;
+    cursorReporterRef.current.cancel();
+    activePointerIdRef.current = null;
+    releaseCanvasPointerCapture(event.currentTarget, pointerId);
+    setDrag(null);
+  }
   async function onContextMenu(event:ReactMouseEvent<HTMLCanvasElement>){
     event.preventDefault();
     // A second-button menu must not delete a note while a pointer owns a drag.
@@ -538,7 +548,7 @@ export default function EditorCanvas(props: Props) {
   }
   useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const handler=(event:WheelEvent)=>{event.preventDefault();const rect=canvas.getBoundingClientRect(),changes=wheelViewChange(event,props.view,{timeRatio:Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),pitchRatio:Math.max(0,Math.min(1,(rect.bottom-event.clientY)/Math.max(1,rect.height)))},wheelPitchAccumulatorRef.current,props.playback.duration);if(changes)void props.onView(changes)};canvas.addEventListener("wheel",handler,{passive:false});return()=>canvas.removeEventListener("wheel",handler)},[props.onView,props.view,props.playback.duration]);
   return <div className="canvas-wrap" ref={containerRef}>
-    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>{cursorReporterRef.current.cancel();props.onTrackHover?.(null)}} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
+    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onBlur={onCanvasBlur} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>{cursorReporterRef.current.cancel();props.onTrackHover?.(null)}} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
     <span id="editor-keyboard-help" className="sr-only">左右矢印で時間順にノートを選択します。Shiftと矢印で複数選択、Escapeで選択解除します。F1で操作方法を確認できます。</span>
     <span id="editor-selection-status" className="sr-only" aria-live="polite">{keyboardNote === null ? "" : (()=>{const note=props.notes[keyboardNote];return note ? `${keyboardNote + 1}番目の${(note.kind??"note")==="curve"?"カーブノート":"ノート"}、開始${note.start.toFixed(3)}秒、${midiLabel(note.midi)}、選択${props.selected.length}件` : ""})()}</span>
