@@ -142,7 +142,7 @@ test("Timeline clamps very short durations to the backend minimum window", () =>
 
 test("App normalizes both pitch and time before the follow-playback no-op guard", () => {
   const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(source, /const pitchNormalized = clampPitchViewChange\(view, changes\);[\s\S]*?const normalized = clampTimeViewChange\(view, pitchNormalized, playback\.duration\);[\s\S]*?if \(!hasEffectiveViewChange\(view, normalized\)\) return;/);
+  assert.match(source, /const currentView = latestView\.current;[\s\S]*?const pitchNormalized = clampPitchViewChange\(currentView, changes\);[\s\S]*?const normalized = clampTimeViewChange\(currentView, pitchNormalized, playback\.duration\);[\s\S]*?if \(!hasEffectiveViewChange\(currentView, normalized\)\) return;/);
 });
 
 test("Timeline exposes separate pitch labels in a group rather than a label with two inputs", () => {
