@@ -1,4 +1,5 @@
 import type { ViewState } from "./bridge";
+import { clampPitchViewChange } from "./pitchViewport";
 
 /** Convert wheel pixels, lines and pages to the same nominal wheel tick. */
 function wheelTicks(delta: number, deltaMode: number): number {
@@ -123,8 +124,12 @@ export function wheelViewChange(
       return {visibleNotes,pitchBottom:Math.max(0,Math.min(view.pitchBottom,128-visibleNotes))};
     }
     const midi = view.pitchBottom - .5 + anchor.pitchRatio * view.visibleNotes;
-    const pitchBottom = Math.max(0, Math.min(midi + .5 - anchor.pitchRatio * visibleNotes, 128 - visibleNotes));
-    return { visibleNotes, pitchBottom };
+    // The backend and App round pitchBottom to integer MIDI steps. Keep the
+    // Canvas wheel baseline identical before React commits the next render.
+    return clampPitchViewChange(view, {
+      visibleNotes,
+      pitchBottom: midi + .5 - anchor.pitchRatio * visibleNotes,
+    });
   }
   resetPitchAccumulator();
   if (event.ctrlKey) {
