@@ -28,7 +28,7 @@ function commitFocusedEditBeforeSave(event: ShortcutEvent): void {
   // A window-level keydown may target Document or another non-Element object.
   // Optional chaining does not protect against a present, non-callable closest.
   if (typeof target?.closest !== "function") return;
-  const field = target.closest("input,textarea,[contenteditable='true']") as HTMLElement | null;
+  const field = target.closest("input,textarea,[contenteditable='true'],[contenteditable=''],[contenteditable='plaintext-only']") as HTMLElement | null;
   field?.blur();
 }
 
