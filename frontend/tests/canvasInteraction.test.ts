@@ -260,3 +260,15 @@ test("canvas consumes gesture-time arrows before local and global shortcut handl
   assert.match(handler, /if \(shouldSuppressCanvasArrowDuringPointerGesture\(event\.key, activePointerIdRef\.current\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
   assert.ok(handler.indexOf("shouldSuppressCanvasArrowDuringPointerGesture") < handler.indexOf("isNoteNavigationKey(event)"));
 });
+
+test("context-menu deletion is blocked while another pointer owns a drag", () => {
+  assert.equal(canStartCanvasGesture(null), true);
+  assert.equal(canStartCanvasGesture(7), false);
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("async function onContextMenu(");
+  const end = source.indexOf("function onCanvasKeyDown(", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /event\.preventDefault\(\);\s*if \(!canStartCanvasGesture\(activePointerIdRef\.current\)\) return;/);
+  assert.ok(handler.indexOf("!canStartCanvasGesture") < handler.indexOf("props.onDelete("));
+});
