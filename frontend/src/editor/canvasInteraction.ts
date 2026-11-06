@@ -31,6 +31,15 @@ export function releaseCanvasPointerCapture(
   return true;
 }
 
+/** A held pointer owns the current edit targets. Arrow shortcuts must not
+ * change selection, seek, or move notes before that gesture is released. */
+export function shouldSuppressCanvasArrowDuringPointerGesture(
+  key: string, activePointerId: number | null,
+): boolean {
+  return activePointerId !== null &&
+    (key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown");
+}
+
 /** Report immediately at most once per interval, then deliver the final pointer position.
  * Without a trailing report, a pointer that stops during the throttle window can
  * leave the displayed Track and cursor position stale until the next movement. */

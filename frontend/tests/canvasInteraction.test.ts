@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -240,4 +240,23 @@ test("pointer down clears the displayed Track hover before starting a gesture", 
   const clear = handler.indexOf("props.onTrackHover?.(null);", cancel);
   const capture = handler.indexOf("setPointerCapture(", cancel);
   assert.ok(cancel >= 0 && clear > cancel && capture > clear);
+});
+
+test("arrow shortcuts are consumed while a pointer gesture owns the canvas", () => {
+  for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+    assert.equal(shouldSuppressCanvasArrowDuringPointerGesture(key, 7), true, key);
+    assert.equal(shouldSuppressCanvasArrowDuringPointerGesture(key, null), false, key);
+  }
+  assert.equal(shouldSuppressCanvasArrowDuringPointerGesture("Escape", 7), false);
+  assert.equal(shouldSuppressCanvasArrowDuringPointerGesture("Delete", 7), false);
+});
+
+test("canvas consumes gesture-time arrows before local and global shortcut handlers", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onCanvasKeyDown(");
+  const end = source.indexOf("  useEffect(()=>{const canvas=", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /if \(shouldSuppressCanvasArrowDuringPointerGesture\(event\.key, activePointerIdRef\.current\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
+  assert.ok(handler.indexOf("shouldSuppressCanvasArrowDuringPointerGesture") < handler.indexOf("isNoteNavigationKey(event)"));
 });

@@ -7,7 +7,7 @@ import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, createTrailingReporter } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -496,6 +496,12 @@ export default function EditorCanvas(props: Props) {
       keyboardAnchorRef.current = null;
       setKeyboardNote(null);
       clearIdleCanvasSelection(clearTrackSelection, () => props.onSelect([]));
+      return;
+    }
+    // Keep the pointer gesture's captured note indices stable. Also consume
+    // global Ctrl+Shift+arrow moves and pitch/seek arrows while the pointer is held.
+    if (shouldSuppressCanvasArrowDuringPointerGesture(event.key, activePointerIdRef.current)) {
+      event.preventDefault();
       return;
     }
     if (!isNoteNavigationKey(event)) return;
