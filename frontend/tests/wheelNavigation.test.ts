@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { wheelViewChange, type WheelInput } from "../src/editor/wheelNavigation.ts";
+import { clampPitchViewChange } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
 
 const view: ViewState = {
@@ -325,4 +326,30 @@ test("overflowing unbounded pan is ignored instead of passing Infinity to set_vi
   assert.equal(wheelViewChange(wheel(Infinity, 0), view), null);
   assert.equal(wheelViewChange(wheel(0, 1e308), { ...view, windowSeconds: 1e308 }), null);
   assert.deepEqual(wheelViewChange(wheel(0, 120), view), { start: 20.96 });
+});
+
+test("anchored Alt wheel pitch zoom uses the backend's integer MIDI viewport", () => {
+  const centered = wheelViewChange(
+    wheel(0, 30, { altKey: true }), view, { timeRatio: .5, pitchRatio: .5 },
+  );
+  // 40 - 0.5 + 0.5 * 48 = 63.5; the new 49-note window requests 39.5.
+  // Python round() and App.clampPitchViewChange both use ties-to-even.
+  assert.deepEqual(centered, { visibleNotes: 49, pitchBottom: 40 });
+  const offCenter = wheelViewChange(
+    wheel(0, 30, { altKey: true }), view, { timeRatio: .5, pitchRatio: .75 },
+  );
+  assert.deepEqual(offCenter, { visibleNotes: 49, pitchBottom: 39 });
+});
+
+test("rapid anchored Alt wheel inputs do not drift from App's normalized view", () => {
+  const anchor = { timeRatio: .5, pitchRatio: .5 };
+  let canvasView = view;
+  let appView = view;
+  for (const delta of [30, 30, -30, 30]) {
+    const changes = wheelViewChange(wheel(0, delta, { altKey: true }), canvasView, anchor);
+    assert.ok(changes);
+    canvasView = { ...canvasView, ...changes };
+    appView = { ...appView, ...clampPitchViewChange(appView, changes) };
+    assert.deepEqual(canvasView, appView);
+  }
 });
