@@ -479,7 +479,11 @@ export default function EditorCanvas(props: Props) {
     setDrag(null);
   }
   async function onContextMenu(event:ReactMouseEvent<HTMLCanvasElement>){
-    event.preventDefault();const p=eventPosition(event),hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
+    event.preventDefault();
+    // A second-button menu must not delete a note while a pointer owns a drag.
+    // The pending drag still holds note indices captured before any deletion.
+    if (!canStartCanvasGesture(activePointerIdRef.current)) return;
+    const p=eventPosition(event),hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
     const indices=contextMenuDeleteIndices(hit);
     if(indices.length)await props.onDelete(indices);
   }
