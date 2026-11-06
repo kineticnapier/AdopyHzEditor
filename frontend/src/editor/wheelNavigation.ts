@@ -1,5 +1,5 @@
 import type { ViewState } from "./bridge";
-import { clampPitchViewChange } from "./pitchViewport";
+import { clampPitchViewChange } from "./pitchViewport.ts";
 
 /** Convert wheel pixels, lines and pages to the same nominal wheel tick. */
 function wheelTicks(delta: number, deltaMode: number): number {
