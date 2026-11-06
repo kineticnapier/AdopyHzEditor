@@ -314,21 +314,19 @@ test("focus loss cancels a pending canvas gesture before shortcuts can change no
 });
 
 test("wheel input cannot move the viewport while a canvas pointer gesture is active", () => {
-  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
-  const start = source.indexOf("const handler = (event: WheelEvent) =>");
-  const end = source.indexOf('canvas.addEventListener("wheel", handler', start);
-  assert.ok(start >= 0 && end > start);
-  const handler = source.slice(start, end);
-  const prevent = handler.indexOf("event.preventDefault();");
-  const guard = handler.indexOf("if (activePointerIdRef.current !== null)");
-  const reset = handler.indexOf("wheelPitchAccumulatorRef.current = { modifier: null, remainder: 0 };", guard);
-  const stop = handler.indexOf("return;", reset);
-  const compute = handler.indexOf("wheelViewChange(", stop);
-  const dispatch = handler.indexOf("props.onView(changes)", compute);
+  const source = readFileSync(new URL("../src/editor/canvasWheelHandler.ts", import.meta.url), "utf8");
+  const canvas = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const prevent = source.indexOf("event.preventDefault();");
+  const guard = source.indexOf("if (context.activePointerId.current !== null)");
+  const reset = source.indexOf("context.pitchAccumulator.current = { modifier: null, remainder: 0 };", guard);
+  const stop = source.indexOf("return;", reset);
+  const compute = source.indexOf("wheelViewChange(", stop);
+  const dispatch = source.indexOf("context.onView.current(changes)", compute);
   assert.ok(prevent >= 0 && guard > prevent && reset > guard && stop > reset);
   assert.ok(compute > stop && dispatch > compute);
+  assert.ok(canvas.includes("createCanvasWheelHandler({"));
+  assert.ok(canvas.includes("activePointerId: activePointerIdRef"));
 });
-
 test("window blur and page hiding cancel a canvas gesture, with cleanup", () => {
   const windowTarget = new EventTarget();
   const documentTarget = Object.assign(new EventTarget(), { visibilityState: "visible" });
