@@ -212,6 +212,8 @@ export default function App() {
   const playbackRequests = useRef(new LatestRequestGate());
   const trackSelectionRequests = useRef(new LatestRequestGate());
   const destructiveSelection = useRef(new AsyncActionGuard());
+  // Updated synchronously when backend notes are applied, before React renders.
+  const latestNotes = useRef(notes);
   const documentGeneration = useRef(0);
   const analysisIdentity = useRef("");
   const pendingSaveGuard = useRef(new AsyncActionGuard());
@@ -285,6 +287,7 @@ export default function App() {
     setSettings(state.settings);
     setView(state.view);
     setPlayback(state.playback);
+    latestNotes.current = state.notes;
     setNotes(state.notes);
     setSelected((old) => retainValidSelection(old, state.notes.length));
     setTrackSelection({ ids: [], range: null, useRange: false });
@@ -866,6 +869,7 @@ export default function App() {
     selection?: number[],
     markDirty = true,
   ) {
+    latestNotes.current = result.notes;
     setNotes(result.notes);
     setStatus(result.status);
     if (result.dirty !== undefined) setDirty(result.dirty);
@@ -879,14 +883,21 @@ export default function App() {
     call: () => Promise<NoteMutationResult>,
     selection: (result: NoteMutationResult) => number[] | undefined,
     markDirty: (result: NoteMutationResult) => boolean = () => true,
+    requireFreshNotes = false,
   ) {
     const generation = documentGeneration.current;
+    const snapshot = notes;
+    // A queued edit may refer to indices from a render preceding another edit.
+    // Check both before the backend call and after its response.
+    const isCurrent = () =>
+      generation === documentGeneration.current &&
+      (!requireFreshNotes || latestNotes.current === snapshot);
     return runWithErrorFeedback(
       () => enqueueAppliedTask(
         mutationQueue.current,
         call,
         (result) => applyMutation(result, selection(result), markDirty(result)),
-        () => generation === documentGeneration.current,
+        isCurrent,
       ),
       () => undefined,
       (message) => {
@@ -894,11 +905,18 @@ export default function App() {
       },
     );
   }
+  async function queuedSelectionMutation(
+    call: () => Promise<NoteMutationResult>,
+    selection: (result: NoteMutationResult) => number[] | undefined,
+    markDirty: (result: NoteMutationResult) => boolean = () => true,
+  ) {
+    return queuedMutation(call, selection, markDirty, true);
+  }
   function queueExternalMutation(
     call: () => Promise<NoteMutationResult>,
     selection: (result: NoteMutationResult) => number[] | undefined = () => undefined,
   ) {
-    return queuedMutation(call, selection);
+    return queuedSelectionMutation(call, selection);
   }
   async function addNote(
     start: number,
@@ -915,14 +933,14 @@ export default function App() {
   }
   async function moveNotes(indices: number[], dx: number, dy: number) {
     if (api && indices.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.move_notes(indices, dx, dy),
         () => indices,
       );
   }
   async function duplicateMove(indices: number[], dx: number, dy: number) {
     if (api && indices.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.duplicate_notes_shifted(indices, dx, dy),
         (r) => r.indices ?? [],
       );
@@ -933,7 +951,7 @@ export default function App() {
     delta: number,
   ) {
     if (api && indices.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.resize_notes(indices, edge, delta),
         () => indices,
       );
@@ -943,7 +961,7 @@ export default function App() {
     // Even disjoint index sets become stale after an earlier deletion shifts notes.
     // Do not queue another delete until the first request has settled.
     await destructiveSelection.current.run(async () => {
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.delete_notes(indices),
         () => [],
       );
@@ -952,7 +970,7 @@ export default function App() {
   async function cutRange(indices: number[], start: number, end: number) {
     if (api && indices.length)
       await destructiveSelection.current.run(async () => {
-        await queuedMutation(
+        await queuedSelectionMutation(
           () => api.cut_notes_range(indices, start, end),
           (r) => r.indices ?? [],
           (r) => r.changed !== false,
@@ -961,21 +979,21 @@ export default function App() {
   }
   async function duplicate() {
     if (api && selected.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.duplicate_notes(selected),
         (r) => r.indices ?? [],
       );
   }
   async function quantize() {
     if (api && selected.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.quantize_notes(selected),
         () => selected,
       );
   }
   async function splitSelected() {
     if (api && selected.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.split_notes(selected, playback.time),
         (r) => (r.indices?.length ? r.indices : selected),
       );
@@ -983,12 +1001,13 @@ export default function App() {
   async function copySelected() {
     if (api) {
       const generation = documentGeneration.current;
+      const snapshot = notes;
       await runWithErrorFeedback(
         () => enqueueAppliedTask(
           mutationQueue.current,
           () => api.copy_notes(selected),
           (result) => setStatus(result.status),
-          () => generation === documentGeneration.current,
+          () => generation === documentGeneration.current && latestNotes.current === snapshot,
         ),
         () => undefined,
         (message) => { if (generation === documentGeneration.current) setStatus(`コピーに失敗しました: ${message}`); },
@@ -998,7 +1017,7 @@ export default function App() {
   async function cutSelected() {
     if (api)
       await destructiveSelection.current.run(async () => {
-        await queuedMutation(
+        await queuedSelectionMutation(
           () => api.cut_notes(selected),
           () => [],
           (r) => r.changed !== false,
@@ -1015,7 +1034,7 @@ export default function App() {
   }
   async function applyTargetAngle() {
     if (api)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.apply_target_angle(selected, settings.targetAngle),
         () => selected,
         (r) => r.changed !== false,
@@ -1152,6 +1171,7 @@ export default function App() {
   function exportMidi(selectedOnly = false) {
     if (!api) return;
     const generation = documentGeneration.current;
+    const snapshot = notes;
     // Capture the selection at invocation time, not when earlier edits finish.
     const selectedAtRequest = [...selected];
     const action =
@@ -1166,7 +1186,8 @@ export default function App() {
         if (generation === documentGeneration.current) setStatus(message);
       }),
       () => undefined,
-      () => generation === documentGeneration.current,
+      () => generation === documentGeneration.current &&
+        (!selectedOnly || latestNotes.current === snapshot),
     );
   }
 
