@@ -312,3 +312,19 @@ test("focus loss cancels a pending canvas gesture before shortcuts can change no
   assert.ok(reset >= 0 && release > reset && cancel > release);
   assert.match(source, /onBlur=\{onCanvasBlur\}/);
 });
+
+test("wheel input cannot move the viewport while a canvas pointer gesture is active", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const handler=(event:WheelEvent)=>");
+  const end = source.indexOf('canvas.addEventListener("wheel",handler', start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  const prevent = handler.indexOf("event.preventDefault();");
+  const guard = handler.indexOf("if(activePointerIdRef.current!==null)");
+  const reset = handler.indexOf("wheelPitchAccumulatorRef.current={modifier:null,remainder:0};", guard);
+  const stop = handler.indexOf("return;", reset);
+  const compute = handler.indexOf("wheelViewChange(", stop);
+  const dispatch = handler.indexOf("props.onView(changes)", compute);
+  assert.ok(prevent >= 0 && guard > prevent && reset > guard && stop > reset);
+  assert.ok(compute > stop && dispatch > compute);
+});
