@@ -319,3 +319,22 @@ test("global Track clearing is wired through the request-invalidating App handle
   assert.match(source, /clearTracks:\s*\(\)\s*=>\s*changeTrackSelection\(\{\s*ids:\s*\[\],\s*range:\s*null,\s*useRange:\s*false\s*\}\)/);
   assert.match(source, /function changeTrackSelection\([\s\S]*?trackSelectionRequests\.current\.invalidate\(\)/);
 });
+
+
+test("save commits all supported contenteditable variants before invoking save", () => {
+  for (const [value, modifiers, expected] of [
+    ["", { ctrlKey: true }, "save"],
+    ["plaintext-only", { metaKey: true }, "save"],
+    ["true", { ctrlKey: true, shiftKey: true }, "saveAs"],
+  ] as const) {
+    const { calls, press } = setup();
+    const editable = { blur() { calls.push("commit-editable"); } };
+    const target = {
+      closest(selector: string) {
+        return selector.split(",").includes(`[contenteditable='${value}']`) ? editable : null;
+      },
+    } as unknown as EventTarget;
+    assert.equal(press("s", modifiers, target), true, value);
+    assert.deepEqual(calls, ["commit-editable", expected], value);
+  }
+});
