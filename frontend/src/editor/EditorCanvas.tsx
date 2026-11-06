@@ -174,6 +174,7 @@ export default function EditorCanvas(props: Props) {
     props.onTrackHover?.(null);
   }, [props.notes, props.frequencyTracks, props.view, size]);
   const wheelPitchAccumulatorRef = useRef<WheelPitchAccumulator>({ modifier: null, remainder: 0 });
+  const wheelViewRef = useRef(props.view);
   const lastSelectionRef = useRef(props.selected);
   const lastNotesRef = useRef(props.notes);
   useEffect(() => {
@@ -599,7 +600,39 @@ export default function EditorCanvas(props: Props) {
     if (nextPitchBottom !== null) changes.pitchBottom = nextPitchBottom;
     if (Object.keys(changes).length) void props.onView(changes);
   }
-  useEffect(()=>{const canvas=canvasRef.current;if(!canvas)return;const handler=(event:WheelEvent)=>{event.preventDefault();if(activePointerIdRef.current!==null){wheelPitchAccumulatorRef.current={modifier:null,remainder:0};return;}const rect=canvas.getBoundingClientRect(),changes=wheelViewChange(event,props.view,{timeRatio:Math.max(0,Math.min(1,(event.clientX-rect.left)/Math.max(1,rect.width))),pitchRatio:Math.max(0,Math.min(1,(rect.bottom-event.clientY)/Math.max(1,rect.height)))},wheelPitchAccumulatorRef.current,props.playback.duration);if(changes)void props.onView(changes)};canvas.addEventListener("wheel",handler,{passive:false});return()=>canvas.removeEventListener("wheel",handler)},[props.onView,props.view,props.playback.duration]);
+  // Reset the wheel baseline when a new view is committed by React or the backend.
+  useLayoutEffect(() => {
+    wheelViewRef.current = props.view;
+  });
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handler = (event: WheelEvent) => {
+      event.preventDefault();
+      if (activePointerIdRef.current !== null) {
+        wheelPitchAccumulatorRef.current = { modifier: null, remainder: 0 };
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const changes = wheelViewChange(
+        event,
+        wheelViewRef.current,
+        {
+          timeRatio: Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))),
+          pitchRatio: Math.max(0, Math.min(1, (rect.bottom - event.clientY) / Math.max(1, rect.height))),
+        },
+        wheelPitchAccumulatorRef.current,
+        props.playback.duration,
+      );
+      if (changes) {
+        // The next wheel event can arrive before React renders this change.
+        wheelViewRef.current = { ...wheelViewRef.current, ...changes };
+        void props.onView(changes);
+      }
+    };
+    canvas.addEventListener("wheel", handler, { passive: false });
+    return () => canvas.removeEventListener("wheel", handler);
+  }, [props.onView, props.view, props.playback.duration]);
   return <div className="canvas-wrap" ref={containerRef}>
     <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onBlur={onCanvasBlur} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>{cursorReporterRef.current.cancel();props.onTrackHover?.(null)}} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
