@@ -111,3 +111,51 @@ test("repeated Ctrl+X in a focused native input is not intercepted", () => {
   assert.equal(event.defaultPrevented, false);
   assert.deepEqual(calls, []);
 });
+
+test("repeated Ctrl/Meta+Shift+Arrow nudges are consumed without moving notes twice", () => {
+  const calls: string[] = [];
+  const current = {
+    api: {}, disabled: false, selected: [2], nudgeSeconds: 0.25,
+    move: (indices: number[], dx: number, dy: number) =>
+      calls.push(`${indices.join(",")}:${dx},${dy}`),
+  } as unknown as ShortcutListenerState;
+  const handler = createEditorShortcutHandler(() => current);
+  const keys = [
+    ["ArrowLeft", "-0.25,0"],
+    ["ArrowRight", "0.25,0"],
+    ["ArrowUp", "0,1"],
+    ["ArrowDown", "0,-1"],
+  ] as const;
+  for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
+    for (const [key] of keys) {
+      const first = Object.assign(keyEvent(key), modifier, { shiftKey: true });
+      handler(first);
+      assert.equal(first.defaultPrevented, true, "first " + key);
+      const repeated = Object.assign(keyEvent(key), modifier, { shiftKey: true, repeat: true });
+      handler(repeated);
+      assert.equal(repeated.defaultPrevented, true, "repeat " + key);
+    }
+  }
+  assert.deepEqual(calls, [
+    ...keys.map(([, delta]) => "2:" + delta),
+    ...keys.map(([, delta]) => "2:" + delta),
+  ]);
+});
+
+test("repeated navigation arrows remain available without Shift+Ctrl note movement", () => {
+  const calls: string[] = [];
+  const current = {
+    api: {}, disabled: false,
+    view: { mode: "spec", start: 0, windowSeconds: 12, pitchBottom: 24, visibleNotes: 60 },
+    updateView: (changes: unknown) => calls.push("view:" + JSON.stringify(changes)),
+    seek: (delta: number) => calls.push("seek:" + delta),
+  } as unknown as ShortcutListenerState;
+  const handler = createEditorShortcutHandler(() => current);
+  const pitch = Object.assign(keyEvent("ArrowUp"), { ctrlKey: true, repeat: true });
+  handler(pitch);
+  const seek = Object.assign(keyEvent("ArrowRight"), { shiftKey: true, repeat: true });
+  handler(seek);
+  assert.equal(pitch.defaultPrevented, true);
+  assert.equal(seek.defaultPrevented, true);
+  assert.deepEqual(calls, ['view:{"pitchBottom":36}', "seek:5"]);
+});
