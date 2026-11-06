@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, contextMenuDeleteIndices, isValidTrackSample, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
@@ -7,7 +7,7 @@ import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -127,6 +127,19 @@ export default function EditorCanvas(props: Props) {
   const keyboardAnchorRef = useRef<number | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
   const cursorReporterRef = useRef(createTrailingReporter<{ time: number; midi: number; track: TrackHoverInfo | null }>(50));
+  const observedCanvasViewRef = useRef(props.view);
+  useLayoutEffect(() => {
+    const previous = observedCanvasViewRef.current;
+    observedCanvasViewRef.current = props.view;
+    // Playback follow or an external viewport change must not mix old drag
+    // start coordinates with the new mapping on pointer release.
+    if (!shouldCancelCanvasGestureForViewChange(activePointerIdRef.current, previous, props.view)) return;
+    const pointerId = activePointerIdRef.current;
+    cursorReporterRef.current.cancel();
+    activePointerIdRef.current = null;
+    if (canvasRef.current) releaseCanvasPointerCapture(canvasRef.current, pointerId);
+    setDrag(null);
+  }, [props.view]);
   useEffect(() => () => cursorReporterRef.current.cancel(), []);
   useEffect(() => observeCanvasPageExit(window, document, () => {
     // Window blur (Alt+Tab, browser chrome) need not blur the focused canvas.
