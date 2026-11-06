@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -273,4 +273,26 @@ test("context-menu deletion is blocked while another pointer owns a drag", () =>
   const guard = handler.indexOf("if (!canStartCanvasGesture(activePointerIdRef.current)) return;");
   const deletion = handler.indexOf("props.onDelete(");
   assert.ok(prevent >= 0 && guard > prevent && deletion > guard);
+});
+
+test("non-arrow editor shortcuts cannot change a gesture's captured note indices", () => {
+  for (const key of ["x", "c", "v", "z", "y", "d", "a", "s", "o", "l", "i", "q", "Delete", "Backspace", "F1", "1", " "]) {
+    assert.equal(shouldSuppressCanvasNonArrowKeyDuringPointerGesture(key, 7), true, key);
+    assert.equal(shouldSuppressCanvasNonArrowKeyDuringPointerGesture(key, null), false, key);
+  }
+  for (const key of ["Escape", "Tab", "Control", "Shift", "Alt", "Meta", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+    assert.equal(shouldSuppressCanvasNonArrowKeyDuringPointerGesture(key, 7), false, key);
+  }
+});
+
+test("canvas blocks global editing shortcuts before note navigation while a pointer is held", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onCanvasKeyDown(");
+  const end = source.indexOf("  useEffect(()=>{const canvas=", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /if \(shouldSuppressCanvasNonArrowKeyDuringPointerGesture\(event\.key, activePointerIdRef\.current\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
+  assert.ok(handler.indexOf("shouldSuppressCanvasNonArrowKeyDuringPointerGesture") < handler.indexOf("isNoteNavigationKey(event)"));
+  const shortcutTarget = readFileSync(new URL("../src/editor/shortcutTarget.ts", import.meta.url), "utf8");
+  assert.match(shortcutTarget, /if \(event\.defaultPrevented \|\| disabled/);
 });
