@@ -214,6 +214,7 @@ export default function App() {
   const destructiveSelection = useRef(new AsyncActionGuard());
   // Updated synchronously when backend notes are applied, before React renders.
   const latestNotes = useRef(notes);
+  const latestView = useRef(view);
   const documentGeneration = useRef(0);
   const analysisIdentity = useRef("");
   const pendingSaveGuard = useRef(new AsyncActionGuard());
@@ -272,6 +273,15 @@ export default function App() {
       : null;
   const toolsApi = api as ToolBackendApi | null;
 
+  // Keep the view current between input events, before React commits a render.
+  function applyViewState(next: ViewState) {
+    latestView.current = next;
+    setView(next);
+  }
+  function applyViewChanges(changes: Partial<ViewState>) {
+    applyViewState({ ...latestView.current, ...changes });
+  }
+
   function applyState(state: AppState) {
     documentGeneration.current += 1;
     peakRequest.current.invalidate();
@@ -285,7 +295,7 @@ export default function App() {
       setAnalysisRevision((v) => v + 1);
     }
     setSettings(state.settings);
-    setView(state.view);
+    applyViewState(state.view);
     setPlayback(state.playback);
     latestNotes.current = state.notes;
     setNotes(state.notes);
@@ -596,7 +606,7 @@ export default function App() {
       playback.duration,
     );
     if (next !== null) {
-      setView((v) => ({ ...v, start: next }));
+      applyViewChanges({ start: next });
       // Follow updates must share the manual viewport queue and failure recovery.
       // Otherwise an in-flight follow write can overtake a user's pan/zoom.
       if (api && stateTransitionPending.current === 0)
@@ -691,13 +701,13 @@ export default function App() {
       viewQueue.current,
       action,
       isCurrent,
-      setView,
+      applyViewState,
       async (error) => {
         setStatus(`${label}に失敗しました: ${String(error)}`);
         try {
           // Read the backend's actual view, not the optimistic local value.
           const state = await viewQueue.current.enqueue(() => api.get_state());
-          if (isCurrent()) setView(state.view);
+          if (isCurrent()) applyViewState(state.view);
         } catch (recoveryError) {
           if (isCurrent())
             setStatus(`表示範囲の再取得に失敗しました: ${String(recoveryError)}`);
@@ -711,10 +721,11 @@ export default function App() {
       return;
     }
     // Match Bridge.set_view time and MIDI bounds before optimistic rendering.
-    const pitchNormalized = clampPitchViewChange(view, changes);
-    const normalized = clampTimeViewChange(view, pitchNormalized, playback.duration);
+    const currentView = latestView.current;
+    const pitchNormalized = clampPitchViewChange(currentView, changes);
+    const normalized = clampTimeViewChange(currentView, pitchNormalized, playback.duration);
     // A clamped or repeated input must not cancel follow or enqueue set_view.
-    if (!hasEffectiveViewChange(view, normalized)) return;
+    if (!hasEffectiveViewChange(currentView, normalized)) return;
     if (Object.keys(normalized).some((key) => key !== "mode"))
       setFollowPlayback(false);
     if (normalized.mode === "notes") {
@@ -722,7 +733,7 @@ export default function App() {
       setTrackSelection({ ids: [], range: null, useRange: false });
       setHoveredTrack(null);
     }
-    setView((v) => ({ ...v, ...normalized }));
+    applyViewChanges(normalized);
     if (api) await applyViewAction(() => api.set_view(normalized), "表示範囲の変更");
   }
   async function fitView() {
