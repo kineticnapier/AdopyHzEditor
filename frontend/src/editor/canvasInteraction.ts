@@ -55,6 +55,16 @@ export function shouldSuppressCanvasNonArrowKeyDuringPointerGesture(
   ].includes(key);
 }
 
+/** Resizing the canvas changes pointer-to-note coordinates during an active edit. */
+export function shouldCancelCanvasGestureForResize(
+  activePointerId: number | null,
+  previous: { width: number; height: number },
+  next: { width: number; height: number },
+): boolean {
+  return activePointerId !== null &&
+    (previous.width !== next.width || previous.height !== next.height);
+}
+
 type PageExitEventTarget = Pick<EventTarget, "addEventListener" | "removeEventListener">;
 
 /** Cancel an active canvas gesture when the window loses focus or the page is hidden. */
