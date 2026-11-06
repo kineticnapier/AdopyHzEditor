@@ -401,13 +401,13 @@ test("a viewport mapping or mode change cancels a live canvas gesture", () => {
 
 test("Canvas releases the captured gesture synchronously when its viewport changes", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
-  assert.match(source, /import \\{ useEffect, useLayoutEffect,/);
+  assert.match(source, /import \{ useEffect, useLayoutEffect,/);
   const start = source.indexOf("const observedCanvasViewRef = useRef(props.view);");
   const end = source.indexOf("}, [props.view]);", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
-  assert.match(handler, /useLayoutEffect\\(\\(\\) => \\{/);
-  assert.match(handler, /shouldCancelCanvasGestureForViewChange\\(activePointerIdRef\\.current, previous, props\\.view\\)/);
+  assert.match(handler, /useLayoutEffect\(\(\) => \{/);
+  assert.match(handler, /shouldCancelCanvasGestureForViewChange\(activePointerIdRef\.current, previous, props\.view\)/);
   const updatePrevious = handler.indexOf("observedCanvasViewRef.current = props.view;");
   const guard = handler.indexOf("shouldCancelCanvasGestureForViewChange(");
   const reset = handler.indexOf("activePointerIdRef.current = null;");
