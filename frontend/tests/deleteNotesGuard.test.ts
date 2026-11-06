@@ -60,7 +60,7 @@ test("App shares one guard across delete, cut and range-cut", () => {
     const block = app.slice(start, end);
     assert.match(block, /await destructiveSelection\.current\.run\(async \(\) => \{/);
     assert.match(block, new RegExp(`api\\.${apiCall}\\(`));
-    assert.match(block, /await queuedMutation\(/);
+    assert.match(block, /await queuedSelectionMutation\(/);
   }
   assert.doesNotMatch(app, /deletingSelection/);
 });
