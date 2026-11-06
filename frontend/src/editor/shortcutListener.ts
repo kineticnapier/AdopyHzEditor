@@ -17,7 +17,11 @@ function isRepeatedMutationShortcut(event: KeyboardEvent): boolean {
   const key = event.key.toLowerCase();
   const ctrl = event.ctrlKey || event.metaKey;
   if (ctrl) {
-    if (event.shiftKey) return false;
+    // Ctrl/Meta+Shift+Arrow nudges notes through an asynchronous mutation queue.
+    // Unlike navigation arrows, repeating these can enqueue stale note indices.
+    if (event.shiftKey) return !event.altKey &&
+      (key === "arrowleft" || key === "arrowright" ||
+       key === "arrowup" || key === "arrowdown");
     if (event.altKey) return key === "a";
     return key === "x" || key === "v" || key === "d";
   }
