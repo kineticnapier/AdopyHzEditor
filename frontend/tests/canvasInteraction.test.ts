@@ -68,7 +68,7 @@ test("idle Escape clears Track before Note selection", () => {
 test("canvas Escape wires Track invalidation into the idle path only", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const start = source.indexOf("function onCanvasKeyDown(");
-  const end = source.indexOf("  useEffect(()=>{const canvas=", start);
+  const end = source.indexOf("  useLayoutEffect(() => {\n    wheelViewRef.current = props.view;", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /if \(event\.key === "Escape" && !event\.ctrlKey && !event\.metaKey && !event\.altKey && !event\.shiftKey\) \{/);
@@ -254,7 +254,7 @@ test("arrow shortcuts are consumed while a pointer gesture owns the canvas", () 
 test("canvas consumes gesture-time arrows before local and global shortcut handlers", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const start = source.indexOf("function onCanvasKeyDown(");
-  const end = source.indexOf("  useEffect(()=>{const canvas=", start);
+  const end = source.indexOf("  useLayoutEffect(() => {\n    wheelViewRef.current = props.view;", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /if \(shouldSuppressCanvasArrowDuringPointerGesture\(event\.key, activePointerIdRef\.current\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
@@ -288,7 +288,7 @@ test("non-arrow editor shortcuts cannot change a gesture's captured note indices
 test("canvas blocks global editing shortcuts before note navigation while a pointer is held", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const start = source.indexOf("function onCanvasKeyDown(");
-  const end = source.indexOf("  useEffect(()=>{const canvas=", start);
+  const end = source.indexOf("  useLayoutEffect(() => {\n    wheelViewRef.current = props.view;", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /if \(shouldSuppressCanvasNonArrowKeyDuringPointerGesture\(event\.key, activePointerIdRef\.current\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
@@ -315,13 +315,13 @@ test("focus loss cancels a pending canvas gesture before shortcuts can change no
 
 test("wheel input cannot move the viewport while a canvas pointer gesture is active", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
-  const start = source.indexOf("const handler=(event:WheelEvent)=>");
-  const end = source.indexOf('canvas.addEventListener("wheel",handler', start);
+  const start = source.indexOf("const handler = (event: WheelEvent) =>");
+  const end = source.indexOf('canvas.addEventListener("wheel", handler', start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   const prevent = handler.indexOf("event.preventDefault();");
-  const guard = handler.indexOf("if(activePointerIdRef.current!==null)");
-  const reset = handler.indexOf("wheelPitchAccumulatorRef.current={modifier:null,remainder:0};", guard);
+  const guard = handler.indexOf("if (activePointerIdRef.current !== null)");
+  const reset = handler.indexOf("wheelPitchAccumulatorRef.current = { modifier: null, remainder: 0 };", guard);
   const stop = handler.indexOf("return;", reset);
   const compute = handler.indexOf("wheelViewChange(", stop);
   const dispatch = handler.indexOf("props.onView(changes)", compute);
