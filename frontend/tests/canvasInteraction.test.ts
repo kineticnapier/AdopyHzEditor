@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -382,4 +382,36 @@ test("ResizeObserver cancels the captured edit before applying a new canvas size
   const cancel = handler.indexOf("setDrag(null);");
   const resize = handler.indexOf("setSize(next);");
   assert.ok(reset >= 0 && release > reset && cancel > release && resize > cancel);
+});
+
+test("a viewport mapping or mode change cancels a live canvas gesture", () => {
+  const before = { start: 0, windowSeconds: 10, pitchBottom: 24, visibleNotes: 48, mode: "notes" };
+  assert.equal(shouldCancelCanvasGestureForViewChange(null, before, { ...before, start: 1 }), false);
+  assert.equal(shouldCancelCanvasGestureForViewChange(7, before, { ...before }), false);
+  for (const change of [
+    { start: 1 }, // Playback follow without a wheel event.
+    { windowSeconds: 20 },
+    { pitchBottom: 25 },
+    { visibleNotes: 60 },
+    { mode: "spectrum" },
+  ]) {
+    assert.equal(shouldCancelCanvasGestureForViewChange(7, before, { ...before, ...change }), true, JSON.stringify(change));
+  }
+});
+
+test("Canvas releases the captured gesture synchronously when its viewport changes", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /import \\{ useEffect, useLayoutEffect,/);
+  const start = source.indexOf("const observedCanvasViewRef = useRef(props.view);");
+  const end = source.indexOf("}, [props.view]);", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /useLayoutEffect\\(\\(\\) => \\{/);
+  assert.match(handler, /shouldCancelCanvasGestureForViewChange\\(activePointerIdRef\\.current, previous, props\\.view\\)/);
+  const updatePrevious = handler.indexOf("observedCanvasViewRef.current = props.view;");
+  const guard = handler.indexOf("shouldCancelCanvasGestureForViewChange(");
+  const reset = handler.indexOf("activePointerIdRef.current = null;");
+  const release = handler.indexOf("releaseCanvasPointerCapture(canvasRef.current, pointerId);");
+  const cancel = handler.indexOf("setDrag(null);");
+  assert.ok(updatePrevious >= 0 && guard > updatePrevious && reset > guard && release > reset && cancel > release);
 });
