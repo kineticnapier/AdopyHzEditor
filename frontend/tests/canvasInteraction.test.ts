@@ -296,3 +296,19 @@ test("canvas blocks global editing shortcuts before note navigation while a poin
   const shortcutTarget = readFileSync(new URL("../src/editor/shortcutTarget.ts", import.meta.url), "utf8");
   assert.match(shortcutTarget, /if \(event\.defaultPrevented \|\| disabled/);
 });
+
+test("focus loss cancels a pending canvas gesture before shortcuts can change notes", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onCanvasBlur(");
+  const end = source.indexOf("async function onContextMenu(", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /const pointerId = activePointerIdRef\.current;/);
+  assert.match(handler, /if \(pointerId === null\) return;/);
+  assert.match(handler, /cursorReporterRef\.current\.cancel\(\)/);
+  const reset = handler.indexOf("activePointerIdRef.current = null;");
+  const release = handler.indexOf("releaseCanvasPointerCapture(event.currentTarget, pointerId);");
+  const cancel = handler.indexOf("setDrag(null);");
+  assert.ok(reset >= 0 && release > reset && cancel > release);
+  assert.match(source, /onBlur=\{onCanvasBlur\}/);
+});
