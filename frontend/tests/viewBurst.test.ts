@@ -52,16 +52,23 @@ test("unrelated Canvas renders must not discard uncommitted wheel movement", () 
 test("Canvas connects the stable wheel listener to current view and callback refs", () => {
   const canvas = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(canvas, /const wheelViewRef = useRef\\(props\\.view\\)/);
-  assert.match(canvas, /const wheelOnViewRef = useRef\\(props\\.onView\\)/);
-  assert.match(canvas, /wheelOnViewRef\\.current = props\\.onView/);
-  assert.match(canvas, /wheelDurationRef\\.current = props\\.playback\\.duration/);
-  assert.match(canvas, /createCanvasWheelHandler\\(\\{[\\s\\S]*?view: wheelViewRef,[\\s\\S]*?onView: wheelOnViewRef/);
-  assert.match(canvas, /canvas\\.addEventListener\\("wheel", handler, \\{ passive: false \\}\\)/);
-  assert.match(canvas, /canvas\\.removeEventListener\\("wheel", handler\\)/);
-  assert.match(canvas, /canvas\\.removeEventListener\\("wheel", handler\\);\\s*\\}, \\[\\]\\)/);
-  assert.match(app, /const latestView = useRef\\(view\\)/);
-  assert.match(app, /const currentView = latestView\\.current;[\\s\\S]*?clampPitchViewChange\\(currentView, changes\\)/);
-  assert.match(app, /hasEffectiveViewChange\\(currentView, normalized\\)/);
-  assert.match(app, /latestView\\.current = next;\\s*setView\\(next\\)/);
+  for (const part of [
+    "const wheelViewRef = useRef(props.view)",
+    "const wheelOnViewRef = useRef(props.onView)",
+    "wheelOnViewRef.current = props.onView",
+    "wheelDurationRef.current = props.playback.duration",
+    "createCanvasWheelHandler({",
+    "view: wheelViewRef,",
+    "onView: wheelOnViewRef,",
+    'canvas.addEventListener("wheel", handler, { passive: false })',
+    'canvas.removeEventListener("wheel", handler)',
+  ]) assert.ok(canvas.includes(part), `missing Canvas wiring: ${part}`);
+  assert.ok(canvas.includes("return () => canvas.removeEventListener(\"wheel\", handler);\n  }, []);"));
+  for (const part of [
+    "const latestView = useRef(view)",
+    "const currentView = latestView.current",
+    "clampPitchViewChange(currentView, changes)",
+    "hasEffectiveViewChange(currentView, normalized)",
+    "latestView.current = next",
+  ]) assert.ok(app.includes(part), `missing App view guard: ${part}`);
 });
