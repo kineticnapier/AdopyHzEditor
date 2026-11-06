@@ -56,3 +56,58 @@ test("the hook installs one window listener and updates its state in the layout 
   assert.match(source, /\}, \[\]\);/);
   assert.doesNotMatch(source, /\}, \[a\]\);\s*\}/);
 });
+
+test("repeated destructive editor chords are consumed without duplicate mutations", () => {
+  const calls: string[] = [];
+  const current = {
+    api: {}, disabled: false,
+    cut: () => calls.push("cut"),
+    paste: () => calls.push("paste"),
+    duplicate: () => calls.push("duplicate"),
+    quantize: () => calls.push("quantize"),
+    applyTargetAngle: () => calls.push("angle"),
+    undo: () => calls.push("undo"),
+    seek: (delta: number) => calls.push("seek:" + delta),
+  } as unknown as ShortcutListenerState;
+  const handler = createEditorShortcutHandler(() => current);
+  const chords = [
+    ["x", { ctrlKey: true }, "cut"],
+    ["v", { metaKey: true }, "paste"],
+    ["d", { ctrlKey: true }, "duplicate"],
+    ["q", {}, "quantize"],
+    ["a", { ctrlKey: true, altKey: true }, "angle"],
+  ] as const;
+  for (const [key, mods] of chords) {
+    const repeated = Object.assign(keyEvent(key), mods, { repeat: true });
+    handler(repeated);
+    assert.equal(repeated.defaultPrevented, true, "repeat " + key);
+  }
+  assert.deepEqual(calls, []);
+  for (const [key, mods] of chords) {
+    const first = Object.assign(keyEvent(key), mods);
+    handler(first);
+    assert.equal(first.defaultPrevented, true, "first " + key);
+  }
+  assert.deepEqual(calls, ["cut", "paste", "duplicate", "quantize", "angle"]);
+  const undo = Object.assign(keyEvent("z"), { ctrlKey: true, repeat: true });
+  handler(undo);
+  assert.equal(undo.defaultPrevented, true);
+  assert.equal(calls.at(-1), "undo");
+  const navigation = Object.assign(keyEvent("ArrowRight"), { repeat: true });
+  handler(navigation);
+  assert.equal(navigation.defaultPrevented, true);
+  assert.equal(calls.at(-1), "seek:1");
+});
+
+test("repeated Ctrl+X in a focused native input is not intercepted", () => {
+  const calls: string[] = [];
+  const current = {
+    api: {}, disabled: false, cut: () => calls.push("cut"),
+  } as unknown as ShortcutListenerState;
+  const handler = createEditorShortcutHandler(() => current);
+  const input = { closest: () => ({}) } as unknown as EventTarget;
+  const event = Object.assign(keyEvent("x"), { ctrlKey: true, repeat: true, target: input });
+  handler(event);
+  assert.equal(event.defaultPrevented, false);
+  assert.deepEqual(calls, []);
+});
