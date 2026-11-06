@@ -211,7 +211,7 @@ export default function App() {
   const viewRequests = useRef(new LatestRequestGate());
   const playbackRequests = useRef(new LatestRequestGate());
   const trackSelectionRequests = useRef(new LatestRequestGate());
-  const deletingSelection = useRef(new AsyncActionGuard());
+  const destructiveSelection = useRef(new AsyncActionGuard());
   const documentGeneration = useRef(0);
   const analysisIdentity = useRef("");
   const pendingSaveGuard = useRef(new AsyncActionGuard());
@@ -942,7 +942,7 @@ export default function App() {
     if (!api || !indices.length) return;
     // Even disjoint index sets become stale after an earlier deletion shifts notes.
     // Do not queue another delete until the first request has settled.
-    await deletingSelection.current.run(async () => {
+    await destructiveSelection.current.run(async () => {
       await queuedMutation(
         () => api.delete_notes(indices),
         () => [],
@@ -951,11 +951,13 @@ export default function App() {
   }
   async function cutRange(indices: number[], start: number, end: number) {
     if (api && indices.length)
-      await queuedMutation(
-        () => api.cut_notes_range(indices, start, end),
-        (r) => r.indices ?? [],
-        (r) => r.changed !== false,
-      );
+      await destructiveSelection.current.run(async () => {
+        await queuedMutation(
+          () => api.cut_notes_range(indices, start, end),
+          (r) => r.indices ?? [],
+          (r) => r.changed !== false,
+        );
+      });
   }
   async function duplicate() {
     if (api && selected.length)
@@ -995,11 +997,13 @@ export default function App() {
   }
   async function cutSelected() {
     if (api)
-      await queuedMutation(
-        () => api.cut_notes(selected),
-        () => [],
-        (r) => r.changed !== false,
-      );
+      await destructiveSelection.current.run(async () => {
+        await queuedMutation(
+          () => api.cut_notes(selected),
+          () => [],
+          (r) => r.changed !== false,
+        );
+      });
   }
   async function pasteAtPlayback() {
     if (api)
