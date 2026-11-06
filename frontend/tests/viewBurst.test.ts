@@ -38,6 +38,17 @@ test("opposite wheel input must not be mistaken for a no-op against an older ren
   assert.ok(Math.abs((reverse.start ?? 0) - initial.start) < 1e-10);
 });
 
+test("unrelated Canvas renders must not discard uncommitted wheel movement", () => {
+  const canvas = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  // Only an actual new viewport prop may replace the optimistic wheel baseline.
+  // A playback tick or hover/selection render can occur between two wheel events.
+  const resetEffect = canvas.match(
+    /useLayoutEffect\(\(\) => \{\s*wheelViewRef\.current = props\.view;\s*\},\s*(\[[^\]]*\])\s*\);/,
+  );
+  assert.ok(resetEffect, "wheel baseline must be synchronized by a dependency-scoped effect");
+  assert.equal(resetEffect[1].replace(/\s/g, ""), "[props.view]");
+});
+
 test("Canvas and App use synchronous optimistic view snapshots for wheel bursts", () => {
   const canvas = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
