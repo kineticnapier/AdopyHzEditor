@@ -603,7 +603,7 @@ export default function EditorCanvas(props: Props) {
   // Reset the wheel baseline when a new view is committed by React or the backend.
   useLayoutEffect(() => {
     wheelViewRef.current = props.view;
-  });
+  }, [props.view]);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
