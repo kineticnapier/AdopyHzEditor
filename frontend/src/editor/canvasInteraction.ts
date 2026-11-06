@@ -55,6 +55,30 @@ export function shouldSuppressCanvasNonArrowKeyDuringPointerGesture(
   ].includes(key);
 }
 
+/** A view change can invalidate the coordinate mapping of an active drag.
+ * Playback follow can change start even when the user does not scroll.
+ */
+export type CanvasGestureView = {
+  start: number;
+  windowSeconds: number;
+  pitchBottom: number;
+  visibleNotes: number;
+  mode: string;
+};
+
+export function shouldCancelCanvasGestureForViewChange(
+  activePointerId: number | null,
+  previous: CanvasGestureView,
+  next: CanvasGestureView,
+): boolean {
+  return activePointerId !== null &&
+    (previous.start !== next.start ||
+      previous.windowSeconds !== next.windowSeconds ||
+      previous.pitchBottom !== next.pitchBottom ||
+      previous.visibleNotes !== next.visibleNotes ||
+      previous.mode !== next.mode);
+}
+
 /** Resizing the canvas changes pointer-to-note coordinates during an active edit. */
 export function shouldCancelCanvasGestureForResize(
   activePointerId: number | null,
