@@ -79,6 +79,15 @@ export function shouldCancelCanvasGestureForViewChange(
       previous.mode !== next.mode);
 }
 
+/** A new notes array invalidates the indices captured by an active gesture. */
+export function shouldCancelCanvasGestureForNotesChange(
+  activePointerId: number | null,
+  previous: readonly unknown[],
+  next: readonly unknown[],
+): boolean {
+  return activePointerId !== null && previous !== next;
+}
+
 /** Resizing the canvas changes pointer-to-note coordinates during an active edit. */
 export function shouldCancelCanvasGestureForResize(
   activePointerId: number | null,

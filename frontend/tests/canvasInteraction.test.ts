@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -414,4 +414,29 @@ test("Canvas releases the captured gesture synchronously when its viewport chang
   const release = handler.indexOf("releaseCanvasPointerCapture(canvasRef.current, pointerId);");
   const cancel = handler.indexOf("setDrag(null);");
   assert.ok(updatePrevious >= 0 && guard > updatePrevious && reset > guard && release > reset && cancel > release);
+});
+
+test("note-array replacement invalidates only a captured canvas gesture", () => {
+  const notes = [{ start: 0, end: 1 }];
+  const replacement = [{ start: 0, end: 1 }];
+  assert.equal(shouldCancelCanvasGestureForNotesChange(null, notes, replacement), false);
+  assert.equal(shouldCancelCanvasGestureForNotesChange(7, notes, notes), false);
+  assert.equal(shouldCancelCanvasGestureForNotesChange(7, notes, replacement), true);
+  assert.equal(shouldCancelCanvasGestureForNotesChange(7, notes, [...notes]), true);
+});
+
+test("Canvas releases stale note indices during the layout phase of a notes update", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const observedNotesRef = useRef(props.notes);");
+  const end = source.indexOf("}, [props.notes]);", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /useLayoutEffect\(\(\) => \{/);
+  const updatePrevious = handler.indexOf("observedNotesRef.current = props.notes;");
+  const guard = handler.indexOf("shouldCancelCanvasGestureForNotesChange(");
+  const reset = handler.indexOf("activePointerIdRef.current = null;");
+  const release = handler.indexOf("releaseCanvasPointerCapture(canvasRef.current, pointerId);");
+  const cancel = handler.indexOf("setDrag(null);");
+  assert.ok(updatePrevious >= 0 && guard > updatePrevious && reset > guard && release > reset && cancel > release);
+  assert.ok(end < source.indexOf("async function onPointerUp("));
 });

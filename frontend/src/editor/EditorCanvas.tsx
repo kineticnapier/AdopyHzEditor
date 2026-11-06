@@ -7,7 +7,7 @@ import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -140,6 +140,19 @@ export default function EditorCanvas(props: Props) {
     if (canvasRef.current) releaseCanvasPointerCapture(canvasRef.current, pointerId);
     setDrag(null);
   }, [props.view]);
+  const observedNotesRef = useRef(props.notes);
+  useLayoutEffect(() => {
+    const previous = observedNotesRef.current;
+    observedNotesRef.current = props.notes;
+    // An async edit or document replacement can invalidate the indices
+    // captured at pointer down. Cancel before a pointer-up can commit them.
+    if (!shouldCancelCanvasGestureForNotesChange(activePointerIdRef.current, previous, props.notes)) return;
+    const pointerId = activePointerIdRef.current;
+    cursorReporterRef.current.cancel();
+    activePointerIdRef.current = null;
+    if (canvasRef.current) releaseCanvasPointerCapture(canvasRef.current, pointerId);
+    setDrag(null);
+  }, [props.notes]);
   useEffect(() => () => cursorReporterRef.current.cancel(), []);
   useEffect(() => observeCanvasPageExit(window, document, () => {
     // Window blur (Alt+Tab, browser chrome) need not blur the focused canvas.
