@@ -3,9 +3,11 @@ import type {
   AppState,
   BackendApi,
   EditorSettings,
+  KickPitchPayload,
   NoteDto,
   NoteMutationResult,
 } from "./bridge";
+import KickPitchSection from "./KickPitchSection";
 import type {
   TrackHoverInfo,
   TrackSelectionState,
@@ -34,6 +36,11 @@ type Props = {
   onStatus(text: string): void;
   onTrackSelectionChange(selection: TrackSelectionState): void;
   onConvertTracks(mode: "fixed" | "curve"): Promise<void>;
+  viewStart: number;
+  kickPitch: KickPitchPayload | null;
+  kickPitchSelected: number[];
+  onKickPitch(payload: KickPitchPayload | null, selectedIds: number[]): void;
+  onKickPitchSelect(ids: number[]): void;
 };
 
 type CurveShapeState = { mode: string; p1: number; p2: number };
@@ -70,6 +77,11 @@ export default function SettingsPanel({
   onStatus,
   onTrackSelectionChange,
   onConvertTracks,
+  viewStart,
+  kickPitch,
+  kickPitchSelected,
+  onKickPitch,
+  onKickPitchSelect,
 }: Props) {
   const [page, setPage] = useState<Page>("inspector");
   const one = selected.length === 1 ? notes[selected[0]] : null;
@@ -426,6 +438,19 @@ export default function SettingsPanel({
                 onStatus={onStatus}
               />
             )}
+            <KickPitchSection
+              api={api}
+              busy={busy}
+              audioLoaded={Boolean(audioName)}
+              trackRange={trackSelection.range}
+              viewStart={viewStart}
+              kickPitch={kickPitch}
+              selectedIds={kickPitchSelected}
+              onKickPitch={onKickPitch}
+              onSelectIds={onKickPitchSelect}
+              onQueuedMutation={onQueuedMutation}
+              onStatus={onStatus}
+            />
           </>
         )}
 

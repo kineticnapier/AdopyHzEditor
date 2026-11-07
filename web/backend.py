@@ -26,6 +26,7 @@ from core.vorbis_spectrum_store import (
 )
 from web.editing import EditingMixin
 from web.io import DEFAULT_EDITOR_SETTINGS, IOMixin
+from web.kick_pitch import KickPitchMixin
 from web.notes import EditorSnapshot, NoteMixin
 from web.track_display import readable_frequency_track_region
 from web.track_transcription import TrackTranscriptionMixin
@@ -110,7 +111,7 @@ def _pool_absolute_time_columns(
     return pooled, aligned_left, aligned_right
 
 
-class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
+class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
     """Stateful Python backend for the React/TypeScript editor shell.
 
     pywebview executes exposed API calls in worker threads, so mutable editor
@@ -127,6 +128,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self._spectrogram_render_cache_u8: np.ndarray | None = None
         self.vorbis_spectrum_store: VorbisSpectrumStore | None = None
         self.frequency_track_store: FrequencyTrackStore | None = None
+        self.kick_pitch_result = None
         self.analysis_stats: dict[str, Any] = {}
         self.audio_path: str | None = None
         # The project may intentionally keep a reference to an unavailable
@@ -626,6 +628,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self.spectrogram = None
         self.vorbis_spectrum_store = None
         self.frequency_track_store = None
+        self.kick_pitch_result = None
         self.analysis_stats = {}
 
     def _detach_active_audio(self) -> None:

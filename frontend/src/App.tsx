@@ -40,6 +40,7 @@ import {
   type DirectSpectrumPayload,
   type EditorSettings,
   type FrequencyTrackPayload,
+  type KickPitchPayload,
   type NoteDto,
   type NoteMutationResult,
   type PlaybackState,
@@ -190,6 +191,9 @@ export default function App() {
       useRange: false,
     }),
     [hoveredTrack, setHoveredTrack] = useState<TrackHoverInfo | null>(null);
+  const [kickPitch, setKickPitch] = useState<KickPitchPayload | null>(null),
+    [kickPitchSelected, setKickPitchSelected] = useState<number[]>([]);
+  const kickPitchAudioPath = useRef<string | null>(null);
   const [cursorReadout, setCursorReadout] = useState<{
     time: number;
     midi: number;
@@ -289,6 +293,12 @@ export default function App() {
     setAnalysisAvailable(state.analysis.available);
     setAnalysisSource(state.analysis.source ?? "cqt");
     setAudioName(state.audio.name);
+    if (state.audio.path !== kickPitchAudioPath.current) {
+      // Analysis results belong to one source; the backend drops them too.
+      kickPitchAudioPath.current = state.audio.path;
+      setKickPitch(null);
+      setKickPitchSelected([]);
+    }
     setProjectPath(state.projectPath);
     setDirty(state.dirty);
     setBusy(state.busy);
@@ -1305,6 +1315,8 @@ export default function App() {
               spectrum={visibleSpectrum}
               directSpectrum={visibleDirectSpectrum}
               frequencyTracks={visibleFrequencyTracks}
+              kickPitch={kickPitch}
+              kickPitchSelected={kickPitchSelected}
               trackSelection={trackSelection}
               onViewportSize={setViewportSize}
               onSelect={setSelected}
@@ -1384,6 +1396,14 @@ export default function App() {
             onStatus={setStatus}
             onTrackSelectionChange={changeTrackSelection}
             onConvertTracks={convertSelectedTracks}
+            viewStart={view.start}
+            kickPitch={kickPitch}
+            kickPitchSelected={kickPitchSelected}
+            onKickPitch={(payload, ids) => {
+              setKickPitch(payload);
+              setKickPitchSelected(ids);
+            }}
+            onKickPitchSelect={setKickPitchSelected}
           />
         )}
       </main>

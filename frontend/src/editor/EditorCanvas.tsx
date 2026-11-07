@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
+import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, KickPitchPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 import { adjacentNoteIndex, boundedGridRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchCrop, spectrogramTimeCrop, contextMenuDeleteIndices, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
@@ -7,6 +7,7 @@ import { wheelViewChange, type WheelPitchAccumulator } from "./wheelNavigation";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, reconcileKeyboardNote } from "./noteKeyboardNavigation";
 import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture } from "./canvasInteraction";
+import { kickPitchPolylines } from "../settings/kickPitchModel";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -20,6 +21,8 @@ type Props = {
   spectrum: SpectrogramPayload | null;
   directSpectrum: DirectSpectrumPayload | null;
   frequencyTracks: FrequencyTrackPayload | null;
+  kickPitch?: KickPitchPayload | null;
+  kickPitchSelected?: number[];
   trackSelection: TrackSelectionState;
   onViewportSize?(size: {width:number;height:number}): void;
   onSelect(indices: number[]): void;
@@ -138,6 +141,7 @@ export default function EditorCanvas(props: Props) {
   const keyboardOrder=noteTimeIndex.order;
   const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
   const decodedTracks = useMemo(() => decodeFrequencyTracks(props.frequencyTracks), [props.frequencyTracks]);
+  const kickPitchLines = useMemo(() => kickPitchPolylines(props.kickPitch ?? null), [props.kickPitch]);
   const selectedTrackSet = useMemo(() => new Set(props.trackSelection.ids), [props.trackSelection.ids]);
 
   const spectrumCanvas = useMemo(() => {
@@ -250,6 +254,21 @@ export default function EditorCanvas(props: Props) {
       ctx.restore();
     }
 
+    if(kickPitchLines.length){
+      // Kick pitch candidates: selected ones bright, primary solid, others dashed.
+      const selectedKick=new Set(props.kickPitchSelected??[]);
+      ctx.save();ctx.lineCap="round";ctx.lineJoin="round";
+      for(const line of kickPitchLines){
+        const chosen=selectedKick.has(line.id);
+        ctx.setLineDash(line.role==="primary"?[]:[4,3]);
+        ctx.strokeStyle=chosen?"rgba(255,120,200,.98)":line.role==="primary"?"rgba(255,170,215,.72)":"rgba(200,170,255,.55)";
+        ctx.lineWidth=chosen?2.6:1.5;
+        ctx.beginPath();
+        line.points.forEach((p,i)=>{const x=coords.x(p.time),y=coords.y(p.midi);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     for(let midi=Math.floor(props.view.pitchBottom);midi<=Math.ceil(props.view.pitchBottom+props.view.visibleNotes);midi+=1){
       const y=coords.y(midi-.5);ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.strokeStyle=midi%12===0?"rgba(255,255,255,.22)":"rgba(255,255,255,.075)";ctx.stroke();
       if(midi%12===0){ctx.fillStyle="rgba(235,240,245,.68)";ctx.font="11px Segoe UI,sans-serif";ctx.fillText(`C${Math.floor(midi/12)-1}`,5,Math.max(12,y-3));}
@@ -286,7 +305,7 @@ export default function EditorCanvas(props: Props) {
     for(const index of notesInTimeRange(noteTimeIndex,props.view.start,props.view.start+props.view.windowSeconds)){const note=props.notes[index];if(note)drawNote(note,selectedSet.has(index))}
     if(keyboardNote!==null){const note=props.notes[keyboardNote];if(note){const x=coords.x(note.start),y=coords.y(note.midi);ctx.save();ctx.strokeStyle="#ffffff";ctx.lineWidth=2;ctx.setLineDash([2,2]);ctx.strokeRect(x-6,y-7,12,14);ctx.restore();}}
 
-  },[coords,decoded,decodedTracks,directSpectrumCanvas,keyboardNote,noteTimeIndex,props.directSpectrum,props.notes,props.settings.bpm,props.settings.displayMode,props.settings.gridEnabled,props.settings.offsetMs,props.settings.spectrumOpacity,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas]);
+  },[coords,decoded,decodedTracks,directSpectrumCanvas,keyboardNote,kickPitchLines,props.kickPitchSelected,noteTimeIndex,props.directSpectrum,props.notes,props.settings.bpm,props.settings.displayMode,props.settings.gridEnabled,props.settings.offsetMs,props.settings.spectrumOpacity,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas]);
 
   useEffect(()=>{
     const canvas=playheadRef.current;if(!canvas)return;const dpr=window.devicePixelRatio||1;
