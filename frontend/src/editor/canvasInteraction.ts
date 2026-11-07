@@ -1,3 +1,14 @@
+/** A held pointer must be cancellable even if Ctrl/Shift/Alt/Meta is still
+ * pressed. Without a pointer, modified Escape keeps its shortcut semantics. */
+export function shouldHandleCanvasEscape(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+  activePointerId: number | null,
+): boolean {
+  return event.key === "Escape" &&
+    (activePointerId !== null ||
+      (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey));
+}
+
 /** Decide whether Escape cancels a pending gesture or clears an idle selection. */
 export function canvasEscapeAction(dragging: boolean): "cancel-drag" | "clear-selection" {
   return dragging ? "cancel-drag" : "clear-selection";
