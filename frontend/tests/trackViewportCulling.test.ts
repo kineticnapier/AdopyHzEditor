@@ -54,3 +54,20 @@ test("diagonal clipping retains corner contacts and strokes inside the margin", 
 test("extreme finite endpoints are conservatively kept if subtraction overflows", () => {
   assert.equal(trackPrimitiveIntersectsViewport(-1e308, 50, 1e308, 50, 100, 100), true);
 });
+
+test("Track viewport culling rejects non-finite dimensions and margins", () => {
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    assert.equal(trackPrimitiveIntersectsViewport(0, 0, 100, 100, bad, 100), false);
+    assert.equal(trackPrimitiveIntersectsViewport(0, 0, 100, 100, 100, bad), false);
+    assert.equal(trackPrimitiveIntersectsViewport(0, 0, 100, 100, 100, 100, bad), false);
+  }
+  assert.equal(trackPrimitiveIntersectsViewport(0, 0, 100, 100, 100, 100, -1), false);
+});
+
+test("Track culling hot path avoids per-segment finite-check array allocations", () => {
+  const source = readFileSync(new URL("../src/editor/editorMath.ts", import.meta.url), "utf8");
+  const start = source.indexOf("export function trackPrimitiveIntersectsViewport(");
+  const end = source.indexOf("/** Bound the ghost preview", start);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(source.slice(start, end), /\\[[^\\]]+\\]\\.every\\(Number\\.isFinite\\)/);
+});
