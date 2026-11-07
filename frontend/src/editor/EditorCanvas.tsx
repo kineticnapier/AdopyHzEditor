@@ -178,7 +178,7 @@ export default function EditorCanvas(props: Props) {
   const wheelViewRef = useRef(props.view);
   const wheelOnViewRef = useRef(props.onView);
   const wheelDurationRef = useRef(props.playback.duration);
-  useEffect(() => observeWheelPitchCarryRelease(window, wheelPitchAccumulatorRef), []);
+  useEffect(() => observeWheelPitchCarryRelease(window, wheelPitchAccumulatorRef, document), []);
   useLayoutEffect(() => {
     wheelOnViewRef.current = props.onView;
     wheelDurationRef.current = props.playback.duration;
