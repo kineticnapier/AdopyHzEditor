@@ -15,3 +15,11 @@ test("removed notes are filtered without mutating the original selection", () =>
   assert.deepEqual(selected, [0, 3, 7]);
   assert.deepEqual(retainValidSelection(selected, 0), []);
 });
+
+test("fractional, non-finite and unsafe note indices are discarded", () => {
+  const selected = [0, .5, NaN, 2, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1];
+  assert.deepEqual(retainValidSelection(selected, 3), [0, 2]);
+  assert.deepEqual(selected.slice(0, 4), [0, .5, NaN, 2]);
+  const valid = [0, 2];
+  assert.strictEqual(retainValidSelection(valid, 3), valid);
+});
