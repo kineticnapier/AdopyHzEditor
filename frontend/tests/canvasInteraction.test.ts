@@ -454,6 +454,29 @@ test("window blur and page hiding cancel a canvas gesture, with cleanup", () => 
   assert.equal(cancellations, 2);
 });
 
+test("idle hover is cleared on page exit and focus loss before checking pointer ownership", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const exitStart = source.indexOf("useEffect(() => observeCanvasPageExit(window, document,");
+  const exitEnd = source.indexOf("}), []);", exitStart);
+  assert.ok(exitStart >= 0 && exitEnd > exitStart);
+  const pageExit = source.slice(exitStart, exitEnd);
+  const exitCancel = pageExit.indexOf("cursorReporterRef.current.cancel();");
+  const exitClear = pageExit.indexOf("trackHoverRef.current?.(null);");
+  const exitGuard = pageExit.indexOf("if (pointerId === null) return;");
+  assert.ok(exitCancel >= 0 && exitClear > exitCancel && exitGuard > exitClear,
+    "page exit must discard an idle delayed report and visible Track hover");
+
+  const blurStart = source.indexOf("function onCanvasBlur(");
+  const blurEnd = source.indexOf("async function onContextMenu(", blurStart);
+  assert.ok(blurStart >= 0 && blurEnd > blurStart);
+  const blur = source.slice(blurStart, blurEnd);
+  const blurCancel = blur.indexOf("cursorReporterRef.current.cancel();");
+  const blurClear = blur.indexOf("props.onTrackHover?.(null);");
+  const blurGuard = blur.indexOf("if (pointerId === null) return;");
+  assert.ok(blurCancel >= 0 && blurClear > blurCancel && blurGuard > blurClear,
+    "focus loss must discard idle hover even without pointer capture");
+});
+
 test("canvas clears captured drag on page exit even if its own blur never fires", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const start = source.indexOf("useEffect(() => observeCanvasPageExit(window, document,");
