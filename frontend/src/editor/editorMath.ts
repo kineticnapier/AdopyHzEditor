@@ -365,6 +365,21 @@ export function noteGhostIntersectsViewport(
   return high >= midiBottom && low <= midiTop;
 }
 
+/** Conservatively reject Frequency Track points and segments that cannot
+ * reach the visible canvas. Bounding-box overlap retains lines crossing the
+ * viewport even when both endpoints are outside it. */
+export function trackPrimitiveIntersectsViewport(
+  ax: number, ay: number, bx: number, by: number,
+  width: number, height: number, margin = 8,
+): boolean {
+  if (!Number.isFinite(ax) || !Number.isFinite(ay) ||
+      !Number.isFinite(bx) || !Number.isFinite(by) ||
+      !Number.isFinite(width) || !Number.isFinite(height) ||
+      !Number.isFinite(margin) || width <= 0 || height <= 0 || margin < 0) return false;
+  return Math.max(ax, bx) >= -margin && Math.min(ax, bx) <= width + margin &&
+    Math.max(ay, by) >= -margin && Math.min(ay, by) <= height + margin;
+}
+
 /** Bound the ghost preview for a multi-note drag without spreading the full
  * selection into Math.min/Math.max. Large imported charts may have >100k notes,
  * exceeding the JavaScript engine's argument limit.
