@@ -379,6 +379,9 @@ export function trackPrimitiveIntersectsViewport(
   const left = -margin, right = width + margin, top = -margin, bottom = height + margin;
   if (Math.max(ax, bx) < left || Math.min(ax, bx) > right ||
       Math.max(ay, by) < top || Math.min(ay, by) > bottom) return false;
+  // Most drawn segments have a visible endpoint: skip clipping arithmetic.
+  if ((ax >= left && ax <= right && ay >= top && ay <= bottom) ||
+      (bx >= left && bx <= right && by >= top && by <= bottom)) return true;
   const dx = bx - ax, dy = by - ay;
   if (![dx, dy, right, bottom].every(Number.isFinite)) return true;
   let enter = 0, leave = 1;
