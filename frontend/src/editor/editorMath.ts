@@ -374,7 +374,11 @@ export function trackPrimitiveIntersectsViewport(
   ax: number, ay: number, bx: number, by: number,
   width: number, height: number, margin = 8,
 ): boolean {
-  if (![ax, ay, bx, by, width, height, margin].every(Number.isFinite) ||
+  // This runs for every Track primitive on redraw: avoid allocating a
+  // temporary array just to validate seven scalar coordinates.
+  if (!Number.isFinite(ax) || !Number.isFinite(ay) ||
+      !Number.isFinite(bx) || !Number.isFinite(by) ||
+      !Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(margin) ||
       width <= 0 || height <= 0 || margin < 0) return false;
   const left = -margin, right = width + margin, top = -margin, bottom = height + margin;
   if (Math.max(ax, bx) < left || Math.min(ax, bx) > right ||
@@ -383,7 +387,8 @@ export function trackPrimitiveIntersectsViewport(
   if ((ax >= left && ax <= right && ay >= top && ay <= bottom) ||
       (bx >= left && bx <= right && by >= top && by <= bottom)) return true;
   const dx = bx - ax, dy = by - ay;
-  if (![dx, dy, right, bottom].every(Number.isFinite)) return true;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) ||
+      !Number.isFinite(right) || !Number.isFinite(bottom)) return true;
   let enter = 0, leave = 1;
   if (dx !== 0) {
     const a = (left - ax) / dx, b = (right - ax) / dx;
