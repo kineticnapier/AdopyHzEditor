@@ -36,3 +36,21 @@ test("Track viewport rejection occurs before Canvas draw commands", () => {
   assert.ok(rejection >= 0);
   assert.ok(rejection < loop.indexOf("ctx.beginPath()"));
 });
+
+// A bounding box alone is insufficient: a diagonal may miss the viewport's
+// corner while both of its coordinate ranges overlap the canvas.
+test("offscreen diagonal segments with overlapping bounds are rejected", () => {
+  assert.equal(trackPrimitiveIntersectsViewport(-100, 10, 10, -100, 100, 100), false);
+  assert.equal(trackPrimitiveIntersectsViewport(90, 200, 200, 90, 100, 100), false);
+  assert.equal(trackPrimitiveIntersectsViewport(10, -100, -100, 10, 100, 100), false);
+});
+
+test("diagonal clipping retains corner contacts and strokes inside the margin", () => {
+  assert.equal(trackPrimitiveIntersectsViewport(-100, 84, 84, -100, 100, 100), true);
+  assert.equal(trackPrimitiveIntersectsViewport(-100, 83.9, 83.9, -100, 100, 100), false);
+  assert.equal(trackPrimitiveIntersectsViewport(-100, -100, 200, 200, 100, 100), true);
+});
+
+test("extreme finite endpoints are conservatively kept if subtraction overflows", () => {
+  assert.equal(trackPrimitiveIntersectsViewport(-1e308, 50, 1e308, 50, 100, 100), true);
+});
