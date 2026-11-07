@@ -209,7 +209,9 @@ export default function EditorCanvas(props: Props) {
   const noteTimeIndex=useMemo(()=>buildNoteTimeIndex(props.notes),[props.notes]);
   const keyboardOrder=noteTimeIndex.order;
   const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
-  const decodedTracks = useMemo(() => decodeFrequencyTracks(props.frequencyTracks), [props.frequencyTracks]);
+  // Notes-only mode has no Track drawing or hit targets. Defer unpacking the
+  // potentially large packed payload until a spectrum view is selected.
+  const decodedTracks = useMemo(() => props.view.mode === "notes" ? null : decodeFrequencyTracks(props.frequencyTracks), [props.frequencyTracks, props.view.mode]);
   const selectedTrackSet = useMemo(() => new Set(props.trackSelection.ids), [props.trackSelection.ids]);
 
   const spectrumCanvas = useMemo(() => {
