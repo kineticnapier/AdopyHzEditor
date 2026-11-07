@@ -4,7 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNot
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import type { WheelPitchAccumulator } from "./wheelNavigation";
-import { createCanvasWheelHandler } from "./canvasWheelHandler";
+import { createCanvasWheelHandler, observeWheelPitchCarryRelease } from "./canvasWheelHandler";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
@@ -178,6 +178,7 @@ export default function EditorCanvas(props: Props) {
   const wheelViewRef = useRef(props.view);
   const wheelOnViewRef = useRef(props.onView);
   const wheelDurationRef = useRef(props.playback.duration);
+  useEffect(() => observeWheelPitchCarryRelease(window, wheelPitchAccumulatorRef), []);
   useLayoutEffect(() => {
     wheelOnViewRef.current = props.onView;
     wheelDurationRef.current = props.playback.duration;
