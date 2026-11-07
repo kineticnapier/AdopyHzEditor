@@ -128,6 +128,8 @@ export default function EditorCanvas(props: Props) {
   const keyboardAnchorRef = useRef<number | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
   const cursorReporterRef = useRef(createTrailingReporter<{ time: number; midi: number; track: TrackHoverInfo | null }>(50));
+  const trackHoverRef = useRef(props.onTrackHover);
+  useLayoutEffect(() => { trackHoverRef.current = props.onTrackHover; }, [props.onTrackHover]);
   const observedCanvasViewRef = useRef(props.view);
   useLayoutEffect(() => {
     const previous = observedCanvasViewRef.current;
@@ -161,6 +163,7 @@ export default function EditorCanvas(props: Props) {
     const pointerId = activePointerIdRef.current;
     if (pointerId === null) return;
     cursorReporterRef.current.cancel();
+    trackHoverRef.current?.(null);
     activePointerIdRef.current = null;
     if (canvasRef.current) releaseCanvasPointerCapture(canvasRef.current, pointerId);
     setDrag(null);
@@ -542,6 +545,7 @@ export default function EditorCanvas(props: Props) {
   function cancelDrag(event:ReactPointerEvent<HTMLCanvasElement>){
     if(!isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
     cursorReporterRef.current.cancel();
+    props.onTrackHover?.(null);
     activePointerIdRef.current = null;
     releaseCanvasPointerCapture(event.currentTarget, event.pointerId);
     setDrag(null);
@@ -552,6 +556,7 @@ export default function EditorCanvas(props: Props) {
     const pointerId = activePointerIdRef.current;
     if (pointerId === null) return;
     cursorReporterRef.current.cancel();
+    props.onTrackHover?.(null);
     activePointerIdRef.current = null;
     releaseCanvasPointerCapture(event.currentTarget, pointerId);
     setDrag(null);
