@@ -8,7 +8,7 @@ import { createCanvasWheelHandler, observeWheelPitchCarryRelease, syncCanvasWhee
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, shouldHandleCanvasEscape, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -560,7 +560,7 @@ export default function EditorCanvas(props: Props) {
     if(indices.length)await props.onDelete(indices);
   }
   function onCanvasKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
-    if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+    if (shouldHandleCanvasEscape(event, activePointerIdRef.current)) {
       event.preventDefault();
       // Ctrl-click can own pointer capture without creating a drag state.
       if (canvasEscapeAction(activePointerIdRef.current !== null) === "cancel-drag") {
