@@ -127,6 +127,22 @@ class AudioChangeUndoConsistencyTests(unittest.TestCase):
         bridge.redo()
         self.assertAlmostEqual(bridge.duration, 20.0)
 
+    def test_undo_after_cqt_reanalysis_keeps_current_audio_bounds(self):
+        bridge = self._bridge()
+        self._open(bridge, "song.wav", 10.0, (40, 80))
+        bridge.add_note(1.0, 2.0, 60.0)
+
+        with mock.patch.object(web_backend, "analyze_cqt",
+                               return_value=_spec(22.0, 24, 100)):
+            self.assertEqual(bridge._analyze_current_audio(explicit=True), "cqt")
+
+        bridge.undo()
+        self.assertEqual(bridge.notes, [])
+        self._assert_source_state(bridge, 22.0, (24, 100))
+        bridge.redo()
+        self.assertEqual(len(bridge.notes), 1)
+        self._assert_source_state(bridge, 22.0, (24, 100))
+
     def test_undo_after_direct_reanalysis_keeps_direct_pitch_range(self):
         bridge = self._bridge()
         self._open(bridge, "song.ogg", 10.0, (40, 80))
