@@ -70,3 +70,34 @@ test("separate fine Shift-wheel gestures do not combine fractional MIDI steps", 
   assert.equal(carry.current.remainder, -.5);
   stop();
 });
+
+test("hidden document resets pitch carry even without window blur; visible does not", () => {
+  const { target } = fakeWindow();
+  const listeners = new Set<() => void>();
+  let visibilityState: DocumentVisibilityState = "visible";
+  const documentTarget = {
+    get visibilityState() { return visibilityState; },
+    addEventListener(type: string, listener: () => void) {
+      if (type === "visibilitychange") listeners.add(listener);
+    },
+    removeEventListener(type: string, listener: () => void) {
+      if (type === "visibilitychange") listeners.delete(listener);
+    },
+  } as unknown as Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">;
+  const fireVisibility = (state: DocumentVisibilityState) => {
+    visibilityState = state;
+    for (const listener of listeners) listener();
+  };
+  const carry = { current: { modifier: "shift", remainder: -.5 } as WheelPitchAccumulator };
+  const stop = observeWheelPitchCarryRelease(target, carry, documentTarget);
+  fireVisibility("visible");
+  assert.deepEqual(carry.current, { modifier: "shift", remainder: -.5 });
+  fireVisibility("hidden");
+  assert.deepEqual(carry.current, { modifier: null, remainder: 0 });
+
+  carry.current = { modifier: "alt", remainder: .75 };
+  stop();
+  assert.equal(listeners.size, 0);
+  fireVisibility("hidden");
+  assert.deepEqual(carry.current, { modifier: "alt", remainder: .75 });
+});
