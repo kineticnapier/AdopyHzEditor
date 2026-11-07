@@ -487,7 +487,13 @@ export default function EditorCanvas(props: Props) {
   function onPointerMove(event:ReactPointerEvent<HTMLCanvasElement>){
     if(activePointerIdRef.current!==null && !isCanvasGesturePointer(activePointerIdRef.current,event.pointerId))return;
     const p=eventPosition(event);
-    if(drag){setDrag({...drag,nowTime:p.time,nowMidi:p.midi});return;}
+    if(drag){
+      // A cancel clears pointer ownership synchronously, but React may still
+      // expose the previous drag state until its next render. Never revive it.
+      if (!isCanvasGesturePointer(activePointerIdRef.current,event.pointerId)) return;
+      setDrag({...drag,nowTime:p.time,nowMidi:p.midi});
+      return;
+    }
     const track=hoveredTrack(p.x,p.y);
     cursorReporterRef.current.report({time:p.time,midi:p.midi,track}, value => {
       props.onCursorMove?.(value.time,value.midi);
