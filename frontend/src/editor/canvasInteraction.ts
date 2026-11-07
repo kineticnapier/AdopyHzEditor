@@ -1,3 +1,11 @@
+/** Auto-repeated Escape must not clear a selection after its first press
+ * has already cancelled pointer capture. The canvas consumes repeat events. */
+export function shouldIgnoreRepeatedCanvasEscape(
+  event: Pick<KeyboardEvent, "key" | "repeat">,
+): boolean {
+  return event.key === "Escape" && event.repeat;
+}
+
 /** A held pointer must be cancellable even if Ctrl/Shift/Alt/Meta is still
  * pressed. Without a pointer, modified Escape keeps its shortcut semantics. */
 export function shouldHandleCanvasEscape(
