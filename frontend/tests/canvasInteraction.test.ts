@@ -383,6 +383,29 @@ test("canvas blocks global editing shortcuts before note navigation while a poin
   assert.match(shortcutTarget, /if \(event\.defaultPrevented \|\| disabled/);
 });
 
+test("pointer cancellation, focus loss and page exit discard displayed Track hover", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  for (const [name, startMarker, endMarker] of [
+    ["pointercancel/lostcapture", "function cancelDrag(", "function onCanvasBlur("],
+    ["canvas blur", "function onCanvasBlur(", "async function onContextMenu("],
+  ]) {
+    const start = source.indexOf(startMarker);
+    const end = source.indexOf(endMarker, start);
+    assert.ok(start >= 0 && end > start, name);
+    const handler = source.slice(start, end);
+    const cancel = handler.indexOf("cursorReporterRef.current.cancel();");
+    const clear = handler.indexOf("props.onTrackHover?.(null);", cancel);
+    const release = handler.indexOf("releaseCanvasPointerCapture(", cancel);
+    assert.ok(cancel >= 0 && clear > cancel && release > clear,
+      `${name}: cancel delayed hover and clear visible hover before releasing capture`);
+  }
+  const exitStart = source.indexOf("useEffect(() => observeCanvasPageExit(");
+  const exitEnd = source.indexOf("}), []);", exitStart);
+  assert.ok(exitStart >= 0 && exitEnd > exitStart);
+  const pageExit = source.slice(exitStart, exitEnd);
+  assert.match(pageExit, /cursorReporterRef\.current\.cancel\(\);[\s\S]*?trackHoverRef\.current\?\.\(null\)/);
+});
+
 test("focus loss cancels a pending canvas gesture before shortcuts can change notes", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const start = source.indexOf("function onCanvasBlur(");
