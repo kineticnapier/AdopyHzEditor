@@ -68,7 +68,7 @@ test("idle Escape clears Track before Note selection", () => {
 test("canvas Escape wires Track invalidation into the idle path only", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const start = source.indexOf("function onCanvasKeyDown(");
-  const end = source.indexOf("  useLayoutEffect(() => {\n    wheelViewRef.current = props.view;", start);
+  const end = source.indexOf("  useLayoutEffect(() => {", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /if \(event\.key === "Escape" && !event\.ctrlKey && !event\.metaKey && !event\.altKey && !event\.shiftKey\) \{/);
@@ -254,7 +254,7 @@ test("arrow shortcuts are consumed while a pointer gesture owns the canvas", () 
 test("canvas consumes gesture-time arrows before local and global shortcut handlers", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const start = source.indexOf("function onCanvasKeyDown(");
-  const end = source.indexOf("  useLayoutEffect(() => {\n    wheelViewRef.current = props.view;", start);
+  const end = source.indexOf("  useLayoutEffect(() => {", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /if \(shouldSuppressCanvasArrowDuringPointerGesture\(event\.key, activePointerIdRef\.current\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
@@ -288,7 +288,7 @@ test("non-arrow editor shortcuts cannot change a gesture's captured note indices
 test("canvas blocks global editing shortcuts before note navigation while a pointer is held", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   const start = source.indexOf("function onCanvasKeyDown(");
-  const end = source.indexOf("  useLayoutEffect(() => {\n    wheelViewRef.current = props.view;", start);
+  const end = source.indexOf("  useLayoutEffect(() => {", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /if \(shouldSuppressCanvasNonArrowKeyDuringPointerGesture\(event\.key, activePointerIdRef\.current\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
