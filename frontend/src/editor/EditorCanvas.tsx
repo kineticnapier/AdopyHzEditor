@@ -161,9 +161,11 @@ export default function EditorCanvas(props: Props) {
     // Window blur (Alt+Tab, browser chrome) need not blur the focused canvas.
     // Do not allow a captured drag to resume after returning to this page.
     const pointerId = activePointerIdRef.current;
-    if (pointerId === null) return;
+    // Even an idle hover is stale after leaving the page: there may be no
+    // captured pointer, and no pointerleave event to clear the Inspector.
     cursorReporterRef.current.cancel();
     trackHoverRef.current?.(null);
+    if (pointerId === null) return;
     activePointerIdRef.current = null;
     if (canvasRef.current) releaseCanvasPointerCapture(canvasRef.current, pointerId);
     setDrag(null);
@@ -566,9 +568,11 @@ export default function EditorCanvas(props: Props) {
     // Tab or an external focus change ends the gesture before window shortcuts
     // can act on the note indices captured at pointer down.
     const pointerId = activePointerIdRef.current;
-    if (pointerId === null) return;
+    // Keyboard focus can leave the canvas without a pointerleave event.
+    // Clear a pending or displayed Track hover even when no drag is active.
     cursorReporterRef.current.cancel();
     props.onTrackHover?.(null);
+    if (pointerId === null) return;
     activePointerIdRef.current = null;
     releaseCanvasPointerCapture(event.currentTarget, pointerId);
     setDrag(null);
