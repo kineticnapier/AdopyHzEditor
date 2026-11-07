@@ -208,15 +208,17 @@ export function regionSelectedNoteIndices(
   notes: readonly NoteDto[], index: NoteTimeIndex,
   timeA: number, timeB: number, midiA: number, midiB: number,
 ): number[] {
-  const candidates = notesInTimeRange(index, Math.min(timeA, timeB), Math.max(timeA, timeB));
-  // A wide selection may include most of the chart. Avoid sorting a huge
-  // candidate list when the original linear scan is cheaper and ordered.
-  if (candidates.length >= notes.length / 2) {
+  const left = lowerBound(index.maxEnds, Math.min(timeA, timeB));
+  const right = upperBound(index.starts, Math.max(timeA, timeB));
+  // Decide whether to scan before allocating a candidate array. Broad
+  // selections should not copy tens of thousands of indices unnecessarily.
+  if (right - left >= notes.length / 2) {
     const selected: number[] = [];
     for (let i = 0; i < notes.length; i += 1)
       if (noteIntersects(notes[i], timeA, timeB, midiA, midiB)) selected.push(i);
     return selected;
   }
+  const candidates = index.order.slice(left, right);
   return candidates
     .filter(noteIndex => noteIntersects(notes[noteIndex], timeA, timeB, midiA, midiB))
     .sort((a, b) => a - b);
