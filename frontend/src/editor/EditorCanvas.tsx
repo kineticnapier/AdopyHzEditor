@@ -403,10 +403,13 @@ export default function EditorCanvas(props: Props) {
     canvas.width=Math.max(1,Math.round(size.width*dpr));canvas.height=Math.max(1,Math.round(size.height*dpr));canvas.style.width=`${size.width}px`;canvas.style.height=`${size.height}px`;
     const ctx=canvas.getContext("2d");if(!ctx)return;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,size.width,size.height);
     if(drag&&["move","duplicate-move","resize-start","resize-end"].includes(drag.mode)){
-      const rawDx=drag.nowTime-drag.startTime;let dy=Math.round(drag.nowMidi-drag.startMidi);const first=props.notes[drag.indices[0]];
-      let dx=rawDx;if(first&&props.settings.snapEnabled&&Math.abs(rawDx)>1e-12&&(drag.mode==="move"||drag.mode==="duplicate-move"))dx=snapTime(props.settings,props.playback.duration,first.start+rawDx)-first.start;
-      const bounded = clampDraggedNoteOffset(props.notes, drag.indices, dx, dy, props.playback.duration);
-      dx = bounded.dx; dy = bounded.dy;
+      const rawDx=drag.nowTime-drag.startTime;let dy=Math.round(drag.nowMidi-drag.startMidi);
+      const shouldSnap = props.settings.snapEnabled && (drag.mode==="move"||drag.mode==="duplicate-move");
+      const bounded = clampDraggedNoteOffset(
+        props.notes, drag.indices, rawDx, dy, props.playback.duration,
+        shouldSnap ? time => snapTime(props.settings, props.playback.duration, time) : undefined,
+      );
+      const dx = bounded.dx; dy = bounded.dy;
       // Skip ghosts that cannot touch the canvas, including an 8px stroke margin.
       // This avoids thousands of Canvas calls for selected notes offscreen.
       const timePad = 8 * props.view.windowSeconds / Math.max(1, size.width);
