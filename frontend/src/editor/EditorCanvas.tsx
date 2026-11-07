@@ -576,6 +576,10 @@ export default function EditorCanvas(props: Props) {
       event.preventDefault();
       // Ctrl-click can own pointer capture without creating a drag state.
       if (canvasEscapeAction(activePointerIdRef.current !== null) === "cancel-drag") {
+        // Ctrl-click has capture without drag state and may still have a
+        // delayed hover report from pointermove. Do not publish it after Escape.
+        cursorReporterRef.current.cancel();
+        props.onTrackHover?.(null);
         setDrag(null);
         releaseCanvasPointerCapture(event.currentTarget, activePointerIdRef.current);
         activePointerIdRef.current = null;
