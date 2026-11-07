@@ -365,19 +365,37 @@ export function noteGhostIntersectsViewport(
   return high >= midiBottom && low <= midiTop;
 }
 
-/** Conservatively reject Frequency Track points and segments that cannot
- * reach the visible canvas. Bounding-box overlap retains lines crossing the
- * viewport even when both endpoints are outside it. */
+/** Reject Frequency Track primitives that cannot reach the visible canvas.
+ * A bounding box alone retains diagonals that miss a viewport corner, so
+ * clip the actual segment against the canvas with an 8px stroke margin.
+ * Keep overflowing coordinates conservatively rather than hiding a segment.
+ */
 export function trackPrimitiveIntersectsViewport(
   ax: number, ay: number, bx: number, by: number,
   width: number, height: number, margin = 8,
 ): boolean {
-  if (!Number.isFinite(ax) || !Number.isFinite(ay) ||
-      !Number.isFinite(bx) || !Number.isFinite(by) ||
-      !Number.isFinite(width) || !Number.isFinite(height) ||
-      !Number.isFinite(margin) || width <= 0 || height <= 0 || margin < 0) return false;
-  return Math.max(ax, bx) >= -margin && Math.min(ax, bx) <= width + margin &&
-    Math.max(ay, by) >= -margin && Math.min(ay, by) <= height + margin;
+  if (![ax, ay, bx, by, width, height, margin].every(Number.isFinite) ||
+      width <= 0 || height <= 0 || margin < 0) return false;
+  const left = -margin, right = width + margin, top = -margin, bottom = height + margin;
+  if (Math.max(ax, bx) < left || Math.min(ax, bx) > right ||
+      Math.max(ay, by) < top || Math.min(ay, by) > bottom) return false;
+  const dx = bx - ax, dy = by - ay;
+  if (![dx, dy, right, bottom].every(Number.isFinite)) return true;
+  let enter = 0, leave = 1;
+  if (dx !== 0) {
+    const a = (left - ax) / dx, b = (right - ax) / dx;
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
+    enter = Math.max(enter, Math.min(a, b));
+    leave = Math.min(leave, Math.max(a, b));
+    if (enter > leave) return false;
+  }
+  if (dy !== 0) {
+    const a = (top - ay) / dy, b = (bottom - ay) / dy;
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
+    enter = Math.max(enter, Math.min(a, b));
+    leave = Math.min(leave, Math.max(a, b));
+  }
+  return enter <= leave;
 }
 
 /** Bound the ghost preview for a multi-note drag without spreading the full
