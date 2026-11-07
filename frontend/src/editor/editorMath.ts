@@ -345,3 +345,36 @@ export function boundedGridRange(start: number, windowSeconds: number, beat: num
 export function contextMenuDeleteIndices(hit: number | null): number[] {
   return hit === null ? [] : [hit];
 }
+
+
+/** Bound the ghost preview for a multi-note drag without spreading the full
+ * selection into Math.min/Math.max. Large imported charts may have >100k notes,
+ * exceeding the JavaScript engine's argument limit.
+ */
+export function clampDraggedNoteOffset(
+  notes: readonly NoteDto[],
+  indices: readonly number[],
+  dx: number,
+  dy: number,
+  duration: number,
+): { dx: number; dy: number } {
+  let minStart = Infinity;
+  let maxEnd = -Infinity;
+  let minPitch = Infinity;
+  let maxPitch = -Infinity;
+  for (const index of indices) {
+    const note = notes[index];
+    if (!note) continue;
+    minStart = Math.min(minStart, note.start);
+    maxEnd = Math.max(maxEnd, note.end);
+    minPitch = Math.min(minPitch, note.midi, note.midi_end ?? note.midi,
+      note.ctrl1_midi ?? note.midi, note.ctrl2_midi ?? note.midi);
+    maxPitch = Math.max(maxPitch, note.midi, note.midi_end ?? note.midi,
+      note.ctrl1_midi ?? note.midi, note.ctrl2_midi ?? note.midi);
+  }
+  if (minStart === Infinity) return { dx, dy };
+  return {
+    dx: Math.max(-minStart, Math.min(Math.max(0, duration - maxEnd), dx)),
+    dy: Math.max(-minPitch, Math.min(127 - maxPitch, dy)),
+  };
+}
