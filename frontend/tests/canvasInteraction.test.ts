@@ -144,6 +144,25 @@ test("Escape cancels a captured Ctrl-click even without a drag state", () => {
   assert.match(handler, /activePointerIdRef\.current = null/);
 });
 
+test("Escape cancellation discards pending cursor reports and Track hover before pointer release", () => {
+  // Ctrl-click owns pointer capture without a drag state. Pointer moves during
+  // that capture can queue a delayed hover report that must not outlive Escape.
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onCanvasKeyDown(");
+  const end = source.indexOf("  useLayoutEffect(() => {", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  const branchStart = handler.indexOf('if (canvasEscapeAction(activePointerIdRef.current !== null) === "cancel-drag") {');
+  const branchEnd = handler.indexOf("return;", branchStart);
+  assert.ok(branchStart >= 0 && branchEnd > branchStart);
+  const branch = handler.slice(branchStart, branchEnd);
+  const cancel = branch.indexOf("cursorReporterRef.current.cancel();");
+  const clearHover = branch.indexOf("props.onTrackHover?.(null);");
+  const release = branch.indexOf("releaseCanvasPointerCapture(");
+  assert.ok(cancel >= 0 && clearHover > cancel && release > clearHover,
+    "Escape must cancel delayed cursor reports and clear Track hover before releasing capture");
+});
+
 test("cursor reporting delivers the final position after the throttle interval", () => {
   let now = 100, nextId = 0;
   const scheduled = new Map<number, { callback: () => void; delay: number }>();
