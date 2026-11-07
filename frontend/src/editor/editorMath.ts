@@ -347,6 +347,24 @@ export function contextMenuDeleteIndices(hit: number | null): number[] {
 }
 
 
+/** Coarse viewport rejection for drag ghosts. Bezier curves stay within the
+ * convex hull of their pitch controls (also for Hz interpolation), so using
+ * their control pitches is conservative and avoids sampling every curve.
+ * Callers provide a pixel-derived margin to retain strokes at the edges.
+ */
+export function noteGhostIntersectsViewport(
+  note: NoteDto,
+  timeStart: number, timeEnd: number, midiBottom: number, midiTop: number,
+): boolean {
+  if (note.end < timeStart || note.start > timeEnd) return false;
+  if ((note.kind ?? "note") !== "curve")
+    return note.midi + .43 >= midiBottom && note.midi - .43 <= midiTop;
+  const end = note.midi_end ?? note.midi;
+  const low = Math.min(note.midi, end, note.ctrl1_midi ?? note.midi, note.ctrl2_midi ?? end);
+  const high = Math.max(note.midi, end, note.ctrl1_midi ?? note.midi, note.ctrl2_midi ?? end);
+  return high >= midiBottom && low <= midiTop;
+}
+
 /** Bound the ghost preview for a multi-note drag without spreading the full
  * selection into Math.min/Math.max. Large imported charts may have >100k notes,
  * exceeding the JavaScript engine's argument limit.
