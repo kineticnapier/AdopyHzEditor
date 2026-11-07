@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, shouldHandleCanvasEscape, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -21,6 +21,29 @@ test("Escape cancels a captured pointer even while Ctrl, Shift, Alt or Meta is h
     assert.equal(shouldHandleCanvasEscape(held, null), false, modifier);
   }
   assert.equal(shouldHandleCanvasEscape({ ...idle, key: "Enter" }, 7), false);
+});
+
+
+test("holding Escape does not turn a cancelled pointer gesture into an idle selection clear", () => {
+  const first = { key: "Escape", repeat: false };
+  const held = { key: "Escape", repeat: true };
+  assert.equal(shouldIgnoreRepeatedCanvasEscape(first), false);
+  assert.equal(shouldIgnoreRepeatedCanvasEscape(held), true);
+  assert.equal(shouldIgnoreRepeatedCanvasEscape({ key: "ArrowLeft", repeat: true }), false);
+  // After the first Escape releases pointer ownership, repeated keydown must
+  // be consumed rather than evaluated as a fresh idle Escape.
+  assert.equal(canvasEscapeAction(true), "cancel-drag");
+  assert.equal(canvasEscapeAction(false), "clear-selection");
+});
+
+test("canvas consumes repeated Escape before evaluating pointer ownership or clearing selection", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onCanvasKeyDown(");
+  const end = source.indexOf("  useLayoutEffect(() => {", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /if \(shouldIgnoreRepeatedCanvasEscape\(event\)\) \{\s*event\.preventDefault\(\);\s*return;\s*\}/);
+  assert.ok(handler.indexOf("shouldIgnoreRepeatedCanvasEscape") < handler.indexOf("shouldHandleCanvasEscape"));
 });
 
 test("cancel releases the active pointer capture exactly once", () => {
