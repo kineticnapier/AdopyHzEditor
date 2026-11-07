@@ -35,6 +35,18 @@ test("indexed rectangle selection agrees with a full scan for unsorted notes and
   }
 });
 
+test("dense full-chart rectangle selection keeps index order", () => {
+  const notes = Array.from({ length: 4000 }, (_, i) => ({
+    start: (i * 37) % 100,
+    end: (i * 37) % 100 + 2,
+    midi: 60,
+  }));
+  const selected = regionSelectedNoteIndices(notes, buildNoteTimeIndex(notes), -1, 102, 59, 61);
+  assert.equal(selected.length, notes.length);
+  assert.equal(selected[0], 0);
+  assert.equal(selected.at(-1), notes.length - 1);
+});
+
 test("region selection handles a large mostly-offscreen chart", () => {
   const notes = [
     { start: 0, end: 1, midi: 60 },
