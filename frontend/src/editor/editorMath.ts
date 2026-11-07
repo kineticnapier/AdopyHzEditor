@@ -201,6 +201,19 @@ export function notesInTimeRange(index:NoteTimeIndex,start:number,end:number){
   return index.order.slice(left,right);
 }
 
+/** Select only notes overlapping the rectangle's time interval, then apply
+ * the exact pitch/curve test. Preserve the original note-index order used by
+ * the previous full scan and by selection-dependent editor operations. */
+export function regionSelectedNoteIndices(
+  notes: readonly NoteDto[], index: NoteTimeIndex,
+  timeA: number, timeB: number, midiA: number, midiB: number,
+): number[] {
+  const candidates = notesInTimeRange(index, Math.min(timeA, timeB), Math.max(timeA, timeB));
+  return candidates
+    .filter(noteIndex => noteIntersects(notes[noteIndex], timeA, timeB, midiA, midiB))
+    .sort((a, b) => a - b);
+}
+
 export type ScreenSegment = { ax: number; ay: number; bx: number; by: number };
 export type SegmentSpatialIndex = {
   cellSize: number;
