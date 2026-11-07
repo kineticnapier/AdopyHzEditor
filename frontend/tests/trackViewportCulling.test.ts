@@ -71,3 +71,12 @@ test("Track culling hot path avoids per-segment finite-check array allocations",
   assert.ok(start >= 0 && end > start);
   assert.equal(source.slice(start, end).includes(".every(Number.isFinite)"), false);
 });
+
+test("notes-only view does not decode or index Frequency Tracks", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  // No Track pixels or hit targets exist in notes-only mode. Avoid unpacking
+  // potentially large Vorbis payloads just to discard them during drawing.
+  assert.match(source, /const decodedTracks = useMemo\(\(\) => props\.view\.mode === "notes" \? null : decodeFrequencyTracks\(props\.frequencyTracks\)/);
+  // Switching back to a spectrum view must decode the still-present payload.
+  assert.match(source, /\[props\.frequencyTracks, props\.view\.mode\]/);
+});
