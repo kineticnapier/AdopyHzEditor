@@ -4,7 +4,7 @@ import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNot
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import type { WheelPitchAccumulator } from "./wheelNavigation";
-import { createCanvasWheelHandler, observeWheelPitchCarryRelease } from "./canvasWheelHandler";
+import { createCanvasWheelHandler, observeWheelPitchCarryRelease, syncCanvasWheelView } from "./canvasWheelHandler";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
@@ -608,9 +608,10 @@ export default function EditorCanvas(props: Props) {
     if (nextPitchBottom !== null) changes.pitchBottom = nextPitchBottom;
     if (Object.keys(changes).length) void props.onView(changes);
   }
-  // Reset the wheel baseline when a new view is committed by React or the backend.
+  // Keep the wheel baseline aligned with committed views, but do not carry
+  // sub-MIDI steps across an external pitch or display-mode change.
   useLayoutEffect(() => {
-    wheelViewRef.current = props.view;
+    syncCanvasWheelView(wheelViewRef, wheelPitchAccumulatorRef, props.view);
   }, [props.view]);
   useEffect(() => {
     const canvas = canvasRef.current;
