@@ -39,6 +39,24 @@ export function createCanvasWheelHandler(context: {
 }
 
 /**
+ * A new externally chosen pitch range starts a new fine-wheel gesture.
+ * Ignore time-only changes (notably playback follow), and retain carry when
+ * React merely acknowledges a wheel change already in the optimistic ref.
+ */
+export function syncCanvasWheelView(
+  view: { current: ViewState },
+  carry: { current: WheelPitchAccumulator },
+  next: ViewState,
+): void {
+  if (view.current.pitchBottom !== next.pitchBottom ||
+      view.current.visibleNotes !== next.visibleNotes ||
+      view.current.mode !== next.mode) {
+    carry.current = { modifier: null, remainder: 0 };
+  }
+  view.current = next;
+}
+
+/**
  * Pitch-wheel fractions belong to one held-modifier gesture. Releasing the
  * modifier (or leaving the window) must not carry sub-MIDI steps into a later
  * gesture, even if no ordinary wheel event occurs between them.
