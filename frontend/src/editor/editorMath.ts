@@ -416,14 +416,18 @@ export function clampDraggedNoteOffset(
   dx: number,
   dy: number,
   duration: number,
+  snapTime?: (time: number) => number,
 ): { dx: number; dy: number } {
   let minStart = Infinity;
   let maxEnd = -Infinity;
   let minPitch = Infinity;
   let maxPitch = -Infinity;
+  let firstIndex = Infinity;
   for (const index of indices) {
     const note = notes[index];
     if (!note) continue;
+    // Python _valid_indices sorts the selection before choosing the snap anchor.
+    firstIndex = Math.min(firstIndex, index);
     minStart = Math.min(minStart, note.start);
     maxEnd = Math.max(maxEnd, note.end);
     minPitch = Math.min(minPitch, note.midi, note.midi_end ?? note.midi,
@@ -432,8 +436,16 @@ export function clampDraggedNoteOffset(
       note.ctrl1_midi ?? note.midi, note.ctrl2_midi ?? note.midi);
   }
   if (minStart === Infinity) return { dx, dy };
+  const minDx = -minStart, maxDx = Math.max(0, duration - maxEnd);
+  // Match move_notes / duplicate_notes_shifted: clamp the raw offset first,
+  // snap using the lowest selected index, then clamp the snapped offset again.
+  let boundedDx = Math.max(minDx, Math.min(maxDx, dx));
+  if (snapTime && Math.abs(boundedDx) > 1e-12) {
+    const anchor = notes[firstIndex];
+    boundedDx = Math.max(minDx, Math.min(maxDx, snapTime(anchor.start + boundedDx) - anchor.start));
+  }
   return {
-    dx: Math.max(-minStart, Math.min(Math.max(0, duration - maxEnd), dx)),
+    dx: boundedDx,
     dy: Math.max(-minPitch, Math.min(127 - maxPitch, dy)),
   };
 }
