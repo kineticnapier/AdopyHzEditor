@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, shouldHandleCanvasEscape, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -9,6 +9,18 @@ test("Escape cancels a live canvas gesture without clearing the note selection",
 
 test("Escape clears selection only when no gesture is active", () => {
   assert.equal(canvasEscapeAction(false), "clear-selection");
+});
+
+test("Escape cancels a captured pointer even while Ctrl, Shift, Alt or Meta is held", () => {
+  const idle = { key: "Escape", ctrlKey: false, shiftKey: false, altKey: false, metaKey: false };
+  assert.equal(shouldHandleCanvasEscape(idle, 7), true);
+  assert.equal(shouldHandleCanvasEscape(idle, null), true);
+  for (const modifier of ["ctrlKey", "shiftKey", "altKey", "metaKey"] as const) {
+    const held = { ...idle, [modifier]: true };
+    assert.equal(shouldHandleCanvasEscape(held, 7), true, modifier);
+    assert.equal(shouldHandleCanvasEscape(held, null), false, modifier);
+  }
+  assert.equal(shouldHandleCanvasEscape({ ...idle, key: "Enter" }, 7), false);
 });
 
 test("cancel releases the active pointer capture exactly once", () => {
@@ -71,7 +83,7 @@ test("canvas Escape wires Track invalidation into the idle path only", () => {
   const end = source.indexOf("  useLayoutEffect(() => {", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
-  assert.match(handler, /if \(event\.key === "Escape" && !event\.ctrlKey && !event\.metaKey && !event\.altKey && !event\.shiftKey\) \{/);
+  assert.match(handler, /if \(shouldHandleCanvasEscape\(event, activePointerIdRef\.current\)\) \{/);
   assert.match(handler, /if \(canvasEscapeAction\(activePointerIdRef\.current !== null\) === "cancel-drag"\) \{[\s\S]*?return;\s*\}/);
   assert.match(handler, /clearIdleCanvasSelection\(clearTrackSelection, \(\) => props\.onSelect\(\[\]\)\)/);
   assert.equal(handler.match(/clearIdleCanvasSelection\(/g)?.length, 1);
