@@ -62,3 +62,20 @@ test("Canvas rectangle selection uses the indexed helper", () => {
   assert.match(source, /cur\.mode==="region"[\s\S]*?regionSelectedNoteIndices\(props\.notes,\s*noteTimeIndex,/);
   assert.doesNotMatch(source, /props\.notes\.flatMap\(\(n,i\)=>noteIntersects\(/);
 });
+
+test("wide region avoids allocating a full time-index candidate slice", () => {
+  const notes = Array.from({ length: 20_000 }, (_, i) => ({
+    start: i / 10, end: i / 10 + .2, midi: i % 2 === 0 ? 60 : 80,
+  }));
+  const index = buildNoteTimeIndex(notes);
+  index.order = new Proxy(index.order, {
+    get(target, property, receiver) {
+      if (property === "slice") throw new Error("wide region must not copy index candidates");
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  // Almost every note overlaps in time, but only half overlap in pitch.
+  // The fallback must be selected by time-candidate count, not by pitch hits.
+  const selected = regionSelectedNoteIndices(notes, index, -1, 2001, 59, 61);
+  assert.deepEqual(selected, Array.from({ length: 10_000 }, (_, i) => i * 2));
+});
