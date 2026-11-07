@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
-import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, noteIntersects, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, clampDraggedNoteOffset, noteGhostIntersectsViewport, trackPrimitiveIntersectsViewport, contextMenuDeleteIndices, isValidTrackSample, type NoteTimeIndex } from "./editorMath";
+import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, regionSelectedNoteIndices, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, clampDraggedNoteOffset, noteGhostIntersectsViewport, trackPrimitiveIntersectsViewport, contextMenuDeleteIndices, isValidTrackSample, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
 import { midiLabel, midiToHz } from "./musicMath";
 import type { WheelPitchAccumulator } from "./wheelNavigation";
@@ -553,7 +553,7 @@ export default function EditorCanvas(props: Props) {
     if(cur.mode==="resize-start"||cur.mode==="resize-end"){
       const d=cur.nowTime-cur.startTime;if(Math.abs(d)>1e-4)await props.onResize(cur.indices,cur.mode==="resize-start"?"start":"end",d);return;
     }
-    if(cur.mode==="region"){props.onSelect(props.notes.flatMap((n,i)=>noteIntersects(n,cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi)?[i]:[]));return;}
+    if(cur.mode==="region"){props.onSelect(regionSelectedNoteIndices(props.notes,noteTimeIndex,cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi));return;}
     if(Math.abs(cur.nowTime-cur.startTime)*size.width/Math.max(.001,props.view.windowSeconds)<4){props.onSelect([]);await props.onSeek(cur.startTime);return;}
     const a=Math.min(cur.startTime,cur.nowTime),b=Math.max(cur.startTime,cur.nowTime);
     if(cur.mode==="curve"){
