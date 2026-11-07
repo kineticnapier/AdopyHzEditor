@@ -562,7 +562,8 @@ export default function EditorCanvas(props: Props) {
   function onCanvasKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
     if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
       event.preventDefault();
-      if (canvasEscapeAction(drag !== null) === "cancel-drag") {
+      // Ctrl-click can own pointer capture without creating a drag state.
+      if (canvasEscapeAction(activePointerIdRef.current !== null) === "cancel-drag") {
         setDrag(null);
         releaseCanvasPointerCapture(event.currentTarget, activePointerIdRef.current);
         activePointerIdRef.current = null;
