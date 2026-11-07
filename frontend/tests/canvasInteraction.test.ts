@@ -72,9 +72,23 @@ test("canvas Escape wires Track invalidation into the idle path only", () => {
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /if \(event\.key === "Escape" && !event\.ctrlKey && !event\.metaKey && !event\.altKey && !event\.shiftKey\) \{/);
-  assert.match(handler, /if \(canvasEscapeAction\(drag !== null\) === "cancel-drag"\) \{[\s\S]*?return;\s*\}/);
+  assert.match(handler, /if \(canvasEscapeAction\(activePointerIdRef\.current !== null\) === "cancel-drag"\) \{[\s\S]*?return;\s*\}/);
   assert.match(handler, /clearIdleCanvasSelection\(clearTrackSelection, \(\) => props\.onSelect\(\[\]\)\)/);
   assert.equal(handler.match(/clearIdleCanvasSelection\(/g)?.length, 1);
+});
+
+
+test("Escape cancels a captured Ctrl-click even without a drag state", () => {
+  // Ctrl-click selects immediately after pointer capture; it does not setDrag.
+  // Escape must cancel pointer ownership instead of clearing the selection.
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onCanvasKeyDown(");
+  const end = source.indexOf("  useLayoutEffect(() => {", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /canvasEscapeAction\(activePointerIdRef\.current !== null\)/);
+  assert.match(handler, /releaseCanvasPointerCapture\(event\.currentTarget, activePointerIdRef\.current\)/);
+  assert.match(handler, /activePointerIdRef\.current = null/);
 });
 
 test("cursor reporting delivers the final position after the throttle interval", () => {
