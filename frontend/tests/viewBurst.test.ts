@@ -43,7 +43,7 @@ test("unrelated Canvas renders must not discard uncommitted wheel movement", () 
   // Only an actual new viewport prop may replace the optimistic wheel baseline.
   // A playback tick or hover/selection render can occur between two wheel events.
   const resetEffect = canvas.match(
-    /useLayoutEffect\(\(\) => \{\s*wheelViewRef\.current = props\.view;\s*\},\s*(\[[^\]]*\])\s*\);/,
+    /useLayoutEffect\(\(\) => \{\s*syncCanvasWheelView\(wheelViewRef, wheelPitchAccumulatorRef, props\.view\);\s*\},\s*(\[[^\]]*\])\s*\);/,
   );
   assert.ok(resetEffect, "wheel baseline must be synchronized by a dependency-scoped effect");
   assert.equal(resetEffect[1].replace(/\s/g, ""), "[props.view]");
