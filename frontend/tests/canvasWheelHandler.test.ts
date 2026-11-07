@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ViewState } from "../src/editor/bridge.ts";
-import { createCanvasWheelHandler } from "../src/editor/canvasWheelHandler.ts";
+import { createCanvasWheelHandler, syncCanvasWheelView } from "../src/editor/canvasWheelHandler.ts";
 import type { WheelPitchAccumulator } from "../src/editor/wheelNavigation.ts";
 
 const initial: ViewState = {
@@ -66,4 +66,27 @@ test("wheel during an owned pointer drag does not change the view or preserve pi
   assert.deepEqual(s.view.current, initial);
   assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
   assert.equal(s.getPrevented(), 1);
+});
+
+test("external pitch changes discard a pending fine-wheel remainder", () => {
+  const s = setup();
+  s.pitchAccumulator.current = { modifier: "shift", remainder: -.5 };
+  syncCanvasWheelView(s.view, s.pitchAccumulator, { ...initial, pitchBottom: 41 });
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
+  s.handler(s.event(20, { shiftKey: true }));
+  assert.equal(s.first.length, 0, "a half-step from the old pitch viewport must not combine");
+  assert.equal(s.pitchAccumulator.current.remainder, -.5);
+});
+
+test("playback-follow time changes and wheel echoes preserve the current pitch gesture", () => {
+  const s = setup();
+  s.pitchAccumulator.current = { modifier: "shift", remainder: -.5 };
+  syncCanvasWheelView(s.view, s.pitchAccumulator, { ...initial, start: 21 });
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: "shift", remainder: -.5 });
+  // The React echo of a wheel-initiated pitch change is not an external edit.
+  s.view.current = { ...s.view.current, pitchBottom: 41 };
+  syncCanvasWheelView(s.view, s.pitchAccumulator, { ...initial, start: 21, pitchBottom: 41 });
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: "shift", remainder: -.5 });
+  syncCanvasWheelView(s.view, s.pitchAccumulator, { ...s.view.current, mode: "notes" });
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
 });
