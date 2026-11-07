@@ -69,5 +69,5 @@ test("Track culling hot path avoids per-segment finite-check array allocations",
   const start = source.indexOf("export function trackPrimitiveIntersectsViewport(");
   const end = source.indexOf("/** Bound the ghost preview", start);
   assert.ok(start >= 0 && end > start);
-  assert.doesNotMatch(source.slice(start, end), /\\[[^\\]]+\\]\\.every\\(Number\\.isFinite\\)/);
+  assert.equal(source.slice(start, end).includes(".every(Number.isFinite)"), false);
 });
