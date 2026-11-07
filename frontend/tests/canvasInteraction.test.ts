@@ -94,6 +94,24 @@ test("foreign pointer up/cancel cannot finish the current gesture", () => {
   assert.equal(canStartCanvasGesture(activePointerId), true);
 });
 
+test("a cancelled pointer cannot revive a stale drag on a later pointer move", () => {
+  // Cancellation clears the pointer ref synchronously, but React may not have
+  // committed setDrag(null) when a subsequent pointermove is dispatched.
+  assert.equal(isCanvasGesturePointer(null, 7), false);
+  assert.equal(isCanvasGesturePointer(9, 7), false);
+  assert.equal(isCanvasGesturePointer(7, 7), true);
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("function onPointerMove(");
+  const end = source.indexOf("async function onPointerUp(", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  const dragBranch = handler.indexOf("if(drag)");
+  const ownershipGuard = handler.indexOf("if (!isCanvasGesturePointer(activePointerIdRef.current,event.pointerId)) return;", dragBranch);
+  const dragUpdate = handler.indexOf("setDrag({...drag,nowTime:p.time,nowMidi:p.midi})", dragBranch);
+  assert.ok(dragBranch >= 0 && ownershipGuard > dragBranch && dragUpdate > ownershipGuard,
+    "drag updates must recheck pointer ownership after cancellation");
+});
+
 test("idle Escape clears Track before Note selection", () => {
   const calls: string[] = [];
   clearIdleCanvasSelection(() => calls.push("tracks"), () => calls.push("notes"));
