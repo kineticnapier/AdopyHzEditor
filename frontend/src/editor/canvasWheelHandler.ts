@@ -46,6 +46,7 @@ export function createCanvasWheelHandler(context: {
 export function observeWheelPitchCarryRelease(
   target: Pick<Window, "addEventListener" | "removeEventListener">,
   carry: { current: WheelPitchAccumulator },
+  documentTarget?: Pick<Document, "addEventListener" | "removeEventListener" | "visibilityState">,
 ): () => void {
   const reset = () => {
     carry.current = { modifier: null, remainder: 0 };
@@ -56,10 +57,16 @@ export function observeWheelPitchCarryRelease(
       reset();
     }
   };
+  const onVisibilityChange = () => {
+    // Switching tabs need not fire window blur in every host/browser.
+    if (documentTarget?.visibilityState === "hidden") reset();
+  };
   target.addEventListener("keyup", onKeyUp);
   target.addEventListener("blur", reset);
+  documentTarget?.addEventListener("visibilitychange", onVisibilityChange);
   return () => {
     target.removeEventListener("keyup", onKeyUp);
     target.removeEventListener("blur", reset);
+    documentTarget?.removeEventListener("visibilitychange", onVisibilityChange);
   };
 }
