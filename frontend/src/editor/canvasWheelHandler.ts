@@ -37,3 +37,29 @@ export function createCanvasWheelHandler(context: {
     }
   };
 }
+
+/**
+ * Pitch-wheel fractions belong to one held-modifier gesture. Releasing the
+ * modifier (or leaving the window) must not carry sub-MIDI steps into a later
+ * gesture, even if no ordinary wheel event occurs between them.
+ */
+export function observeWheelPitchCarryRelease(
+  target: Pick<Window, "addEventListener" | "removeEventListener">,
+  carry: { current: WheelPitchAccumulator },
+): () => void {
+  const reset = () => {
+    carry.current = { modifier: null, remainder: 0 };
+  };
+  const onKeyUp = (event: KeyboardEvent) => {
+    if ((carry.current.modifier === "shift" && event.key === "Shift") ||
+        (carry.current.modifier === "alt" && (event.key === "Alt" || event.key === "AltGraph"))) {
+      reset();
+    }
+  };
+  target.addEventListener("keyup", onKeyUp);
+  target.addEventListener("blur", reset);
+  return () => {
+    target.removeEventListener("keyup", onKeyUp);
+    target.removeEventListener("blur", reset);
+  };
+}
