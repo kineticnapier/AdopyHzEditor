@@ -55,6 +55,36 @@ class TrackTranscriptionNumericInputTests(unittest.TestCase):
         self.assertEqual(result["indices"], [])
         self.assertEqual(self.bridge.notes, [])
 
+    def test_find_tracks_rejects_rectangles_outside_audio_time(self):
+        self.bridge.duration = 1.0
+        for start, end in ((-3.0, -1.0), (2.0, 3.0)):
+            with self.subTest(start=start, end=end):
+                result = self.bridge.find_frequency_tracks(start, end, 0.0, 127.0)
+                self.assertEqual(result["trackIds"], [])
+
+    def test_find_tracks_rejects_rectangles_outside_midi_bounds(self):
+        self.bridge.duration = 1.0
+        for pitch, minimum, maximum in ((0.0, -20.0, -5.0), (127.0, 130.0, 150.0)):
+            with self.subTest(pitch=pitch):
+                self.bridge.frequency_track_store.point_midi[:] = pitch
+                result = self.bridge.find_frequency_tracks(0.0, 1.0, minimum, maximum)
+                self.assertEqual(result["trackIds"], [])
+
+    def test_find_tracks_normalizes_reversed_rectangle_bounds(self):
+        self.bridge.duration = 1.0
+        result = self.bridge.find_frequency_tracks(0.8, 0.2, 75.0, 65.0)
+        self.assertEqual(result["trackIds"], [0])
+
+    def test_conversion_rejects_clips_fully_outside_audio(self):
+        self.bridge.duration = 1.0
+        for mode in ("fixed", "curve"):
+            for start, end in ((-3.0, -1.0), (-1.0, -3.0), (2.0, 3.0), (3.0, 2.0)):
+                with self.subTest(mode=mode, start=start, end=end):
+                    result = self.bridge.create_notes_from_tracks([0], mode, start, end)
+                    self.assertFalse(result["changed"])
+                    self.assertEqual(result["indices"], [])
+                    self.assertEqual(self.bridge.notes, [])
+
     def test_finite_clip_still_converts_requested_track(self):
         result = self.bridge.create_notes_from_tracks([0], "fixed", 0.75, 0.75)
         self.assertTrue(result["changed"])
