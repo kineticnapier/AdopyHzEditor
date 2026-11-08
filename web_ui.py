@@ -113,9 +113,10 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
             self._status = "解析が完了しました" if had_audio else "先に音声を開いてください"
         return self.get_state()
 
-    def get_adofai_export_defaults(self, selected_indices=None):
-        defaults = super().get_adofai_export_defaults(selected_indices)
-        defaults["selectedOnly"] = False
+    def get_adofai_export_defaults(self, selected_indices=None, selected_only=False):
+        # Keep the Web bridge signature in sync with AdoFAIMixin. Otherwise
+        # the dialog's initial export scope cannot reach offset calculation.
+        defaults = super().get_adofai_export_defaults(selected_indices, selected_only)
         defaults["harmonyTuning"] = "equal temperament"
         defaults["angleCompressionMode"] = "auto"
         defaults["angleCompressionFixedAngle"] = 165.0
