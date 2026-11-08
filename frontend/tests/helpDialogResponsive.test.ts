@@ -9,7 +9,7 @@ test("help dialog retains a two-column navigation layout on wide windows", () =>
   assert.match(help, /className="modal-window help-window"/);
   assert.match(help, /className="help-layout"/);
   assert.match(help, /<nav aria-label="ヘルプ項目">/);
-  assert.match(help, /<article>/);
+  assert.match(help, /<article\b/);
   assert.match(css, /\.help-layout\{[^}]*grid-template-columns:190px minmax\(0,1fr\)/);
 });
 
