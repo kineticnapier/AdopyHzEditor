@@ -169,7 +169,22 @@ class NoteMixin:
         ).normalized()
 
     def _valid_indices(self, indices: list[int]) -> list[int]:
-        return sorted({int(i) for i in indices if 0 <= int(i) < len(self.notes)})
+        # Indices are positions, not values to round/truncate. In particular,
+        # int(1.5) would silently select a different note and int(NaN) raises.
+        valid: set[int] = set()
+        for index in indices:
+            if isinstance(index, bool):
+                continue
+            if isinstance(index, int):
+                candidate = index
+            elif isinstance(index, float) and math.isfinite(index) and index.is_integer():
+                # Preserve existing callers that pass 0.0 or 1.0.
+                candidate = int(index)
+            else:
+                continue
+            if 0 <= candidate < len(self.notes):
+                valid.add(candidate)
+        return sorted(valid)
 
     def add_note(self, start: float, end: float, midi: float, kind: str = "note", end_midi: float | None = None) -> dict[str, Any]:
         with self._lock:
@@ -407,7 +422,7 @@ class NoteMixin:
 
     def apply_interpolation(self, indices: list[int], interpolation: str | None = None) -> dict[str, Any]:
         with self._lock:
-            valid = sorted({int(i) for i in indices if 0 <= int(i) < len(self.notes) and self.notes[int(i)].is_curve})
+            valid = [i for i in self._valid_indices(indices) if self.notes[i].is_curve]
             if not valid:
                 return {"notes": self._note_dicts(), "status": "カーブノートが選択されていません"}
             mode = self._normalize_setting("curveInterpolation", interpolation) if interpolation is not None else str(self.settings["curveInterpolation"])
