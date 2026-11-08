@@ -18,5 +18,5 @@ test("ADOFAI dialog normalizes X mode when fixed compression is selected", () =>
   const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8");
   assert.match(source, /onChange=\{\(v\) =>\s*changeAngleCompressionMode\(/);
   assert.match(source, /xMode: xModeForCompression\(angleCompressionMode, o\.xMode\)/);
-  assert.match(source, /xModeOptions\.filter\(\(\[mode\]\) =>\s*isXModeAvailable\(options\.angleCompressionMode, mode\)\)/);
+  assert.match(source, /xModeOptions\.filter\(\(\[mode\]\) =>\s*isXModeAvailable\(options\.angleCompressionMode, mode\)\s*\)/);
 });
