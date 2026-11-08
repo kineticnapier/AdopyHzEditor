@@ -55,6 +55,26 @@ class NoteNoopChangedContractTests(unittest.TestCase):
     def test_split_outside_selected_notes_does_not_report_an_edit(self):
         self.assert_noop(lambda b: b.split_notes([0], 5.0))
 
+    def test_inspector_rejects_noninteger_indices_without_touching_history(self):
+        import math
+
+        for index in (0.5, math.nan, math.inf, -math.inf, True, "0", None, -1, 99):
+            with self.subTest(index=index):
+                self.assert_noop(
+                    lambda b, value=index: b.set_note_properties(value, {"velocity": 88})
+                )
+
+    def test_inspector_accepts_integer_valued_float_index(self):
+        bridge = self.make_bridge()
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            result = bridge.set_note_properties(0.0, {"velocity": 88})
+        self.assertIs(result["changed"], True)
+        self.assertEqual(bridge.notes[0].velocity, 88)
+        self.assertTrue(bridge._dirty)
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        sync.assert_called_once()
+
     def test_valid_split_still_creates_one_undo_step(self):
         bridge = self.make_bridge()
         with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
