@@ -173,5 +173,5 @@ test("ADOFAI export footer buttons remain reachable in narrow windows", () => {
   // the flex row is forced onto one line. Allow the controls to wrap.
   const css = readFileSync(new URL("../src/dialogs.css", import.meta.url), "utf8");
   assert.match(source, /<div className="dialog-footer">/);
-  assert.match(css, /\\.dialog-footer\\{[^}]*flex-wrap:wrap/);
+  assert.match(css, /\.dialog-footer\{[^}]*flex-wrap:wrap/);
 });
