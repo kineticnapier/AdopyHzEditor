@@ -122,8 +122,10 @@ def _segment_arrays(
 
     if all_times.size == 1 or clip_end <= clip_start + 1e-12:
         t = clip_start
-        midi = float(all_midis[0])
-        magnitude = float(all_magnitudes[0])
+        # A zero-width clip can fall anywhere along a multi-point track.
+        # Use its local pitch and strength, not the track's first sample.
+        midi = float(np.interp(t, all_times, all_midis))
+        magnitude = float(np.interp(t, all_times, all_magnitudes))
         return (
             np.array([t], dtype=np.float64),
             np.array([midi], dtype=np.float64),
