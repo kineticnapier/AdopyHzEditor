@@ -31,7 +31,7 @@ import {
 import type { TrackSelectionRange } from "./editor/trackSelection";
 import { resolveTrackLookup } from "./editor/trackLookup";
 import { midiLabel, midiToHz } from "./editor/musicMath";
-import { retainValidSelection } from "./editor/selectionValidity";
+import { retainValidSelection, selectionAfterMutation } from "./editor/selectionValidity";
 import { formatCursorPeakLabel } from "./editor/cursorStatus";
 import { shouldShowCanvasEmptyHint } from "./editor/emptyState";
 import { runMidiExport } from "./editor/midiExport";
@@ -885,10 +885,9 @@ export default function App() {
     setStatus(result.status);
     if (result.dirty !== undefined) setDirty(result.dirty);
     else if (markDirty && result.changed !== false) setDirty(true);
-    if (selection)
-      setSelected(retainValidSelection(selection, result.notes.length));
-    else
-      setSelected((old) => retainValidSelection(old, result.notes.length));
+    setSelected((old) =>
+      selectionAfterMutation(old, selection, result.notes.length, result.changed),
+    );
   }
   async function queuedMutation(
     call: () => Promise<NoteMutationResult>,

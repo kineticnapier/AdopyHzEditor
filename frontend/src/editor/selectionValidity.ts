@@ -6,3 +6,13 @@ export function retainValidSelection(selection: number[], noteCount: number): nu
   const isValid = (index: number) => Number.isSafeInteger(index) && index >= 0 && index < noteCount;
   return selection.every(isValid) ? selection : selection.filter(isValid);
 }
+
+/** A failed/no-op edit must not discard the user's current selection. */
+export function selectionAfterMutation(
+  current: number[],
+  requested: number[] | undefined,
+  noteCount: number,
+  changed: boolean | undefined,
+): number[] {
+  return retainValidSelection(changed === false ? current : (requested ?? current), noteCount);
+}

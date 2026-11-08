@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { retainValidSelection } from "../src/editor/selectionValidity.ts";
+import { retainValidSelection, selectionAfterMutation } from "../src/editor/selectionValidity.ts";
 
 test("unchanged selection retains identity across backend state refresh", () => {
   const selected = [0, 3, 7];
@@ -31,6 +31,19 @@ test("explicit mutation selections use the same safe-index filter as state refre
   const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const mutation = source.match(/function applyMutation\([\s\S]*?\n  }\n  async function queuedMutation/);
   assert.ok(mutation, "App.applyMutation must remain covered");
-  assert.match(mutation[0], /if \(selection\)\s*setSelected\(retainValidSelection\(selection, result\.notes\.length\)\)/);
+  assert.match(mutation[0], /setSelected\(\(old\)\s*=>\s*selectionAfterMutation\(old, selection, result\.notes\.length, result\.changed\)/);
   assert.deepEqual(retainValidSelection([0, 1.5, 2, 3, NaN], 3), [0, 2]);
+});
+
+
+test("no-op mutations preserve selection while successful edits honor explicit selection", () => {
+  const current = [1, 3];
+  // Duplicate with no room, empty clipboard paste, or unavailable Undo/Redo.
+  assert.strictEqual(selectionAfterMutation(current, [], 5, false), current);
+  assert.strictEqual(selectionAfterMutation(current, [0], 5, false), current);
+  // Even a no-op must discard indices that no longer exist.
+  assert.deepEqual(selectionAfterMutation([0, 4, 7], [], 5, false), [0, 4]);
+  assert.deepEqual(selectionAfterMutation(current, [], 5, true), []);
+  assert.deepEqual(selectionAfterMutation(current, [0, 1.5, 2, 3, NaN], 3, true), [0, 2]);
+  assert.strictEqual(selectionAfterMutation(current, undefined, 5, true), current);
 });
