@@ -166,3 +166,12 @@ test("ADOFAI debug preview clearly marks rows omitted by the UI and backend", ()
   assert.match(backend, /max_rows = 5000/);
   assert.match(backend, /"limited": len\(rows\) > max_rows/);
 });
+
+
+test("ADOFAI export footer buttons remain reachable in narrow windows", () => {
+  // Five footer buttons exceed the width of a small desktop window when
+  // the flex row is forced onto one line. Allow the controls to wrap.
+  const css = readFileSync(new URL("../src/dialogs.css", import.meta.url), "utf8");
+  assert.match(source, /<div className="dialog-footer">/);
+  assert.match(css, /\\.dialog-footer\\{[^}]*flex-wrap:wrap/);
+});
