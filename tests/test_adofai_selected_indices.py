@@ -31,6 +31,23 @@ class AdoFAISelectedIndicesTests(unittest.TestCase):
                         {"selectedOnly": True, "useProjectSong": False}, indices
                     )
 
+    def test_full_export_defaults_use_all_notes_even_with_selection(self):
+        # The default dialog opens with selectedOnly=False. Selecting a later
+        # note must not shift the displayed manual song offset for full export.
+        defaults = self.bridge.get_adofai_export_defaults([1])
+        self.assertFalse(defaults["selectedOnly"])
+        self.assertEqual(defaults["songOffsetMs"], 0.0)
+
+    def test_selected_only_auto_offset_still_uses_selected_note(self):
+        # Switching to selected-only mode must keep its existing automatic
+        # offset semantics, independent of the full-export dialog defaults.
+        self.bridge.audio_path = "test-song.wav"
+        _, options, _ = self.bridge._prepare_adofai_export(
+            {"selectedOnly": True, "songOffsetAuto": True, "useProjectSong": True},
+            [1],
+        )
+        self.assertEqual(options["song_offset_ms"], 1000.0)
+
     def test_selected_only_exports_only_requested_note(self):
         notes, _, workflow = self.bridge._prepare_adofai_export(
             {"selectedOnly": True, "useProjectSong": False}, [1.0, True]
