@@ -11,7 +11,7 @@ import { isDialogCompositionKey, isPlainDialogEscape } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { exportDefaultsContextIsCurrent } from "./previewFreshness";
-import { exportFailureMessage } from "./exportResult";
+import { exportFailureMessage, exportStatusMessage } from "./exportResult";
 import { exportScopeOffset } from "./exportScopeOffset";
 import { isXModeAvailable, xModeForCompression } from "./angleCompressionXMode";
 
@@ -171,7 +171,8 @@ export default function AdoFAIExportDialogJa({
     if (!fixed || !context) return;
     const r = await run(() => api.export_adofai_advanced(fixed, selected));
     if (!r || !isCurrentAction(context)) return;
-    onStatus(r.status);
+    const status = exportStatusMessage(r);
+    if (status !== null) onStatus(status);
     const failure = exportFailureMessage(r);
     if (failure) setError({ message: failure, context });
     if (r.ok) onClose();
