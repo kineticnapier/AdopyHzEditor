@@ -186,6 +186,43 @@ class NonFiniteNoteInputTests(unittest.TestCase):
         self.assertEqual(bridge.notes, original)
         self.assertFalse(bridge._dirty)
 
+    def test_invalid_note_indices_cannot_delete_other_notes(self):
+        # Fractional, non-finite and non-numeric API indices must not be
+        # truncated to a valid note index or corrupt the Undo/Redo history.
+        for index in (0.5, 1.5, math.nan, math.inf, -math.inf, "0", True, None):
+            with self.subTest(index=index):
+                bridge = self.make_bridge()
+                bridge.notes.append(Note(3.0, 4.0, 62.0).normalized())
+                original = list(bridge.notes)
+                with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                    result = bridge.delete_notes([index])
+                self.assertIn("選択されていません", result["status"])
+                self.assert_unchanged(bridge, original)
+                sync.assert_not_called()
+
+    def test_curve_interpolation_rejects_invalid_indices(self):
+        # This API previously used its own int(i) conversion, bypassing
+        # _valid_indices and potentially editing the wrong curve.
+        for index in (0.5, math.nan, math.inf, "0", True, None):
+            with self.subTest(index=index):
+                bridge = self.make_bridge()
+                bridge.notes = [Note(1.0, 2.0, 60.0, 100, "curve", 72.0).normalized()]
+                original = list(bridge.notes)
+                with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                    result = bridge.apply_interpolation([index], "linear_pitch")
+                self.assertIn("選択されていません", result["status"])
+                self.assert_unchanged(bridge, original)
+                sync.assert_not_called()
+
+    def test_integral_float_indices_remain_compatible(self):
+        bridge = self.make_bridge()
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            bridge.delete_notes([0.0])
+        self.assertEqual(bridge.notes, [])
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        sync.assert_called_once()
+
     def test_finite_bounds_still_clamp(self):
         self.assertEqual(_clamp(-5.0, 0.0, 10.0), 0.0)
         self.assertEqual(_clamp(5.5, 0.0, 10.0), 5.5)
