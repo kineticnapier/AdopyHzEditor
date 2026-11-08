@@ -84,7 +84,7 @@ export default function HelpDialog({
                   </button>
                 ))}
               </nav>
-              <article>
+              <article key={current?.id}>
                 <h2>{current?.title}</h2>
                 <pre>{current?.body}</pre>
               </article>
