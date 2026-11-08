@@ -158,8 +158,11 @@ class AdoFAIMixin:
 
     def get_adofai_export_defaults(self, selected_indices: list[int] | None = None) -> dict[str, Any]:
         with self._lock:
-            selected = self._valid_export_indices(selected_indices)
-            first_source = [self.notes[i].normalized() for i in selected] if selected else [n.normalized() for n in self.notes]
+            # Defaults start in full-export mode (selectedOnly=False). The
+            # selection must not shift the displayed manual song offset.
+            # Selected-only auto offset is computed from the chosen notes in
+            # _prepare_adofai_export when that mode is actually requested.
+            first_source = [n.normalized() for n in self.notes]
             auto_offset = min((n.start for n in first_source), default=0.0) * 1000.0
             bpm = float(self.settings.get("bpm", 175.0))
             has_song = bool(self.audio_path)
