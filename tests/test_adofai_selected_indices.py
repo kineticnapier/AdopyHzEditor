@@ -38,6 +38,11 @@ class AdoFAISelectedIndicesTests(unittest.TestCase):
         self.assertFalse(defaults["selectedOnly"])
         self.assertEqual(defaults["songOffsetMs"], 0.0)
 
+    def test_selected_only_defaults_use_selected_notes(self):
+        defaults = self.bridge.get_adofai_export_defaults([1], selected_only=True)
+        self.assertTrue(defaults["selectedOnly"])
+        self.assertEqual(defaults["songOffsetMs"], 1000.0)
+
     def test_selected_only_auto_offset_still_uses_selected_note(self):
         # Switching to selected-only mode must keep its existing automatic
         # offset semantics, independent of the full-export dialog defaults.
