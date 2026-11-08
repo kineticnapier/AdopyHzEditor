@@ -132,3 +132,13 @@ test("ADOFAI export errors are scoped to the originating request before effects"
   assert.match(source, /\{currentError && <div className="dialog-error" role="alert">\{currentError\}<\/div>\}/);
   assert.match(source, /if \(alive\) setError\(\{ message: String\(e\), context: \{ api, selected, defaultSelectedOnly, loadAttempt, documentGeneration \} \}\)/);
 });
+
+test("fixed-angle compression allows the default 165° and fractional angles", () => {
+  // HTML number inputs with min=0.001 and step=1 reject 165 and most
+  // fractional values as stepMismatch, even though the backend accepts them.
+  const field = source.match(/<Num\s+value=\{options\.angleCompressionFixedAngle\}([\s\S]*?)\/>/)?.[1];
+  assert.ok(field, "fixed compression angle input must exist");
+  assert.match(field, /min=\{0\.001\}/);
+  assert.match(field, /max=\{359\.999\}/);
+  assert.match(field, /step="any"/);
+});
