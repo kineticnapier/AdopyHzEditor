@@ -886,7 +886,7 @@ export default function App() {
     if (result.dirty !== undefined) setDirty(result.dirty);
     else if (markDirty && result.changed !== false) setDirty(true);
     if (selection)
-      setSelected(selection.filter((i) => i >= 0 && i < result.notes.length));
+      setSelected(retainValidSelection(selection, result.notes.length));
     else
       setSelected((old) => retainValidSelection(old, result.notes.length));
   }
