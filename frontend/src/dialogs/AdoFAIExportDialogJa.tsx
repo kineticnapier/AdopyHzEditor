@@ -374,7 +374,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.angleCompressionFixedAngle}
                       min={0.001}
                       max={359.999}
-                      step={1}
+                      step="any"
                       suffix="°"
                       onChange={(v) => patch("angleCompressionFixedAngle", v)}
                     />
