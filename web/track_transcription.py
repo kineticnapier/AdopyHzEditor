@@ -9,6 +9,7 @@ core track derivation code to the Web backend.
 from __future__ import annotations
 
 from typing import Any
+import math
 
 import numpy as np
 
@@ -17,6 +18,13 @@ from web.editing import MIN_NOTE_DURATION
 
 
 _MAX_TRACK_SELECTION = 10_000
+
+
+def _finite_number(value: Any, name: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{name} must be finite")
+    return number
 
 
 def _track_slice(store, track_id: int) -> tuple[int, int] | None:
@@ -277,10 +285,10 @@ def find_frequency_tracks(
     if store is None:
         return {"trackIds": [], "status": "Frequency Tracks を先に解析してください"}
 
-    start = max(0.0, float(start_time))
-    end = max(start, float(end_time))
-    midi_min = max(0.0, min(127.0, float(minimum_midi)))
-    midi_max = max(midi_min, min(127.0, float(maximum_midi)))
+    start = max(0.0, _finite_number(start_time, "start_time"))
+    end = max(start, _finite_number(end_time, "end_time"))
+    midi_min = max(0.0, min(127.0, _finite_number(minimum_midi, "minimum_midi")))
+    midi_max = max(midi_min, min(127.0, _finite_number(maximum_midi, "maximum_midi")))
     candidates = np.flatnonzero(
         (store.track_start_times <= end) & (store.track_end_times >= start)
     )
@@ -314,6 +322,10 @@ def create_notes_from_tracks(
     if conversion_mode not in {"fixed", "curve"}:
         raise ValueError("mode must be 'fixed' or 'curve'")
 
+    # Reject malformed clip values before the first possible undo or note edit.
+    validated_start = None if start_time is None else _finite_number(start_time, "start_time")
+    validated_end = None if end_time is None else _finite_number(end_time, "end_time")
+
     with self._lock:
         store = getattr(self, "frequency_track_store", None)
         if store is None:
@@ -329,6 +341,7 @@ def create_notes_from_tracks(
                 int(value)
                 for value in track_ids
                 if isinstance(value, (int, np.integer))
+                and not isinstance(value, bool)
                 and 0 <= int(value) < int(store.track_count)
             }
         )
@@ -340,8 +353,8 @@ def create_notes_from_tracks(
                 "status": "Track が選択されていません",
             }
 
-        clip_start = None if start_time is None else max(0.0, float(start_time))
-        clip_end = None if end_time is None else min(float(self.duration), float(end_time))
+        clip_start = None if validated_start is None else max(0.0, validated_start)
+        clip_end = None if validated_end is None else min(float(self.duration), validated_end)
         if clip_start is not None and clip_end is not None and clip_end < clip_start:
             clip_start, clip_end = clip_end, clip_start
 
