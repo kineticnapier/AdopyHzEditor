@@ -50,8 +50,11 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         if shape.startswith("custom:"):
             try:
                 _, raw_p1, raw_p2 = shape.split(":", 2)
-                p1 = max(-200.0, min(300.0, float(raw_p1))) / 100.0
-                p2 = max(-200.0, min(300.0, float(raw_p2))) / 100.0
+                raw1, raw2 = float(raw_p1), float(raw_p2)
+                if not (math.isfinite(raw1) and math.isfinite(raw2)):
+                    raise ValueError("custom curve controls must be finite")
+                p1 = max(-200.0, min(300.0, raw1)) / 100.0
+                p2 = max(-200.0, min(300.0, raw2)) / 100.0
             except (TypeError, ValueError):
                 p1, p2 = 0.0, 1.0
             return start + delta * p1, start + delta * p2
