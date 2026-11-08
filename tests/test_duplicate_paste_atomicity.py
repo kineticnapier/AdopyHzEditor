@@ -58,6 +58,35 @@ class DuplicatePasteAtomicityTests(unittest.TestCase):
             "with_time_offset", lambda b: b.paste_notes(4.0)
         )
 
+    def test_duplicate_without_room_is_not_reported_as_an_edit(self):
+        # App.applyMutation marks a document dirty unless changed is False.
+        # Duplicating a note at the right boundary must not create a fake edit.
+        b = self.make_bridge()
+        b.duration = 2.5
+        before = list(b.notes)
+        with mock.patch.object(b, "_sync_notes_to_player") as sync:
+            result = b.duplicate_notes([1])
+        self.assertEqual(result["indices"], [])
+        self.assertIs(result["changed"], False)
+        self.assertEqual(b.notes, before)
+        self.assertFalse(b._dirty)
+        self.assertEqual(len(b._undo_stack), 0)
+        self.assertEqual(len(b._redo_stack), 1)
+        sync.assert_not_called()
+
+    def test_duplicate_without_valid_indices_is_not_reported_as_an_edit(self):
+        b = self.make_bridge()
+        before = list(b.notes)
+        with mock.patch.object(b, "_sync_notes_to_player") as sync:
+            result = b.duplicate_notes([99])
+        self.assertEqual(result["indices"], [])
+        self.assertIs(result["changed"], False)
+        self.assertEqual(b.notes, before)
+        self.assertFalse(b._dirty)
+        self.assertEqual(len(b._undo_stack), 0)
+        self.assertEqual(len(b._redo_stack), 1)
+        sync.assert_not_called()
+
     def test_successful_operations_create_one_undo_step(self):
         operations = (
             lambda b: b.duplicate_notes([0, 1]),
