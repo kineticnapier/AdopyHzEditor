@@ -282,13 +282,26 @@ def find_frequency_tracks(
     """Return full-resolution track ids intersecting a transcription rectangle."""
     with self._lock:
         store = getattr(self, "frequency_track_store", None)
+        duration = float(self.duration)
     if store is None:
         return {"trackIds": [], "status": "Frequency Tracks を先に解析してください"}
 
-    start = max(0.0, _finite_number(start_time, "start_time"))
-    end = max(start, _finite_number(end_time, "end_time"))
-    midi_min = max(0.0, min(127.0, _finite_number(minimum_midi, "minimum_midi")))
-    midi_max = max(midi_min, min(127.0, _finite_number(maximum_midi, "maximum_midi")))
+    raw_start, raw_end = sorted((
+        _finite_number(start_time, "start_time"),
+        _finite_number(end_time, "end_time"),
+    ))
+    raw_min, raw_max = sorted((
+        _finite_number(minimum_midi, "minimum_midi"),
+        _finite_number(maximum_midi, "maximum_midi"),
+    ))
+    # A rectangle wholly outside the timeline or MIDI range must not snap to
+    # the nearest boundary and accidentally select a track at 0s / MIDI 0/127.
+    if raw_end < 0.0 or raw_start > duration or raw_max < 0.0 or raw_min > 127.0:
+        return {"trackIds": [], "status": "Frequency Track を0本選択しました"}
+    start = max(0.0, raw_start)
+    end = min(duration, raw_end)
+    midi_min = max(0.0, raw_min)
+    midi_max = min(127.0, raw_max)
     candidates = np.flatnonzero(
         (store.track_start_times <= end) & (store.track_end_times >= start)
     )
@@ -353,10 +366,22 @@ def create_notes_from_tracks(
                 "status": "Track が選択されていません",
             }
 
-        clip_start = None if validated_start is None else max(0.0, validated_start)
-        clip_end = None if validated_end is None else min(float(self.duration), validated_end)
-        if clip_start is not None and clip_end is not None and clip_end < clip_start:
-            clip_start, clip_end = clip_end, clip_start
+        # Normalize the requested interval before clipping it to the audio.
+        # Clipping first then swapping can turn a wholly out-of-range request
+        # into a zero-width conversion at the first/last track sample.
+        raw_start, raw_end = validated_start, validated_end
+        if raw_start is not None and raw_end is not None and raw_start > raw_end:
+            raw_start, raw_end = raw_end, raw_start
+        duration = float(self.duration)
+        if (raw_start is not None and raw_start > duration) or (raw_end is not None and raw_end < 0.0):
+            return {
+                "notes": self._note_dicts(),
+                "indices": [],
+                "changed": False,
+                "status": "指定範囲にNote化できるTrackがありません",
+            }
+        clip_start = None if raw_start is None else max(0.0, raw_start)
+        clip_end = None if raw_end is None else min(duration, raw_end)
 
         created: list[Note] = []
         used_track_ids: list[int] = []
