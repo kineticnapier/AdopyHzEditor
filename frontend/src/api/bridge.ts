@@ -53,7 +53,7 @@ export type BackendApi = {
   save_project_dialog(): Promise<AppState>; save_project_as_dialog(): Promise<AppState>; load_project_dialog(): Promise<AppState>; relink_project_audio_dialog(): Promise<AppState>; import_midi_dialog(): Promise<AppState>;
   cancel_window_close(): Promise<{ ok: boolean }>; close_window(): Promise<{ ok: boolean }>;
   export_midi_dialog(): Promise<{ ok: boolean; path?: string; status: string }>; export_adofai_dialog(): Promise<{ ok: boolean; path?: string; stats?: Record<string, unknown>; status: string }>;
-  get_adofai_export_defaults(selectedIndices?: number[]): Promise<AdoFAIExportOptions>;
+  get_adofai_export_defaults(selectedIndices?: number[], selectedOnly?: boolean): Promise<AdoFAIExportOptions>;
   choose_adofai_song_source(): Promise<{ ok: boolean; path?: string; name?: string; status: string }>;
   preview_adofai_tiles(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<AdoFAITilePreview>;
   preview_adofai_debug(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<AdoFAIDebugPreview>;
