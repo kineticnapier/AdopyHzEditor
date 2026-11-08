@@ -33,6 +33,7 @@ import { resolveTrackLookup } from "./editor/trackLookup";
 import { midiLabel, midiToHz } from "./editor/musicMath";
 import { retainValidSelection, selectionAfterMutation } from "./editor/selectionValidity";
 import { formatCursorPeakLabel } from "./editor/cursorStatus";
+import { formatTrackHoverReadout } from "./editor/trackHoverReadout";
 import { shouldShowCanvasEmptyHint } from "./editor/emptyState";
 import { runMidiExport } from "./editor/midiExport";
 import "./dialogs.css";
@@ -1389,11 +1390,7 @@ export default function App() {
                 : "Pitch —"}
             </span>
             {hoveredTrack && (
-              <strong>
-                Track #{hoveredTrack.id} · {hoveredTrack.noteName} ·{" "}
-                {hoveredTrack.duration.toFixed(3)} s · $
-                {(hoveredTrack.magnitude * 100).toFixed(1)}%
-              </strong>
+              <strong>{formatTrackHoverReadout(hoveredTrack)}</strong>
             )}
             {!hoveredTrack && cursorReadout?.peak && (
               <strong>{cursorReadout.peak}</strong>
