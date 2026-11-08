@@ -90,7 +90,7 @@ class EditingMixin:
         with self._lock:
             valid = set(self._valid_indices(indices))
             if not valid:
-                return {"notes": self._note_dicts(), "indices": [], "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "ノートが選択されていません"}
             t = self._snap_time(float(at_time))
             split_count = 0
             new_notes: list[Note] = []
@@ -105,7 +105,7 @@ class EditingMixin:
                 else:
                     new_notes.append(n)
             if split_count == 0:
-                return {"notes": self._note_dicts(), "indices": [], "status": "再生位置をまたぐ選択ノートがありません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "再生位置をまたぐ選択ノートがありません"}
             # Build every fragment before touching Undo/Redo. A failed curve
             # calculation must leave the document and history unchanged.
             self._push_undo()
@@ -190,7 +190,7 @@ class EditingMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "indices": [], "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "ノートが選択されていません"}
             source = [self.notes[i].normalized() for i in valid]
             min_start = min(n.start for n in source)
             max_end = max(n.end for n in source)
@@ -221,7 +221,7 @@ class EditingMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
             if not isinstance(changes, dict):
                 raise TypeError("changes must be an object")
 
