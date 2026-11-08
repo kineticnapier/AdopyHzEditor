@@ -948,7 +948,8 @@ function DebugPreview({ preview }: { preview: AdoFAIDebugPreview }) {
   return (
     <div className="debug-preview">
       <div className="preview-summary">
-        行数 {preview.summary.rows} / 推定タイル{" "}
+        表示 {rows.length} / 全 {preview.summary.rows} 行{" "}
+        {preview.summary.rows > rows.length || preview.limited ? "（一部のみ）" : ""} / 推定タイル{" "}
         {preview.summary.estimatedTiles} / 警告 {preview.summary.warnings}
       </div>
       <div className="debug-table-wrap">
