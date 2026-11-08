@@ -203,17 +203,9 @@ class AdoFAIMixin:
     def _valid_export_indices(self, indices: list[int] | None) -> list[int]:
         if not indices:
             return []
-        out: list[int] = []
-        seen: set[int] = set()
-        for raw in indices:
-            try:
-                index = int(raw)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= index < len(self.notes) and index not in seen:
-                out.append(index)
-                seen.add(index)
-        return sorted(out)
+        # Export selection must obey the same exact-index rules as editing.
+        # int(0.5), int(True), and int("1") would target a different note.
+        return self._valid_indices(indices)
 
     def _prepare_adofai_export(
         self,
@@ -223,7 +215,10 @@ class AdoFAIMixin:
         raw = dict(raw_options or {})
         with self._lock:
             selected = self._valid_export_indices(selected_indices)
-            selected_only = bool(raw.get("selectedOnly", False)) and bool(selected)
+            selected_only = bool(raw.get("selectedOnly", False))
+            if selected_only and not selected:
+                # Never turn an explicitly selected-only export into a full export.
+                raise ValueError("選択ノートがありません")
             source = [self.notes[i] for i in selected] if selected_only else list(self.notes)
             semitones = int(self.settings.get("exportOctave", 0)) * 12 + int(self.settings.get("exportSemitone", 0))
             notes = [n.with_pitch_offset(semitones) for n in source]
