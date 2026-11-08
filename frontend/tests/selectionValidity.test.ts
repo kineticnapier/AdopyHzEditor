@@ -29,8 +29,8 @@ test("explicit mutation selections use the same safe-index filter as state refre
   // A backend mutation may supply an explicit index list. Fractional indices
   // must not bypass the validation used for an existing selection.
   const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  const mutation = source.match(/function applyMutation\\([\\s\\S]*?\\n  }\\n  async function queuedMutation/);
+  const mutation = source.match(/function applyMutation\([\s\S]*?\n  }\n  async function queuedMutation/);
   assert.ok(mutation, "App.applyMutation must remain covered");
-  assert.match(mutation[0], /if \\(selection\\)\\s*setSelected\\(retainValidSelection\\(selection, result\\.notes\\.length\\)\\)/);
+  assert.match(mutation[0], /if \(selection\)\s*setSelected\(retainValidSelection\(selection, result\.notes\.length\)\)/);
   assert.deepEqual(retainValidSelection([0, 1.5, 2, 3, NaN], 3), [0, 2]);
 });
