@@ -22,3 +22,10 @@ test("narrow help dialog stacks scrollable navigation above readable article", (
   assert.match(narrow, /\.help-layout nav button\{[^}]*flex:none[^}]*white-space:nowrap/);
   assert.match(narrow, /\.help-layout article\{[^}]*min-height:0/);
 });
+
+test("changing help sections resets the article scroll position", () => {
+  // A keyed article is remounted when the active section changes, instead of
+  // preserving the previous section's scrollTop on the same DOM element.
+  assert.match(help, /onClick=\{\(\) => setSection\(x\.id\)\}/);
+  assert.match(help, /<article key=\{current\?\.id\}>/);
+});
