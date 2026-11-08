@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import sys
 from pathlib import Path
@@ -179,6 +180,8 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
                     song_offset = float(options.get("songOffsetMs", 0.0))
                 except (TypeError, ValueError):
                     song_offset = 0.0
+                if not math.isfinite(song_offset):
+                    raise ValueError("音源オフセットは有限の数値で指定してください")
                 build_opts["song_offset_ms"] = max(-3600000.0, min(3600000.0, song_offset))
             workflow["songSourcePath"] = song_source
             workflow["copySong"] = bool(options.get("copyProjectSong", True))
@@ -194,6 +197,8 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
                 fixed_angle = float(options.get("angleCompressionFixedAngle", 165.0))
             except (TypeError, ValueError):
                 fixed_angle = 165.0
+            if not math.isfinite(fixed_angle):
+                raise ValueError("固定角度は有限の数値で指定してください")
             fixed_angle = max(0.001, min(359.999, fixed_angle))
 
             # Fixed Angle Compression controls only the full/main tiles. The
