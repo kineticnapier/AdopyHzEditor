@@ -154,3 +154,15 @@ test("changing export scope updates automatic manual-offset seed without rewriti
   assert.match(scopeHandler, /o\.songOffsetAuto\s*\? exportScopeOffset\(/);
   assert.match(scopeHandler, /: o\.songOffsetMs/);
 });
+
+
+test("ADOFAI debug preview clearly marks rows omitted by the UI and backend", () => {
+  const preview = source.slice(source.indexOf("function DebugPreview("));
+  assert.match(preview, /rows = preview\.rows\.slice\(0, 300\)/);
+  assert.match(preview, /表示 \{rows\.length\} \/ 全 \{preview\.summary\.rows\} 行/);
+  assert.match(preview, /preview\.summary\.rows > rows\.length \|\| preview\.limited/);
+  assert.match(preview, /一部のみ/);
+  const backend = readFileSync(new URL("../../web/adofai.py", import.meta.url), "utf8");
+  assert.match(backend, /max_rows = 5000/);
+  assert.match(backend, /"limited": len\(rows\) > max_rows/);
+});
