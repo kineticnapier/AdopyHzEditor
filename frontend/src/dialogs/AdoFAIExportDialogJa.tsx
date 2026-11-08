@@ -13,8 +13,18 @@ import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { exportDefaultsContextIsCurrent } from "./previewFreshness";
 import { exportFailureMessage } from "./exportResult";
 import { exportScopeOffset } from "./exportScopeOffset";
+import { isXModeAvailable, xModeForCompression } from "./angleCompressionXMode";
 
 type ExportContext = { api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number };
+
+const xModeOptions: Array<[AdoFAIExportOptions["xMode"], string]> = [
+  ["floor", "切り捨て"],
+  ["lowest_floor", "最小切り捨て"],
+  ["round", "四捨五入"],
+  ["ceil", "切り上げ"],
+  ["fixed", "固定"],
+  ["target_bpm", "目標BPM"],
+];
 
 type Props = {
   api: BackendApi;
@@ -101,6 +111,18 @@ export default function AdoFAIExportDialogJa({
     setOptions((o) =>
       o ? { ...o, [k]: v, harmonyTuning: "equal temperament" } : o,
     );
+  }
+  function changeAngleCompressionMode(angleCompressionMode: AdoFAIExportOptions["angleCompressionMode"]) {
+    if (workingRef.current || !defaultsCurrent) return;
+    invalidatePreview();
+    setError(null);
+    // Python uses "floor" when fixed angles and target BPM are combined.
+    // Keep the displayed X mode consistent with the actual export.
+    setOptions((o) => o ? {
+      ...o,
+      angleCompressionMode,
+      xMode: xModeForCompression(angleCompressionMode, o.xMode),
+    } : o);
   }
   function changeSelectedOnly(selectedOnly: boolean) {
     if (workingRef.current || !defaultsCurrent) return;
@@ -384,10 +406,7 @@ export default function AdoFAIExportDialogJa({
                       ["fixed", "固定角度"],
                     ]}
                     onChange={(v) =>
-                      patch(
-                        "angleCompressionMode",
-                        v as AdoFAIExportOptions["angleCompressionMode"],
-                      )
+                      changeAngleCompressionMode(v as AdoFAIExportOptions["angleCompressionMode"])
                     }
                   />
                 </Field>
@@ -403,17 +422,15 @@ export default function AdoFAIExportDialogJa({
                     />
                   </Field>
                 )}
+                {options.angleCompressionMode === "fixed" && (
+                  <div className="info-card">固定圧縮角度では「目標BPM」のX計算は使えません。</div>
+                )}
                 <Field label="Xの決め方">
                   <Select
                     value={options.xMode}
-                    options={[
-                      ["floor", "切り捨て"],
-                      ["lowest_floor", "最小切り捨て"],
-                      ["round", "四捨五入"],
-                      ["ceil", "切り上げ"],
-                      ["fixed", "固定"],
-                      ["target_bpm", "目標BPM"],
-                    ]}
+                    options={xModeOptions.filter(([mode]) =>
+                      isXModeAvailable(options.angleCompressionMode, mode)
+                    )}
                     onChange={(v) =>
                       patch("xMode", v as AdoFAIExportOptions["xMode"])
                     }
