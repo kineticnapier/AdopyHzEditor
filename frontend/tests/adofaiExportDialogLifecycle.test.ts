@@ -175,3 +175,11 @@ test("ADOFAI export footer buttons remain reachable in narrow windows", () => {
   assert.match(source, /<div className="dialog-footer">/);
   assert.match(css, /\.dialog-footer\{[^}]*flex-wrap:wrap/);
 });
+
+test("narrow export fields stack labels above controls to preserve input width", () => {
+  // At 320px viewport the modal is 280px wide; after 28px body padding,
+  // a 130px label plus 12px gap leaves only 110px for the numeric control.
+  // Stack fields at narrow widths instead of shrinking values with suffixes.
+  const css = readFileSync(new URL("../src/dialogs.css", import.meta.url), "utf8");
+  assert.match(css, /@media\s*\(max-width:\s*420px\)\s*\{\s*\.dialog-field\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\);\s*gap:\s*3px\s*\}\s*\.dialog-field>span\s*\{\s*padding-top:\s*0\s*\}\s*\}/);
+});
