@@ -361,7 +361,7 @@ class NoteMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "indices": [], "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "ノートが選択されていません"}
             source = [self.notes[i].normalized() for i in valid]
             first = min(n.start for n in source)
             last = max(n.end for n in source)
@@ -369,7 +369,7 @@ class NoteMixin:
             if last + offset > self.duration:
                 offset = max(0.0, self.duration - last)
             if offset <= 1e-9:
-                return {"notes": self._note_dicts(), "indices": [], "status": "右側に複製する空きがありません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "右側に複製する空きがありません"}
             # Prepare every copy before recording Undo or modifying notes.
             # A failed conversion must not leave a partial duplicate.
             copies = [n.with_time_offset(offset).normalized() for n in source]
