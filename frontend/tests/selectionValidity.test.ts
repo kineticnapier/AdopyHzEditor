@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { retainValidSelection } from "../src/editor/selectionValidity.ts";
 
@@ -22,4 +23,14 @@ test("fractional, non-finite and unsafe note indices are discarded", () => {
   assert.deepEqual(selected.slice(0, 4), [0, .5, NaN, 2]);
   const valid = [0, 2];
   assert.strictEqual(retainValidSelection(valid, 3), valid);
+});
+
+test("explicit mutation selections use the same safe-index filter as state refresh", () => {
+  // A backend mutation may supply an explicit index list. Fractional indices
+  // must not bypass the validation used for an existing selection.
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const mutation = source.match(/function applyMutation\\([\\s\\S]*?\\n  }\\n  async function queuedMutation/);
+  assert.ok(mutation, "App.applyMutation must remain covered");
+  assert.match(mutation[0], /if \\(selection\\)\\s*setSelected\\(retainValidSelection\\(selection, result\\.notes\\.length\\)\\)/);
+  assert.deepEqual(retainValidSelection([0, 1.5, 2, 3, NaN], 3), [0, 2]);
 });
