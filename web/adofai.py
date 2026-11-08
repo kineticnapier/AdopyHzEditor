@@ -156,13 +156,15 @@ def _stabilize_rabbit_zip_cycle_boundaries(notes: list[Any]) -> list[Any]:
 class AdoFAIMixin:
     """Advanced ADOFAI export and help APIs used by the web UI."""
 
-    def get_adofai_export_defaults(self, selected_indices: list[int] | None = None) -> dict[str, Any]:
+    def get_adofai_export_defaults(
+        self, selected_indices: list[int] | None = None, selected_only: bool = False
+    ) -> dict[str, Any]:
         with self._lock:
-            # Defaults start in full-export mode (selectedOnly=False). The
-            # selection must not shift the displayed manual song offset.
-            # Selected-only auto offset is computed from the chosen notes in
-            # _prepare_adofai_export when that mode is actually requested.
-            first_source = [n.normalized() for n in self.notes]
+            # The manual offset displayed by the dialog must match the mode
+            # used to open it. A regular full export ignores the selection;
+            # an explicit selected-only export starts at its first note.
+            selected = self._valid_export_indices(selected_indices) if selected_only else []
+            first_source = [self.notes[i].normalized() for i in selected] if selected else [n.normalized() for n in self.notes]
             auto_offset = min((n.start for n in first_source), default=0.0) * 1000.0
             bpm = float(self.settings.get("bpm", 175.0))
             has_song = bool(self.audio_path)
@@ -200,7 +202,7 @@ class AdoFAIMixin:
             "songConflictAction": "cancel",
             "songOffsetAuto": True,
             "songOffsetMs": round(auto_offset, 3),
-            "selectedOnly": False,
+            "selectedOnly": bool(selected_only and selected),
         }
 
     def _valid_export_indices(self, indices: list[int] | None) -> list[int]:
