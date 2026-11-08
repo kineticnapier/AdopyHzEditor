@@ -23,7 +23,7 @@ for (const file of dialogFiles) {
     if (file.includes("ToolDialogs.tsx")) {
       assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
     } else {
-      assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, false, editedRef\.current\)/);
+      assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
     }
     assert.match(component, /cancelledRef\.current = true/);
     assert.match(component, /event\.stopPropagation\(\)/);
@@ -217,7 +217,7 @@ test("both tool and ADOFAI dialogs distinguish focus from actual edits", () => {
     if (file.includes("ToolDialogs.tsx")) {
       assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
     } else {
-      assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, false, editedRef\.current\)/);
+      assert.match(component, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
     }
     assert.match(component, /editedRef\.current = false;\s*setEditing\(false\);/);
   }
@@ -231,4 +231,23 @@ test("settings numeric input also ignores modified Escape", () => {
   assert.ok(start >= 0);
   const component = source.slice(start, source.indexOf("function Select(", start));
   assert.ok(component.includes("else if (isPlainDialogEscape(e))"));
+});
+
+
+test("ADOFAI integer fields round exact halves like the Python backend", () => {
+  const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8");
+  const numeric = source.slice(source.indexOf("function Num({"), source.indexOf("function TilePreview("));
+  assert.match(numeric, /commitNumericEdit\(text, fallback, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
+  // Python _as_int uses round(), which rounds exact halves to even.
+  assert.equal(commitNumericEdit("0.5", 1, 0, 10000000, false, true, true), 0);
+  assert.equal(commitNumericEdit("2.5", 1, 0, 10000000, false, true, true), 2);
+  assert.equal(commitNumericEdit("3.5", 1, 0, 10000000, false, true, true), 4);
+  assert.equal(commitNumericEdit("2.5", 1, 0, 10000000, false, false, true), 2.5);
+  for (const field of ["maxTiles", "maxTilesPerNote", "harmonyPolyMaxDenominator"]) {
+    const start = source.indexOf("value={options." + field + "}");
+    assert.ok(start >= 0, "missing integer field " + field);
+    const end = source.indexOf("/>", start);
+    assert.ok(end > start, "unterminated integer field " + field);
+    assert.match(source.slice(start, end), /step=\{1\}/);
+  }
 });
