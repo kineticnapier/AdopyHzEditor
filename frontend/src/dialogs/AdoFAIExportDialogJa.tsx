@@ -11,6 +11,7 @@ import { isDialogCompositionKey, isPlainDialogEscape } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { exportDefaultsContextIsCurrent } from "./previewFreshness";
+import { exportFailureMessage } from "./exportResult";
 
 type ExportContext = { api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number };
 
@@ -126,6 +127,8 @@ export default function AdoFAIExportDialogJa({
     const r = await run(() => api.export_adofai_advanced(fixed, selected));
     if (!r || !isCurrentAction(context)) return;
     onStatus(r.status);
+    const failure = exportFailureMessage(r);
+    if (failure) setError({ message: failure, context });
     if (r.ok) onClose();
   }
   async function tilePreview() {
