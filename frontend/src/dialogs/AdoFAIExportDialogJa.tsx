@@ -67,7 +67,7 @@ export default function AdoFAIExportDialogJa({
     setLoadedContext(null);
     let alive = true;
     void api
-      .get_adofai_export_defaults(selected)
+      .get_adofai_export_defaults(selected, defaultSelectedOnly)
       .then((v) => {
         if (alive) {
           setLoadedContext({ api, selected, defaultSelectedOnly, loadAttempt, documentGeneration });
