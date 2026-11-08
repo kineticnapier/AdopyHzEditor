@@ -10,13 +10,19 @@ const source = readFileSync(
 
 test("selection refresh disables export until new defaults arrive", () => {
   const effectStart = source.indexOf("previewRequests.current.invalidate();");
-  const loadStart = source.indexOf(".get_adofai_export_defaults(selected)", effectStart);
+  const loadStart = source.indexOf(".get_adofai_export_defaults(selected, defaultSelectedOnly)", effectStart);
   assert.ok(effectStart >= 0 && loadStart > effectStart);
   const effect = source.slice(effectStart, loadStart);
   assert.match(effect, /setOptions\(null\)/);
   assert.ok(effect.indexOf("setOptions(null)") < loadStart - effectStart);
   assert.match(source, /if \(!options \|\| !defaultsCurrent\)\s*return\s*\(/);
   assert.match(source, /if \(alive\) \{\s*setLoadedContext\(/);
+});
+
+test("ADOFAI default offset request includes initial full or selected-only scope", () => {
+  // The dialog must not use a selected-only offset when opened for all notes.
+  assert.match(source, /\.get_adofai_export_defaults\(selected, defaultSelectedOnly\)/);
+  assert.match(source, /selectedOnly:defaultSelectedOnly&&selected\.length>0/);
 });
 
 test("export and preview failures are announced to assistive technology", () => {
