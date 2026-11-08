@@ -320,9 +320,10 @@ class NoteMixin:
     def set_note_properties(self, index: int, changes: dict[str, Any]) -> dict[str, Any]:
         """Set exact properties for one selected note from the inspector."""
         with self._lock:
-            i = int(index)
-            if i < 0 or i >= len(self.notes):
+            valid = self._valid_indices([index])
+            if not valid:
                 return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+            i = valid[0]
             if not isinstance(changes, dict):
                 raise TypeError("changes must be an object")
             n = self.notes[i].normalized()
