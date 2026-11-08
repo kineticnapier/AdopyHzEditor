@@ -12,6 +12,7 @@ import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { exportDefaultsContextIsCurrent } from "./previewFreshness";
 import { exportFailureMessage } from "./exportResult";
+import { exportScopeOffset } from "./exportScopeOffset";
 
 type ExportContext = { api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number };
 
@@ -100,6 +101,28 @@ export default function AdoFAIExportDialogJa({
     setOptions((o) =>
       o ? { ...o, [k]: v, harmonyTuning: "equal temperament" } : o,
     );
+  }
+  function changeSelectedOnly(selectedOnly: boolean) {
+    if (workingRef.current || !defaultsCurrent) return;
+    invalidatePreview();
+    setError(null);
+    setOptions((o) => o ? {
+      ...o, selectedOnly,
+      songOffsetMs: o.songOffsetAuto
+        ? exportScopeOffset(o.fullSongOffsetMs, o.selectedSongOffsetMs, selectedOnly)
+        : o.songOffsetMs,
+    } : o);
+  }
+  function changeSongOffsetAuto(songOffsetAuto: boolean) {
+    if (workingRef.current || !defaultsCurrent) return;
+    invalidatePreview();
+    setError(null);
+    setOptions((o) => o ? {
+      ...o, songOffsetAuto,
+      songOffsetMs: songOffsetAuto
+        ? exportScopeOffset(o.fullSongOffsetMs, o.selectedSongOffsetMs, o.selectedOnly)
+        : o.songOffsetMs,
+    } : o);
   }
   async function run<T>(fn: () => Promise<T>) {
     const context = loadedContext;
@@ -342,7 +365,7 @@ export default function AdoFAIExportDialogJa({
               <input
                 type="checkbox"
                 checked={options.selectedOnly}
-                onChange={(e) => patch("selectedOnly", e.target.checked)}
+                onChange={(e) => changeSelectedOnly(e.target.checked)}
               />
               選択ノートのみ（{selected.length}個）
             </label>
@@ -644,9 +667,7 @@ export default function AdoFAIExportDialogJa({
                     <input
                       type="checkbox"
                       checked={options.songOffsetAuto}
-                      onChange={(e) =>
-                        patch("songOffsetAuto", e.target.checked)
-                      }
+                      onChange={(e) => changeSongOffsetAuto(e.target.checked)}
                     />
                     最初のノートから自動計算
                   </label>

@@ -163,9 +163,12 @@ class AdoFAIMixin:
             # The manual offset displayed by the dialog must match the mode
             # used to open it. A regular full export ignores the selection;
             # an explicit selected-only export starts at its first note.
-            selected = self._valid_export_indices(selected_indices) if selected_only else []
-            first_source = [self.notes[i].normalized() for i in selected] if selected else [n.normalized() for n in self.notes]
-            auto_offset = min((n.start for n in first_source), default=0.0) * 1000.0
+            selected = self._valid_export_indices(selected_indices)
+            all_notes = [n.normalized() for n in self.notes]
+            selected_notes = [all_notes[i] for i in selected] if selected else all_notes
+            full_offset = min((n.start for n in all_notes), default=0.0) * 1000.0
+            selected_offset = min((n.start for n in selected_notes), default=0.0) * 1000.0
+            auto_offset = selected_offset if selected_only and selected else full_offset
             bpm = float(self.settings.get("bpm", 175.0))
             has_song = bool(self.audio_path)
         return {
@@ -202,6 +205,9 @@ class AdoFAIMixin:
             "songConflictAction": "cancel",
             "songOffsetAuto": True,
             "songOffsetMs": round(auto_offset, 3),
+            # Keep both automatic offsets available when the dialog changes scope.
+            "fullSongOffsetMs": round(full_offset, 3),
+            "selectedSongOffsetMs": round(selected_offset, 3),
             "selectedOnly": bool(selected_only and selected),
         }
 

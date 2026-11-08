@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { exportDefaultsContextIsCurrent } from "../src/dialogs/previewFreshness.ts";
+import { exportScopeOffset } from "../src/dialogs/exportScopeOffset.ts";
 
 const source = readFileSync(
   new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url),
@@ -141,4 +142,15 @@ test("fixed-angle compression allows the default 165° and fractional angles", (
   assert.match(field, /min=\{0\.001\}/);
   assert.match(field, /max=\{359\.999\}/);
   assert.match(field, /step="any"/);
+});
+
+
+test("changing export scope updates automatic manual-offset seed without rewriting a manual override", () => {
+  assert.equal(exportScopeOffset(0, 1000, false), 0);
+  assert.equal(exportScopeOffset(0, 1000, true), 1000);
+  assert.match(source, /onChange=\{\(e\) => changeSelectedOnly\(e\.target\.checked\)\}/);
+  assert.match(source, /onChange=\{\(e\) => changeSongOffsetAuto\(e\.target\.checked\)\}/);
+  const scopeHandler = source.slice(source.indexOf("function changeSelectedOnly("), source.indexOf("function changeSongOffsetAuto("));
+  assert.match(scopeHandler, /o\.songOffsetAuto\s*\? exportScopeOffset\(/);
+  assert.match(scopeHandler, /: o\.songOffsetMs/);
 });
