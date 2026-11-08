@@ -224,7 +224,7 @@ class NoteMixin:
         with self._lock:
             valid = sorted(self._valid_indices(indices), reverse=True)
             if not valid:
-                return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
             self._push_undo()
             for i in valid:
                 self.notes.pop(i)
@@ -237,7 +237,7 @@ class NoteMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
             original = [self.notes[i].normalized() for i in valid]
             min_start = min(n.start for n in original)
             max_end = max(n.end for n in original)
@@ -281,7 +281,7 @@ class NoteMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
             edge_key = str(edge).lower()
             if edge_key not in {"start", "end"}:
                 raise ValueError("edge must be start or end")
@@ -322,7 +322,7 @@ class NoteMixin:
         with self._lock:
             i = int(index)
             if i < 0 or i >= len(self.notes):
-                return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
             if not isinstance(changes, dict):
                 raise TypeError("changes must be an object")
             n = self.notes[i].normalized()
@@ -386,7 +386,7 @@ class NoteMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
             step = 60.0 / max(1e-6, float(self.settings["bpm"])) / max(1, int(self.settings["snapDiv"]))
             offset = float(self.settings["offsetMs"]) / 1000.0
 
@@ -424,7 +424,7 @@ class NoteMixin:
         with self._lock:
             valid = [i for i in self._valid_indices(indices) if self.notes[i].is_curve]
             if not valid:
-                return {"notes": self._note_dicts(), "status": "カーブノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "カーブノートが選択されていません"}
             mode = self._normalize_setting("curveInterpolation", interpolation) if interpolation is not None else str(self.settings["curveInterpolation"])
             updated = [(i, self.notes[i].with_interpolation(mode)) for i in valid]
             if all(self.notes[i] == note for i, note in updated):
@@ -442,7 +442,7 @@ class NoteMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
             angle = float(self._normalize_setting("targetAngle", target_angle)) if target_angle is not None else float(self.settings["targetAngle"])
             updated = [(i, self.notes[i].with_target_angle(angle)) for i in valid]
             if all(self.notes[i] == note for i, note in updated):
@@ -459,7 +459,7 @@ class NoteMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
             updated = [(i, self.notes[i].with_target_angle(None)) for i in valid]
             if all(self.notes[i] == note for i, note in updated):
                 self._status = "ノートの角度指定は既に解除されています"
