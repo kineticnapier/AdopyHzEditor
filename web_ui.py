@@ -60,22 +60,17 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
     def apply_curve_shape(self, indices):
         """Apply the current curve-shape preset to existing selected curves."""
         with self._lock:
-            valid = sorted(
-                {
-                    int(i)
-                    for i in indices
-                    if 0 <= int(i) < len(self.notes) and self.notes[int(i)].is_curve
-                }
-            )
+            valid = [i for i in self._valid_indices(indices) if self.notes[i].is_curve]
             if not valid:
-                return {"notes": self._note_dicts(), "status": "カーブノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": "カーブノートが選択されていません"}
 
-            self._push_undo()
+            # Validate and prepare every note before changing history or notes.
+            updated: list[tuple[int, Note]] = []
             for i in valid:
                 n = self.notes[i].normalized()
                 end_midi = float(n.midi_end if n.midi_end is not None else n.midi)
                 c1, c2 = self._curve_controls(float(n.midi), end_midi)
-                self.notes[i] = Note(
+                updated.append((i, Note(
                     n.start,
                     n.end,
                     n.midi,
@@ -86,12 +81,19 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
                     c2,
                     n.interpolation,
                     n.target_angle,
-                ).normalized()
+                ).normalized()))
 
+            if all(self.notes[i] == note for i, note in updated):
+                self._status = "カーブの形状は変更されませんでした"
+                return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
+
+            self._push_undo()
+            for i, note in updated:
+                self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"{len(valid)}個のカーブに形状を適用しました"
-            return {"notes": self._note_dicts(), "status": self._status}
+            return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def open_audio(self):
         super().open_audio()
