@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { isPlainMenuNavigationEvent, nextMenuId } from "../src/components/menuNavigation.ts";
+import { focusAdjacentMenu, isPlainMenuNavigationEvent, nextMenuId } from "../src/components/menuNavigation.ts";
 
 const ids = ["file", "edit", "analyze", "tools", "options", "help"] as const;
 
@@ -38,4 +38,34 @@ test("menu navigation leaves modified keys and IME conversion untouched", () => 
 test("trigger, popup, and menu-bar handlers all check native keyboard modifiers", () => {
   const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
   assert.equal(source.split("isPlainMenuNavigationEvent(event.nativeEvent)").length - 1, 3);
+});
+
+
+test("horizontal navigation from a popup focuses the first enabled item", () => {
+  const focused: string[] = [];
+  const root = { querySelector: (selector: string) => {
+    if (selector === '[data-menu-id="edit"]') return { focus: () => focused.push("trigger") };
+    if (selector === '[data-menu-popup="edit"] button:not(:disabled)') return { focus: () => focused.push("first item") };
+    return null;
+  } } as unknown as HTMLElement;
+  focusAdjacentMenu(root, "edit", true);
+  assert.deepEqual(focused, ["first item"]);
+  focusAdjacentMenu(root, "edit", false);
+  assert.deepEqual(focused, ["first item", "trigger"]);
+});
+
+test("horizontal navigation falls back to trigger if popup has no enabled item", () => {
+  const focused: string[] = [];
+  const root = { querySelector: (selector: string) =>
+    selector === '[data-menu-id="help"]' ? { focus: () => focused.push("trigger") } : null,
+  } as unknown as HTMLElement;
+  focusAdjacentMenu(root, "help", true);
+  focusAdjacentMenu(null, "help", true);
+  assert.deepEqual(focused, ["trigger"]);
+});
+
+test("horizontal navigation connects popup identification and item focus", () => {
+  const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
+  assert.match(source, /data-menu-popup=\{id\}/);
+  assert.match(source, /focusAdjacentMenu\(rootRef\.current,next,Boolean\(active && fromPopup\)\)/);
 });
