@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { consumeMenuEscape } from "../src/components/menuEscape.ts";
 
@@ -40,4 +41,12 @@ test("an already-handled Escape is not handled twice", () => {
   const { event } = keyEvent("Escape");
   event.preventDefault();
   assert.equal(consumeMenuEscape(event, "file", () => assert.fail("must not close")), false);
+});
+
+
+test("application menu popup is named by its trigger", () => {
+  const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
+  assert.match(source, /const popupId=useId\(\),triggerId=useId\(\)/);
+  assert.match(source, /<button id=\{triggerId\} className="app-menu-trigger"/);
+  assert.match(source, /role="menu" aria-labelledby=\{triggerId\}/);
 });
