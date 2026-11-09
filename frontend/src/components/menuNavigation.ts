@@ -33,3 +33,17 @@ export function focusAdjacentMenu(root: Pick<HTMLElement, "querySelector"> | nul
     : null;
   (firstItem ?? trigger)?.focus();
 }
+
+/** Restore menu focus only when closing the popup left focus unclaimed.
+ * An action may open a dialog that has already focused its own controls.
+ */
+export function restoreMenuTriggerFocus(
+  root: Pick<HTMLElement, "querySelector"> | null,
+  id: string,
+  activeElement: Element | null,
+  body: Element,
+  documentElement: Element,
+): void {
+  if (activeElement && activeElement !== body && activeElement !== documentElement && activeElement.isConnected) return;
+  root?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`)?.focus();
+}
