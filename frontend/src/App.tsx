@@ -362,11 +362,13 @@ export default function App() {
         try {
           const ping = await backend.ping();
           if (!active) return;
-          setApi(backend);
-          setConnected(ping.ok);
+          // Do not expose an API to controls or polling before the initial
+          // state is loaded. A failed get_state must leave the UI disconnected.
           const state = await backend.get_state();
           if (!active) return;
           applyState(state);
+          setApi(backend);
+          setConnected(ping.ok);
           if (
             state.analysis.available &&
             state.analysis.source !== "vorbis_direct"
@@ -627,6 +629,12 @@ export default function App() {
   ]);
 
   async function patch(changes: Partial<EditorSettings>) {
+    // Settings remain visible while the initial backend connection is loading.
+    // Never mark an unsent edit dirty or queue it without a usable API.
+    if (!api || !connected) {
+      setStatus("バックエンド接続完了まで設定を変更できません");
+      return;
+    }
     if (stateTransitionPending.current > 0) {
       setStatus("プロジェクト処理中は設定を変更できません");
       return;
