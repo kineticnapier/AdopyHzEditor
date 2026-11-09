@@ -17,7 +17,7 @@ test("non-Element keydown targets do not throw or block canvas shortcuts", () =>
 
 test("text fields and native keyboard controls are protected", () => {
   for (const token of ["input", "select", "textarea", "[contenteditable='true']",
-    "button", "a", "[role='menuitem']", "[role='menu']", "[role='dialog']",
+    "button", "a", "summary", "[role='menuitem']", "[role='menu']", "[role='dialog']",
     "[role='slider']", "[role='textbox']"]) {
     assert.equal(isInteractiveShortcutTarget(targetFor(token)), true, token);
   }
@@ -56,4 +56,17 @@ test("IME composition cannot trigger global shortcuts or blur an editing field",
   assert.equal(shouldDispatchEditorShortcut(keyEvent(canvas, "F1", { isComposing: true }), false), false);
   assert.equal(shouldDispatchEditorShortcut(keyEvent(canvas, "Escape", { keyCode: 229 }), false), false);
   assert.equal(shouldDispatchEditorShortcut(keyEvent(input, "s", { ctrlKey: true, isComposing: false, keyCode: 83 }), false), true);
+});
+
+
+test("focused settings disclosure keeps native Space/Enter instead of toggling playback", () => {
+  // SettingsPanel.Fold renders a native <details><summary> control.
+  // A global Space shortcut would prevent the summary from opening/closing.
+  const summary = targetFor("summary");
+  assert.equal(isInteractiveShortcutTarget(summary), true);
+  for (const key of [" ", "Enter", "ArrowDown"]) {
+    assert.equal(shouldDispatchEditorShortcut(keyEvent(summary, key), false), false, key);
+  }
+  // Existing editor shortcuts still work when focus is on the canvas.
+  assert.equal(shouldDispatchEditorShortcut(keyEvent(targetFor("canvas"), " "), false), true);
 });
