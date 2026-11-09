@@ -76,7 +76,7 @@ export default function AppMenus(p:Props){
     event.preventDefault();
     const fromPopup=Boolean((event.target as HTMLElement).closest('[role="menu"]'));
     if(active)setActive(next);
-    window.requestAnimationFrame(()=>focusAdjacentMenu(rootRef.current,next,Boolean(active && fromPopup)));
+    window.requestAnimationFrame(()=>focusAdjacentMenu(rootRef.current,next,Boolean(active && fromPopup),Boolean(active)));
   }
   return <nav className="app-menus" aria-label="アプリケーションメニュー" ref={rootRef} onKeyDown={traverseMenus} onBlur={event=>{if(active&&!event.currentTarget.contains(event.relatedTarget as Node|null))setActive(null)}}>
     <Menu id="file" label="ファイル" active={active} setActive={setActive}>
