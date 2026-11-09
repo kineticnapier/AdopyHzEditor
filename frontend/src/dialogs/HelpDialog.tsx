@@ -66,8 +66,8 @@ export default function HelpDialog({
             ×
           </button>
         </header>
-        {error ? <><div className="dialog-error">ヘルプの読込に失敗しました: {error}</div><div className="dialog-footer"><button onClick={close} disabled={opening}>閉じる</button><button className="primary" onClick={()=>setAttempt(value=>value+1)}>再試行</button></div></> : !payload ? (
-          <div className="dialog-loading">ヘルプを読み込んでいます…</div>
+        {error ? <><div className="dialog-error" role="alert">ヘルプの読込に失敗しました: {error}</div><div className="dialog-footer"><button onClick={close} disabled={opening}>閉じる</button><button className="primary" onClick={()=>setAttempt(value=>value+1)}>再試行</button></div></> : !payload ? (
+          <div className="dialog-loading" role="status">ヘルプを読み込んでいます…</div>
         ) : (
           <>
             <div className="help-header">{payload.header}</div>
