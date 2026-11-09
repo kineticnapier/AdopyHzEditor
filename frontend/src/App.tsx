@@ -362,6 +362,7 @@ export default function App() {
         try {
           const ping = await backend.ping();
           if (!active) return;
+          if (!ping.ok) throw new Error("バックエンドの準備が完了していません");
           // Do not expose an API to controls or polling before the initial
           // state is loaded. A failed get_state must leave the UI disconnected.
           const state = await backend.get_state();
