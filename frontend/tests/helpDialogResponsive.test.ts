@@ -52,3 +52,17 @@ test("help content and loading errors cannot survive API replacement or retry", 
   assert.match(help, /!currentPayload \?/);
   assert.match(help, /currentPayload\.sections\.map/);
 });
+
+test("help release-page errors cannot survive API replacement or retry", () => {
+  const api = {};
+  const releaseError = { api, attempt: 0, message: "open failed" };
+  assert.equal(blankWorkspaceDefaultsContextIsCurrent(releaseError, { api, attempt: 0 }), true);
+  assert.equal(blankWorkspaceDefaultsContextIsCurrent(releaseError, { api: {}, attempt: 0 }), false);
+  assert.equal(blankWorkspaceDefaultsContextIsCurrent(releaseError, { api, attempt: 1 }), false);
+  // A previously completed browser-open action must not leak its error into a
+  // different document/API or a new help-load attempt before effect cleanup.
+  assert.match(help, /blankWorkspaceDefaultsContextIsCurrent\(releaseError, context\)/);
+  assert.match(help, /setReleaseError\(\{ api, attempt, message \}\)/);
+  assert.match(help, /\{currentReleaseError &&/);
+  assert.doesNotMatch(help, /\{releaseError &&/);
+});
