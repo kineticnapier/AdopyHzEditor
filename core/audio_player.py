@@ -77,8 +77,11 @@ class AudioPlayer:
         self.note_volume = 0.20
         self.note_octave_shift = 0
         self.note_instrument = "sine"
+        self.note_sample: np.ndarray | None = None
+        self._note_sample_fft_cache: dict[int, np.ndarray] = {}
         self.preview_notes: list[PreviewSegment | tuple[int, int, float]] = []
         self._preview_ends: list[int] = []
+        self._preview_hit_samples = np.empty(0, dtype=np.float64)
 
         try:
             import sounddevice as sd  # noqa
@@ -160,9 +163,12 @@ class AudioPlayer:
             "organ_like": "organ",
             "square_wave": "square",
             "triangle_wave": "triangle",
+            "kick": "adofai_kick",
+            "adofai": "adofai_kick",
+            "adofai_kick": "adofai_kick",
         }
         key = aliases.get(key, key)
-        if key not in {"sine", "piano", "organ", "square", "triangle"}:
+        if key not in {"sine", "piano", "organ", "square", "triangle", "adofai_kick"}:
             key = "sine"
         return key
 
@@ -174,13 +180,32 @@ class AudioPlayer:
             if instrument is not None:
                 self.note_instrument = self._normalize_note_instrument(str(instrument))
 
+    def set_note_sample(self, audio: np.ndarray | None) -> None:
+        sample: np.ndarray | None
+        if audio is None:
+            sample = None
+        else:
+            data = np.asarray(audio, dtype=np.float32)
+            if data.ndim == 2:
+                data = np.mean(data, axis=1, dtype=np.float32)
+            elif data.ndim != 1:
+                data = np.ravel(data).astype(np.float32, copy=False)
+            sample = np.ascontiguousarray(data, dtype=np.float32)
+            if len(sample) == 0:
+                sample = None
+        with self.lock:
+            self.note_sample = sample
+            self._note_sample_fft_cache.clear()
+
     def set_preview_notes(self, notes) -> None:
         """
         notes: objects with start, end, midi or tuples (start, end, midi)
         Curve notes are sampled into short fixed-pitch preview notes.
         """
         prepared: list[PreviewSegment] = []
+        hit_chunks: list[np.ndarray] = []
         sr = max(1, int(self.sr))
+        two_pi = 2.0 * np.pi
 
         for n in notes:
             try:
@@ -209,11 +234,32 @@ class AudioPlayer:
                     segment_index == 0,
                     segment_index == len(segments) - 1,
                 ))
-                phase += 2.0 * np.pi * midi_to_hz(float(midi)) * (end_sample - start_sample) / sr
+
+                freq = midi_to_hz(float(midi))
+                phase_end = phase + two_pi * freq * (end_sample - start_sample) / sr
+                first_cycle = int(np.ceil((phase - 1e-12) / two_pi))
+                last_cycle = int(np.floor((phase_end - 1e-12) / two_pi))
+                if last_cycle >= first_cycle and freq > 0:
+                    cycles = np.arange(first_cycle, last_cycle + 1, dtype=np.float64)
+                    hits = (
+                        float(start_sample)
+                        + (cycles * two_pi - phase) * sr / (two_pi * freq)
+                    )
+                    valid = (hits >= start_sample - 1e-7) & (hits < end_sample - 1e-7)
+                    if np.any(valid):
+                        hit_chunks.append(hits[valid])
+                phase = phase_end
 
         prepared.sort(key=lambda x: x.start)
+        if hit_chunks:
+            hit_samples = np.concatenate(hit_chunks)
+            hit_samples.sort()
+        else:
+            hit_samples = np.empty(0, dtype=np.float64)
+
         with self.lock:
             self.preview_notes = prepared
+            self._preview_hit_samples = hit_samples
             max_end = 0
             self._preview_ends = []
             for segment in prepared:
@@ -292,11 +338,91 @@ class AudioPlayer:
             sampled = click[i0] * (1.0 - frac) + click[i1] * frac
             outdata[out_s:out_e, :] += sampled * self.metronome_volume
 
+    def _note_sample_fft(self, fft_size: int) -> np.ndarray:
+        cached = self._note_sample_fft_cache.get(int(fft_size))
+        if cached is not None:
+            return cached
+        sample = self.note_sample
+        if sample is None:
+            return np.empty(0, dtype=np.complex128)
+        spectrum = np.fft.rfft(sample, n=int(fft_size))
+        self._note_sample_fft_cache[int(fft_size)] = spectrum
+        # Playback normally needs only one or two FFT sizes. Bound stale sizes
+        # after speed/sample changes so the audio callback cannot grow the cache forever.
+        if len(self._note_sample_fft_cache) > 4:
+            for key in list(self._note_sample_fft_cache)[:-4]:
+                self._note_sample_fft_cache.pop(key, None)
+        return spectrum
+
+    def _mix_preview_sample(self, outdata, source_positions: np.ndarray) -> bool:
+        sample = self.note_sample
+        hits = self._preview_hit_samples
+        if sample is None or len(sample) == 0:
+            return False
+        if len(source_positions) == 0 or len(hits) == 0:
+            return True
+
+        sample_len = len(sample)
+        block_start = float(source_positions[0])
+        block_end = float(source_positions[-1])
+
+        # Render the kick train in source-sample space, then sample that result at
+        # source_positions. This keeps playback-speed handling identical while
+        # replacing O(hit_count * kick_length) overlap-add with one FFT convolution.
+        render_start = int(np.floor(block_start)) - sample_len - 2
+        render_end = int(np.ceil(block_end)) + 3
+        left = int(np.searchsorted(hits, render_start, side="left"))
+        right = int(np.searchsorted(hits, render_end, side="right"))
+        if right <= left:
+            return True
+
+        impulse_len = max(1, render_end - render_start)
+        impulses = np.zeros(impulse_len, dtype=np.float32)
+        local_hits = hits[left:right] - float(render_start)
+        i0 = np.floor(local_hits).astype(np.int64)
+        frac = (local_hits - i0).astype(np.float32)
+
+        valid0 = (i0 >= 0) & (i0 < impulse_len)
+        if np.any(valid0):
+            np.add.at(impulses, i0[valid0], 1.0 - frac[valid0])
+        i1 = i0 + 1
+        valid1 = (i1 >= 0) & (i1 < impulse_len) & (frac > 1e-12)
+        if np.any(valid1):
+            np.add.at(impulses, i1[valid1], frac[valid1])
+
+        convolution_len = impulse_len + sample_len - 1
+        fft_size = 1 << max(0, convolution_len - 1).bit_length()
+        kick_fft = self._note_sample_fft(fft_size)
+        train_fft = np.fft.rfft(impulses, n=fft_size)
+        rendered = np.fft.irfft(train_fft * kick_fft, n=fft_size)[:convolution_len]
+
+        local_positions = source_positions - float(render_start)
+        base = np.floor(local_positions).astype(np.int64)
+        valid = (base >= 0) & (base < convolution_len)
+        if not np.any(valid):
+            return True
+
+        base_clipped = np.clip(base, 0, convolution_len - 1)
+        next_index = np.minimum(base_clipped + 1, convolution_len - 1)
+        alpha = (local_positions - base).astype(np.float64)
+        sampled = (
+            rendered[base_clipped] * (1.0 - alpha)
+            + rendered[next_index] * alpha
+        ).astype(np.float32, copy=False)
+        if not np.all(valid):
+            sampled = sampled * valid.astype(np.float32)
+        outdata[:, 0] += sampled * self.note_volume
+        return True
+
     def _mix_preview_notes(self, outdata, source_positions: np.ndarray) -> None:
         if not self.note_sound_enabled or self.note_volume <= 0 or not self.preview_notes:
             return
         if len(source_positions) == 0:
             return
+
+        if str(getattr(self, "note_instrument", "sine")) == "adofai_kick":
+            if self._mix_preview_sample(outdata, source_positions):
+                return
 
         block_start = float(source_positions[0])
         block_end = float(source_positions[-1])
