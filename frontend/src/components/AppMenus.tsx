@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
-import { focusAdjacentMenu, isPlainMenuNavigationEvent, nextMenuId } from "./menuNavigation";
+import { focusAdjacentMenu, isPlainMenuNavigationEvent, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
 
 type Props = {
   hasSelection:boolean;
@@ -57,14 +57,14 @@ function Action({children,shortcut,disabled,onClick,close}:{children:string;shor
 export default function AppMenus(p:Props){
   const[active,setActive]=useState<MenuId|null>(null);
   const rootRef=useRef<HTMLElement>(null);
+  const focusTrigger=(id:MenuId)=>window.requestAnimationFrame(()=>restoreMenuTriggerFocus(rootRef.current,id,document.activeElement,document.body,document.documentElement));
   useEffect(()=>{
     const down=(e:PointerEvent)=>{const r=rootRef.current;if(r&&!r.contains(e.target as Node))setActive(null)};
-    const key=(e:KeyboardEvent)=>{consumeMenuEscape(e,active,id=>{setActive(null);window.requestAnimationFrame(()=>rootRef.current?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`)?.focus())})};
+    const key=(e:KeyboardEvent)=>{consumeMenuEscape(e,active,id=>{setActive(null);focusTrigger(id)})};
     window.addEventListener("pointerdown",down);
     window.addEventListener("keydown",key,true);
     return()=>{window.removeEventListener("pointerdown",down);window.removeEventListener("keydown",key,true)};
   },[active]);
-  const focusTrigger=(id:MenuId)=>window.requestAnimationFrame(()=>rootRef.current?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`)?.focus());
   const close=()=>{const id=active;setActive(null);if(id)focusTrigger(id)};
   const menuIds:MenuId[]=["file","edit","analyze","tools","options","help"];
   function traverseMenus(event:ReactKeyboardEvent<HTMLElement>){
