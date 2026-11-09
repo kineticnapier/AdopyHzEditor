@@ -1,6 +1,6 @@
 import type { BackendApi } from "./bridge";
 import { dispatchEditorShortcut, type ShortcutActions } from "./shortcutDispatch.ts";
-import { shouldDispatchEditorShortcut } from "./shortcutTarget.ts";
+import { isInteractiveShortcutTarget, shouldDispatchEditorShortcut } from "./shortcutTarget.ts";
 
 export type ShortcutListenerState = ShortcutActions & {
   disabled: boolean;
@@ -32,7 +32,19 @@ function isRepeatedMutationShortcut(event: KeyboardEvent): boolean {
 export function createEditorShortcutHandler(getCurrent: () => ShortcutListenerState) {
   return (event: KeyboardEvent) => {
     const current = getCurrent();
-    if (!current.api || !shouldDispatchEditorShortcut(event, current.disabled)) return;
+    if (!current.api || current.disabled) return;
+    // The shortcut-target guard rejects repeated Delete/Backspace before
+    // dispatch. Consume those repeats on the editor surface so they cannot
+    // fall through to the browser, but preserve native input editing.
+    const key = event.key.toLowerCase();
+    if (event.repeat && (key === "delete" || key === "backspace") &&
+        !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
+        !event.defaultPrevented && !event.isComposing && event.keyCode !== 229 &&
+        !isInteractiveShortcutTarget(event.target)) {
+      event.preventDefault();
+      return;
+    }
+    if (!shouldDispatchEditorShortcut(event, current.disabled)) return;
     if (isRepeatedMutationShortcut(event)) {
       event.preventDefault();
       return;
