@@ -2,7 +2,7 @@
 export function isInteractiveShortcutTarget(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null;
   return typeof element?.closest === "function" &&
-    Boolean(element.closest("input,select,textarea,button,a,[contenteditable='true'],[contenteditable=''],[contenteditable='plaintext-only'],[role='button'],[role='menuitem'],[role='menu'],[role='dialog'],[role='slider'],[role='textbox'],[role='spinbutton'],[role='combobox'],[role='listbox'],[role='checkbox'],[role='radio'],[role='switch']"));
+    Boolean(element.closest("input,select,textarea,button,a,summary,[contenteditable='true'],[contenteditable=''],[contenteditable='plaintext-only'],[role='button'],[role='menuitem'],[role='menu'],[role='dialog'],[role='slider'],[role='textbox'],[role='spinbutton'],[role='combobox'],[role='listbox'],[role='checkbox'],[role='radio'],[role='switch']"));
 }
 
 /** Ctrl/Meta+S must still commit a focused numeric field before saving. */
