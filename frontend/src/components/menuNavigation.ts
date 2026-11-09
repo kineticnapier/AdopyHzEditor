@@ -21,3 +21,15 @@ export function nextMenuId<T extends string>(
   const step = direction === "ArrowRight" ? 1 : -1;
   return menuIds[(index + step + menuIds.length) % menuIds.length];
 }
+
+/** Focus the first enabled item when moving between open popups with Left/Right.
+ * From a menu-bar trigger, keep focus on the adjacent trigger instead.
+ * Fall back to the trigger if the destination popup has no enabled items.
+ */
+export function focusAdjacentMenu(root: Pick<HTMLElement, "querySelector"> | null, id: string, preferPopupItem: boolean): void {
+  const trigger = root?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`);
+  const firstItem = preferPopupItem
+    ? root?.querySelector<HTMLButtonElement>(`[data-menu-popup="${id}"] button:not(:disabled)`)
+    : null;
+  (firstItem ?? trigger)?.focus();
+}
