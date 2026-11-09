@@ -54,20 +54,48 @@ test("horizontal navigation from a popup focuses the first enabled item", () => 
   assert.deepEqual(focused, ["first item", "trigger"]);
 });
 
-test("horizontal navigation falls back to trigger if popup has no enabled item", () => {
+test("horizontal navigation falls back to trigger if an open popup has no enabled item", () => {
+  const focused: string[] = [];
+  const root = { querySelector: (selector: string) => {
+    if (selector === '[data-menu-id="help"]') return { focus: () => focused.push("trigger") };
+    if (selector === '[data-menu-popup="help"]') return {};
+    return null;
+  } } as unknown as HTMLElement;
+  focusAdjacentMenu(root, "help", true, true);
+  focusAdjacentMenu(null, "help", true, true);
+  assert.deepEqual(focused, ["trigger"]);
+});
+
+test("deferred navigation never focuses a trigger after its popup has closed", () => {
   const focused: string[] = [];
   const root = { querySelector: (selector: string) =>
-    selector === '[data-menu-id="help"]' ? { focus: () => focused.push("trigger") } : null,
+    selector === '[data-menu-id="edit"]' ? { focus: () => focused.push("trigger") } : null,
   } as unknown as HTMLElement;
-  focusAdjacentMenu(root, "help", true);
-  focusAdjacentMenu(null, "help", true);
+  focusAdjacentMenu(root, "edit", true, true);
+  focusAdjacentMenu(root, "edit", false, true);
+  assert.deepEqual(focused, []);
+  // With no open menu, moving between triggers remains valid.
+  focusAdjacentMenu(root, "edit", false, false);
   assert.deepEqual(focused, ["trigger"]);
+});
+
+test("deferred navigation focuses an open menu when the popup still exists", () => {
+  const focused: string[] = [];
+  const root = { querySelector: (selector: string) => {
+    if (selector === '[data-menu-popup="edit"]') return {};
+    if (selector === '[data-menu-id="edit"]') return { focus: () => focused.push("trigger") };
+    if (selector === '[data-menu-popup="edit"] button:not(:disabled)') return { focus: () => focused.push("first item") };
+    return null;
+  } } as unknown as HTMLElement;
+  focusAdjacentMenu(root, "edit", true, true);
+  focusAdjacentMenu(root, "edit", false, true);
+  assert.deepEqual(focused, ["first item", "trigger"]);
 });
 
 test("horizontal navigation connects popup identification and item focus", () => {
   const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
   assert.match(source, /data-menu-popup=\{id\}/);
-  assert.match(source, /focusAdjacentMenu\(rootRef\.current,next,Boolean\(active && fromPopup\)\)/);
+  assert.match(source, /focusAdjacentMenu\(rootRef\.current,next,Boolean\(active && fromPopup\),Boolean\(active\)\)/);
 });
 
 
