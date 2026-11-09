@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
-import { isPlainMenuNavigationEvent, nextMenuId } from "./menuNavigation";
+import { focusAdjacentMenu, isPlainMenuNavigationEvent, nextMenuId } from "./menuNavigation";
 
 type Props = {
   hasSelection:boolean;
@@ -46,7 +46,7 @@ function Menu({id,label,active,setActive,children}:MenuProps){
   }
   return <div className={open?"app-menu open":"app-menu"} onMouseEnter={()=>{if(active!==null&&!open)setActive(id)}}>
     <button id={triggerId} className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(!isPlainMenuNavigationEvent(event.nativeEvent))return;if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
-    {open&&<div ref={popupRef} id={popupId} className="app-menu-popup" role="menu" aria-labelledby={triggerId} onKeyDown={navigate}>{children}</div>}
+    {open&&<div ref={popupRef} id={popupId} data-menu-popup={id} className="app-menu-popup" role="menu" aria-labelledby={triggerId} onKeyDown={navigate}>{children}</div>}
   </div>;
 }
 
@@ -74,8 +74,9 @@ export default function AppMenus(p:Props){
     const next=nextMenuId(menuIds,active,(target?.dataset.menuId as MenuId|undefined)??null,event.key);
     if(!next)return;
     event.preventDefault();
+    const fromPopup=Boolean((event.target as HTMLElement).closest('[role="menu"]'));
     if(active)setActive(next);
-    focusTrigger(next);
+    window.requestAnimationFrame(()=>focusAdjacentMenu(rootRef.current,next,Boolean(active && fromPopup)));
   }
   return <nav className="app-menus" aria-label="アプリケーションメニュー" ref={rootRef} onKeyDown={traverseMenus} onBlur={event=>{if(active&&!event.currentTarget.contains(event.relatedTarget as Node|null))setActive(null)}}>
     <Menu id="file" label="ファイル" active={active} setActive={setActive}>
