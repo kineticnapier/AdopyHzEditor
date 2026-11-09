@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { focusAdjacentMenu, isPlainMenuNavigationEvent, nextMenuId } from "../src/components/menuNavigation.ts";
+import { focusAdjacentMenu, isPlainMenuNavigationEvent, nextMenuId, restoreMenuTriggerFocus } from "../src/components/menuNavigation.ts";
 
 const ids = ["file", "edit", "analyze", "tools", "options", "help"] as const;
 
@@ -68,4 +68,34 @@ test("horizontal navigation connects popup identification and item focus", () =>
   const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
   assert.match(source, /data-menu-popup=\{id\}/);
   assert.match(source, /focusAdjacentMenu\(rootRef\.current,next,Boolean\(active && fromPopup\)\)/);
+});
+
+
+test("menu closing leaves newly focused dialog controls alone", () => {
+  const focused: string[] = [];
+  const root = { querySelector: () => ({ focus: () => focused.push("menu") }) } as unknown as HTMLElement;
+  const body = { isConnected: true } as Element;
+  const html = { isConnected: true } as Element;
+  const dialogInput = { isConnected: true } as Element;
+  restoreMenuTriggerFocus(root, "help", dialogInput, body, html);
+  assert.deepEqual(focused, []);
+});
+
+test("menu closing restores focus when the old popup is gone", () => {
+  const focused: string[] = [];
+  const root = { querySelector: () => ({ focus: () => focused.push("menu") }) } as unknown as HTMLElement;
+  const body = { isConnected: true } as Element;
+  const html = { isConnected: true } as Element;
+  const detachedItem = { isConnected: false } as Element;
+  restoreMenuTriggerFocus(root, "file", body, body, html);
+  restoreMenuTriggerFocus(root, "file", html, body, html);
+  restoreMenuTriggerFocus(root, "file", detachedItem, body, html);
+  assert.deepEqual(focused, ["menu", "menu", "menu"]);
+});
+
+test("menu close and Escape both use guarded focus restoration", () => {
+  const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
+  assert.match(source, /const focusTrigger=.*restoreMenuTriggerFocus/);
+  assert.match(source, /consumeMenuEscape\(e,active,id=>\{setActive\(null\);focusTrigger\(id\)\}\)/);
+  assert.match(source, /const close=\(\)=>\{const id=active;setActive\(null\);if\(id\)focusTrigger\(id\)\}/);
 });
