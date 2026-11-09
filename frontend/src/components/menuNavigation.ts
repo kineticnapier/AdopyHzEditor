@@ -1,3 +1,12 @@
+/** Ignore browser/OS shortcuts and IME composition in menu navigation. */
+export function isPlainMenuNavigationEvent(
+  event: Pick<KeyboardEvent, "defaultPrevented"> &
+    Partial<Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing" | "keyCode">>,
+): boolean {
+  return !event.defaultPrevented && !event.ctrlKey && !event.metaKey &&
+    !event.altKey && !event.shiftKey && !event.isComposing && event.keyCode !== 229;
+}
+
 /** Move between menu-bar triggers, preferring the trigger that actually has focus. */
 export function nextMenuId<T extends string>(
   menuIds: readonly T[],
