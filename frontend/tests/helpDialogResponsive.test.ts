@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { blankWorkspaceDefaultsContextIsCurrent } from "../src/dialogs/previewFreshness.ts";
 
 const css = readFileSync(new URL("../src/dialogs.css", import.meta.url), "utf8");
 const help = readFileSync(new URL("../src/dialogs/HelpDialog.tsx", import.meta.url), "utf8");
@@ -33,4 +34,21 @@ test("changing help sections resets the article scroll position", () => {
 test("help loading and failure states are announced to assistive technology", () => {
   assert.match(help, /<div className="dialog-loading" role="status">ヘルプを読み込んでいます…<\/div>/);
   assert.match(help, /<div className="dialog-error" role="alert">ヘルプの読込に失敗しました:/);
+});
+
+test("help content and loading errors cannot survive API replacement or retry", () => {
+  const api = {};
+  const original = { api, attempt: 0 };
+  assert.equal(blankWorkspaceDefaultsContextIsCurrent(original, original), true);
+  assert.equal(blankWorkspaceDefaultsContextIsCurrent(original, { api: {}, attempt: 0 }), false);
+  assert.equal(blankWorkspaceDefaultsContextIsCurrent(original, { api, attempt: 1 }), false);
+  assert.equal(blankWorkspaceDefaultsContextIsCurrent(null, original), false);
+  // The render-time guard is needed: effect cleanup alone runs after render.
+  assert.match(help, /blankWorkspaceDefaultsContextIsCurrent\(payload, context\)/);
+  assert.match(help, /blankWorkspaceDefaultsContextIsCurrent\(error, context\)/);
+  assert.match(help, /setPayload\(\{ api, attempt, value \}\)/);
+  assert.match(help, /setError\(\{ api, attempt, message: String\(reason\) \}\)/);
+  assert.match(help, /currentError \?/);
+  assert.match(help, /!currentPayload \?/);
+  assert.match(help, /currentPayload\.sections\.map/);
 });
