@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
-import { nextMenuId } from "./menuNavigation";
+import { isPlainMenuNavigationEvent, nextMenuId } from "./menuNavigation";
 
 type Props = {
   hasSelection:boolean;
@@ -37,6 +37,7 @@ function Menu({id,label,active,setActive,children}:MenuProps){
   const popupId=useId(),triggerId=useId(),popupRef=useRef<HTMLDivElement>(null);
   const focusItem=(edge:"first"|"last")=>window.requestAnimationFrame(()=>{const items=popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');items?.[edge==="first"?0:Math.max(0,items.length-1)]?.focus()});
   function navigate(event:ReactKeyboardEvent<HTMLDivElement>){
+    if(!isPlainMenuNavigationEvent(event.nativeEvent))return;
     const items=Array.from(popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')??[]),index=items.indexOf(document.activeElement as HTMLButtonElement);
     if(event.key==="ArrowDown"){event.preventDefault();items[(index+1+items.length)%items.length]?.focus()}
     else if(event.key==="ArrowUp"){event.preventDefault();items[(index-1+items.length)%items.length]?.focus()}
@@ -44,7 +45,7 @@ function Menu({id,label,active,setActive,children}:MenuProps){
     else if(event.key==="End"){event.preventDefault();items.at(-1)?.focus()}
   }
   return <div className={open?"app-menu open":"app-menu"} onMouseEnter={()=>{if(active!==null&&!open)setActive(id)}}>
-    <button id={triggerId} className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
+    <button id={triggerId} className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(!isPlainMenuNavigationEvent(event.nativeEvent))return;if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
     {open&&<div ref={popupRef} id={popupId} className="app-menu-popup" role="menu" aria-labelledby={triggerId} onKeyDown={navigate}>{children}</div>}
   </div>;
 }
@@ -67,6 +68,7 @@ export default function AppMenus(p:Props){
   const close=()=>{const id=active;setActive(null);if(id)focusTrigger(id)};
   const menuIds:MenuId[]=["file","edit","analyze","tools","options","help"];
   function traverseMenus(event:ReactKeyboardEvent<HTMLElement>){
+    if(!isPlainMenuNavigationEvent(event.nativeEvent))return;
     if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;
     const target=(event.target as HTMLElement).closest<HTMLButtonElement>("[data-menu-id]");
     const next=nextMenuId(menuIds,active,(target?.dataset.menuId as MenuId|undefined)??null,event.key);
