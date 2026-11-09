@@ -134,7 +134,8 @@ test("Help release button uses guarded action and shows a visible failure", () =
   // Source wiring check; DOM interaction still requires GUI verification.
   const source = readFileSync(new URL("../src/dialogs/HelpDialog.tsx", import.meta.url), "utf8");
   assert.match(source, /runReleasePageAction\(\(\) => api\.open_releases_page\(\)/);
-  assert.match(source, /role="alert">\{releaseError\}/);
+  assert.match(source, /role="alert">\{currentReleaseError\}/);
+  assert.match(source, /blankWorkspaceDefaultsContextIsCurrent\(releaseError, context\)/);
   assert.match(source, /disabled=\{opening\}/);
   assert.doesNotMatch(source, /onClick=\{\(\) => void api\.open_releases_page\(\)\}/);
 });
