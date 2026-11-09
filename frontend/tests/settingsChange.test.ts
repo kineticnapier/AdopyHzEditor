@@ -52,3 +52,26 @@ test("App keeps the settings snapshot aligned with document loads and API replie
   assert.match(source, /settingsSnapshotRef\.current = recovered;\s*setSettings\(recovered\)/);
   assert.match(source, /changes\.analysisSource !== previousSettings\.analysisSource/);
 });
+
+test("settings stay unsent until the backend has loaded its initial state", () => {
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const connectionStart = source.indexOf("const ping = await backend.ping()");
+  const stateRead = source.indexOf("const state = await backend.get_state()", connectionStart);
+  const stateApplied = source.indexOf("applyState(state)", stateRead);
+  const apiPublished = source.indexOf("setApi(backend)", stateApplied);
+  const connectionPublished = source.indexOf("setConnected(ping.ok)", apiPublished);
+  assert.ok(connectionStart >= 0 && stateRead > connectionStart &&
+    stateApplied > stateRead && apiPublished > stateApplied &&
+    connectionPublished > apiPublished,
+  "controls must not receive a backend API before get_state succeeds");
+
+  const patchStart = source.indexOf("async function patch(changes: Partial<EditorSettings>)");
+  const patchEnd = source.indexOf("async function flushPendingSettings()", patchStart);
+  assert.ok(patchStart >= 0 && patchEnd > patchStart);
+  const patch = source.slice(patchStart, patchEnd);
+  const readyGuard = patch.indexOf("if (!api || !connected)");
+  const snapshotMutation = patch.indexOf("acceptSettingsPatch(settingsSnapshotRef, changes)");
+  const dirty = patch.indexOf("setDirty(true)");
+  assert.ok(readyGuard >= 0 && snapshotMutation > readyGuard && dirty > snapshotMutation,
+    "a disconnected edit must not change the settings snapshot or dirty flag");
+});
