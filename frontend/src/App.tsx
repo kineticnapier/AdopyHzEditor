@@ -7,7 +7,7 @@ import EditorCanvas, {
 } from "./editor/EditorCanvas";
 import HelpDialog from "./dialogs/HelpDialog";
 import SettingsPanel from "./settings/SettingsPanel";
-import { hasEffectiveSettingsChange } from "./settings/settingsChange";
+import { acceptSettingsPatch } from "./settings/settingsChange";
 import { settingsResponseIsCurrent } from "./settings/settingsResponseFreshness";
 import {
   BlankWorkspaceDialog,
@@ -204,6 +204,8 @@ export default function App() {
   const peakRequest = useRef(new LatestRequestGate());
   const spectrumRequests = useRef(new LatestRequestGate());
   const settingsRequests = useRef(new LatestRequestGate());
+  // Keep the requested values in sync even when multiple edits precede a React render.
+  const settingsSnapshotRef = useRef(settings);
   const pendingSettings = useRef<Partial<EditorSettings>>({});
   const settingsFlush = useRef<Promise<void> | null>(null);
   const stateTransitionPending = useRef(0);
@@ -295,6 +297,7 @@ export default function App() {
       analysisIdentity.current = identity;
       setAnalysisRevision((v) => v + 1);
     }
+    settingsSnapshotRef.current = state.settings;
     setSettings(state.settings);
     applyViewState(state.view);
     setPlayback(state.playback);
@@ -630,10 +633,11 @@ export default function App() {
     }
     // The backend also treats unchanged batches as no-ops. Do not create a
     // false local dirty flag or send an unnecessary request for those batches.
-    if (!hasEffectiveSettingsChange(settings, changes)) return;
+    const previousSettings = settingsSnapshotRef.current;
+    if (!acceptSettingsPatch(settingsSnapshotRef, changes)) return;
     const sourceChanged =
       changes.analysisSource !== undefined &&
-      changes.analysisSource !== settings.analysisSource;
+      changes.analysisSource !== previousSettings.analysisSource;
     if (sourceChanged) {
       peakRequest.current.invalidate();
       setCursorReadout(null);
@@ -668,7 +672,10 @@ export default function App() {
           );
         try {
           const normalized = await api.update_settings(batch);
-          if (isCurrent()) setSettings(normalized);
+          if (isCurrent()) {
+            settingsSnapshotRef.current = normalized;
+            setSettings(normalized);
+          }
         } catch (e) {
           // A newer edit or document may have arrived while the request failed.
           if (isCurrent()) {
@@ -676,7 +683,10 @@ export default function App() {
             try {
               const recovered = (await api.get_state()).settings;
               // Recheck after awaiting recovery: do not overwrite edits made meanwhile.
-              if (isCurrent()) setSettings(recovered);
+              if (isCurrent()) {
+                settingsSnapshotRef.current = recovered;
+                setSettings(recovered);
+              }
             } catch {
               /* Keep the visible value and the dirty warning. */
             }
