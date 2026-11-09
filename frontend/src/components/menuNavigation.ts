@@ -26,7 +26,15 @@ export function nextMenuId<T extends string>(
  * From a menu-bar trigger, keep focus on the adjacent trigger instead.
  * Fall back to the trigger if the destination popup has no enabled items.
  */
-export function focusAdjacentMenu(root: Pick<HTMLElement, "querySelector"> | null, id: string, preferPopupItem: boolean): void {
+export function focusAdjacentMenu(
+  root: Pick<HTMLElement, "querySelector"> | null,
+  id: string,
+  preferPopupItem: boolean,
+  expectsOpenPopup = false,
+): void {
+  // A pending animation frame can run after a click, Escape, or blur closes
+  // the menu. Never steal focus back to its trigger in that case.
+  if (expectsOpenPopup && !root?.querySelector(`[data-menu-popup="${id}"]`)) return;
   const trigger = root?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`);
   const firstItem = preferPopupItem
     ? root?.querySelector<HTMLButtonElement>(`[data-menu-popup="${id}"] button:not(:disabled)`)
