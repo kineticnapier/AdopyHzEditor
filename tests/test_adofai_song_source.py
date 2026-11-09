@@ -61,6 +61,42 @@ class AdoFAISongSourceTests(unittest.TestCase):
         self.assertEqual(workflow["songSourcePath"], "/tmp/playback.flac")
         self.assertFalse(workflow["copySong"])
 
+    def test_export_copies_custom_song_without_project_audio(self):
+        # A chart can use a chosen playback song even when no analysis audio
+        # is loaded. Exercise the real exporter and disk copy, not just options.
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        bridge = Bridge()
+        bridge.notes = [Note(0.0, 0.073, 69.0).normalized()]
+        self.assertIsNone(bridge.audio_path)
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source" / "playback.ogg"
+            source.parent.mkdir()
+            source.write_bytes(b"chosen playback audio")
+            target = root / "output" / "level.adofai"
+            target.parent.mkdir()
+
+            with mock.patch.object(bridge, "_dialog", return_value=str(target)):
+                result = bridge.export_adofai_advanced(
+                    {
+                        "method": "rabbit_zip",
+                        "useProjectSong": True,
+                        "copyProjectSong": True,
+                        "songSourcePath": str(source),
+                        "songOffsetAuto": True,
+                    }
+                )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual((target.parent / source.name).read_bytes(), source.read_bytes())
+            level = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(level["settings"]["songFilename"], source.name)
+            self.assertIsNone(bridge.audio_path)
+
     def test_song_source_picker_returns_selected_path(self):
         bridge = Bridge()
         with mock.patch.object(bridge, "_dialog", return_value="relative/song.ogg"):
