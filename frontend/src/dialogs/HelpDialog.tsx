@@ -18,7 +18,8 @@ export default function HelpDialog({
   const context = { api, attempt };
   const currentPayload = blankWorkspaceDefaultsContextIsCurrent(payload, context) ? payload!.value : null;
   const currentError = blankWorkspaceDefaultsContextIsCurrent(error, context) ? error!.message : "";
-  const [releaseError, setReleaseError] = useState("");
+  const [releaseError, setReleaseError] = useState<({ api: BackendApi; attempt: number; message: string }) | null>(null);
+  const currentReleaseError = blankWorkspaceDefaultsContextIsCurrent(releaseError, context) ? releaseError!.message : "";
   const [opening, setOpening] = useState(false);
   const openingRef = useRef(false);
   const openOnce = useRef(createExclusiveAsyncAction());
@@ -29,10 +30,10 @@ export default function HelpDialog({
     await openOnce.current(async () => {
       openingRef.current = true;
       setOpening(true);
-      setReleaseError("");
+      setReleaseError(null);
       try {
         // Help stays open after success, unlike the update prompt.
-        await runReleasePageAction(() => api.open_releases_page(), () => {}, setReleaseError);
+        await runReleasePageAction(() => api.open_releases_page(), () => {}, (message) => setReleaseError({ api, attempt, message }));
       } finally {
         openingRef.current = false;
         setOpening(false);
@@ -97,7 +98,7 @@ export default function HelpDialog({
                 <pre>{current?.body}</pre>
               </article>
             </div>
-            {releaseError && <div className="dialog-error inline" role="alert">{releaseError}</div>}
+            {currentReleaseError && <div className="dialog-error inline" role="alert">{currentReleaseError}</div>}
             <div className="dialog-footer">
               <button onClick={() => void openReleases()} disabled={opening}>
                 {opening ? "開いています…" : "リリースページ"}
