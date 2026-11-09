@@ -76,5 +76,38 @@ class FixedAngleFinalTileSeparationTests(unittest.TestCase):
         self.assertIn(float(level["angleData"][-1]), (0.0, 180.0))
 
 
+    def test_bridge_defaults_expose_fixed_angle_ui_controls(self):
+        # The Web bridge overrides the mixin's defaults; checking only the
+        # mixin would incorrectly suggest these UI options are disconnected.
+        bridge = Bridge()
+        defaults = bridge.get_adofai_export_defaults()
+        self.assertEqual(defaults["angleCompressionMode"], "auto")
+        self.assertEqual(defaults["angleCompressionFixedAngle"], 165.0)
+
+    def test_auto_preserves_targets_and_fixed_changes_only_export_copies(self):
+        bridge = Bridge()
+        bridge.notes = [
+            Note(0.0, 0.73, 69.0, target_angle=90.0).normalized(),
+            Note(1.0, 1.6, 72.0).normalized(),
+        ]
+
+        auto_notes, _auto_opts, _ = bridge._prepare_adofai_export(
+            {"method": "rabbit_zip", "angleCompressionMode": "auto"}, None
+        )
+        self.assertEqual([note.target_angle for note in auto_notes], [90.0, None])
+
+        fixed_notes, _fixed_opts, _ = bridge._prepare_adofai_export(
+            {
+                "method": "rabbit_zip",
+                "angleCompressionMode": "fixed",
+                "angleCompressionFixedAngle": 135.0,
+            },
+            None,
+        )
+        self.assertEqual([note.target_angle for note in fixed_notes], [135.0, 135.0])
+        # Export options must never change the notes in the editing project.
+        self.assertEqual([note.target_angle for note in bridge.notes], [90.0, None])
+
+
 if __name__ == "__main__":
     unittest.main()
