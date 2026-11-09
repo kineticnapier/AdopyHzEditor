@@ -33,7 +33,7 @@ type MenuProps={id:MenuId;label:string;active:MenuId|null;setActive(v:MenuId|nul
 
 function Menu({id,label,active,setActive,children}:MenuProps){
   const open=active===id;
-  const popupId=useId(),popupRef=useRef<HTMLDivElement>(null);
+  const popupId=useId(),triggerId=useId(),popupRef=useRef<HTMLDivElement>(null);
   const focusItem=(edge:"first"|"last")=>window.requestAnimationFrame(()=>{const items=popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');items?.[edge==="first"?0:Math.max(0,items.length-1)]?.focus()});
   function navigate(event:ReactKeyboardEvent<HTMLDivElement>){
     const items=Array.from(popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')??[]),index=items.indexOf(document.activeElement as HTMLButtonElement);
@@ -43,8 +43,8 @@ function Menu({id,label,active,setActive,children}:MenuProps){
     else if(event.key==="End"){event.preventDefault();items.at(-1)?.focus()}
   }
   return <div className={open?"app-menu open":"app-menu"} onMouseEnter={()=>{if(active!==null&&!open)setActive(id)}}>
-    <button className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
-    {open&&<div ref={popupRef} id={popupId} className="app-menu-popup" role="menu" onKeyDown={navigate}>{children}</div>}
+    <button id={triggerId} className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
+    {open&&<div ref={popupRef} id={popupId} className="app-menu-popup" role="menu" aria-labelledby={triggerId} onKeyDown={navigate}>{children}</div>}
   </div>;
 }
 
