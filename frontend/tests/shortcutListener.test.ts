@@ -159,3 +159,39 @@ test("repeated navigation arrows remain available without Shift+Ctrl note moveme
   assert.equal(seek.defaultPrevented, true);
   assert.deepEqual(calls, ['view:{"pitchBottom":36}', "seek:5"]);
 });
+
+test("repeated Delete and Backspace are consumed only on the editor surface", () => {
+  const calls: string[] = [];
+  const current = {
+    api: {}, disabled: false, deleteSelected: () => calls.push("delete"),
+  } as unknown as ShortcutListenerState;
+  const handler = createEditorShortcutHandler(() => current);
+
+  for (const key of ["Delete", "Backspace"]) {
+    const first = keyEvent(key);
+    handler(first);
+    assert.equal(first.defaultPrevented, true, "first " + key);
+    const repeated = Object.assign(keyEvent(key), { repeat: true });
+    handler(repeated);
+    assert.equal(repeated.defaultPrevented, true, "repeat " + key);
+
+    const nativeInput = { closest: () => ({}) } as unknown as EventTarget;
+    const nativeRepeat = Object.assign(keyEvent(key), { repeat: true, target: nativeInput });
+    handler(nativeRepeat);
+    assert.equal(nativeRepeat.defaultPrevented, false, "native input " + key);
+
+    const shiftedRepeat = Object.assign(keyEvent(key), { repeat: true, shiftKey: true });
+    handler(shiftedRepeat);
+    assert.equal(shiftedRepeat.defaultPrevented, false, "modified " + key);
+
+    const composingRepeat = Object.assign(keyEvent(key), { repeat: true, isComposing: true });
+    handler(composingRepeat);
+    assert.equal(composingRepeat.defaultPrevented, false, "IME " + key);
+  }
+  assert.deepEqual(calls, ["delete", "delete"]);
+
+  current.disabled = true;
+  const disabledRepeat = Object.assign(keyEvent("Backspace"), { repeat: true });
+  handler(disabledRepeat);
+  assert.equal(disabledRepeat.defaultPrevented, false);
+});
