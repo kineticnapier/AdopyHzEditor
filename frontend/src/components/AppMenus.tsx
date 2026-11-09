@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
+import { nextMenuId } from "./menuNavigation";
 
 type Props = {
   hasSelection:boolean;
@@ -67,10 +68,10 @@ export default function AppMenus(p:Props){
   const menuIds:MenuId[]=["file","edit","analyze","tools","options","help"];
   function traverseMenus(event:ReactKeyboardEvent<HTMLElement>){
     if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;
-    const target=(event.target as HTMLElement).closest<HTMLButtonElement>("[data-menu-id]"),current=(active??target?.dataset.menuId) as MenuId|undefined;
-    if(!current)return;
+    const target=(event.target as HTMLElement).closest<HTMLButtonElement>("[data-menu-id]");
+    const next=nextMenuId(menuIds,active,(target?.dataset.menuId as MenuId|undefined)??null,event.key);
+    if(!next)return;
     event.preventDefault();
-    const index=menuIds.indexOf(current),next=menuIds[(index+(event.key==="ArrowRight"?1:-1)+menuIds.length)%menuIds.length];
     if(active)setActive(next);
     focusTrigger(next);
   }
