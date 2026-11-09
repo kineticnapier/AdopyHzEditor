@@ -31,6 +31,6 @@ test("App rechecks settings freshness after awaiting recovery", () => {
   const block = app.slice(start, end);
   assert.match(block, /const requestGeneration = documentGeneration\.current;/);
   assert.match(block, /const isCurrent = \(\) =>\s*settingsResponseIsCurrent\(/);
-  assert.match(block, /if \(isCurrent\(\)\) setSettings\(normalized\);/);
-  assert.match(block, /const recovered = \(await api\.get_state\(\)\)\.settings;[\s\S]*?if \(isCurrent\(\)\) setSettings\(recovered\);/);
+  assert.match(block, /if \(isCurrent\(\)\) \{\s*settingsSnapshotRef\.current = normalized;\s*setSettings\(normalized\);\s*\}/);
+  assert.match(block, /const recovered = \(await api\.get_state\(\)\)\.settings;[\s\S]*?if \(isCurrent\(\)\) \{\s*settingsSnapshotRef\.current = recovered;\s*setSettings\(recovered\);\s*\}/);
 });
