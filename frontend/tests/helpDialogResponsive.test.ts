@@ -29,3 +29,8 @@ test("changing help sections resets the article scroll position", () => {
   assert.match(help, /onClick=\{\(\) => setSection\(x\.id\)\}/);
   assert.match(help, /<article key=\{current\?\.id\}>/);
 });
+
+test("help loading and failure states are announced to assistive technology", () => {
+  assert.match(help, /<div className="dialog-loading" role="status">ヘルプを読み込んでいます…<\/div>/);
+  assert.match(help, /<div className="dialog-error" role="alert">ヘルプの読込に失敗しました:/);
+});
