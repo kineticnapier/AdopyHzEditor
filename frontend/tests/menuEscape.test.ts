@@ -3,11 +3,12 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { consumeMenuEscape } from "../src/components/menuEscape.ts";
 
-function keyEvent(key: string) {
+function keyEvent(key: string, flags: Partial<Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing" | "keyCode">> = {}) {
   let prevented = false;
   return {
     event: {
       key,
+      ...flags,
       get defaultPrevented() { return prevented; },
       preventDefault() { prevented = true; },
     },
@@ -43,6 +44,21 @@ test("an already-handled Escape is not handled twice", () => {
   assert.equal(consumeMenuEscape(event, "file", () => assert.fail("must not close")), false);
 });
 
+test("modified Escape leaves the menu open for the OS and other shortcuts", () => {
+  for (const flag of ["ctrlKey", "metaKey", "altKey", "shiftKey"] as const) {
+    const { event, isPrevented } = keyEvent("Escape", { [flag]: true });
+    assert.equal(consumeMenuEscape(event, "file", () => assert.fail("must not close")), false);
+    assert.equal(isPrevented(), false);
+  }
+});
+
+test("IME Escape does not close the menu or consume composition", () => {
+  for (const flags of [{ isComposing: true }, { isComposing: false, keyCode: 229 }]) {
+    const { event, isPrevented } = keyEvent("Escape", flags);
+    assert.equal(consumeMenuEscape(event, "file", () => assert.fail("must not close")), false);
+    assert.equal(isPrevented(), false);
+  }
+});
 
 test("application menu popup is named by its trigger", () => {
   const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
