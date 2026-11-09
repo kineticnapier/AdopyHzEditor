@@ -78,5 +78,29 @@ class SettingsAtomicUpdateTests(unittest.TestCase):
             self.assertEqual(bridge.update_settings({"volume": 12}), bridge.get_settings())
             apply.assert_not_called()
 
+    def test_kick_preview_selection_preserves_atomic_settings_and_prepares_asset(self):
+        bridge = Bridge()
+        with mock.patch.object(bridge, "_prepare_adofai_kick_async") as prepare:
+            settings = bridge.update_settings({"previewSound": "adofai_kick"})
+
+        self.assertEqual(settings["previewSound"], "adofai_kick")
+        self.assertEqual(bridge.player.note_instrument, "adofai_kick")
+        prepare.assert_called_once_with()
+        self.assertTrue(bridge.get_state()["dirty"])
+
+    def test_invalid_batch_with_kick_does_not_start_asset_preparation(self):
+        bridge = Bridge()
+        before = bridge.get_settings()
+        with mock.patch.object(bridge, "_prepare_adofai_kick_async") as prepare:
+            with self.assertRaises(ValueError):
+                bridge.update_settings({
+                    "previewSound": "adofai_kick",
+                    "snapDiv": "invalid",
+                })
+            prepare.assert_not_called()
+        self.assertEqual(bridge.get_settings(), before)
+        self.assertEqual(bridge.player.note_instrument, "sine")
+        self.assertFalse(bridge.get_state()["dirty"])
+
 if __name__ == "__main__":
     unittest.main()
