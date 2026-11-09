@@ -122,7 +122,8 @@ export default function SettingsPanel({
           設定
         </button>
       </nav>
-      <div className="settings-body">
+      {!api && <p className="inspector-help" role="status">バックエンド接続待ち…</p>}
+      <div className="settings-body" inert={!api} aria-busy={!api}>
         {page === "inspector" && (
           <>
             {selected.length === 0 && trackSelection.ids.length === 0 && (
