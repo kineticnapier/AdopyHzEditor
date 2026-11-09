@@ -56,12 +56,13 @@ test("App keeps the settings snapshot aligned with document loads and API replie
 test("settings stay unsent until the backend has loaded its initial state", () => {
   const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const connectionStart = source.indexOf("const ping = await backend.ping()");
+  const pingGuard = source.indexOf("if (!ping.ok) throw new Error", connectionStart);
   const stateRead = source.indexOf("const state = await backend.get_state()", connectionStart);
   const stateApplied = source.indexOf("applyState(state)", stateRead);
   const apiPublished = source.indexOf("setApi(backend)", stateApplied);
   const connectionPublished = source.indexOf("setConnected(ping.ok)", apiPublished);
-  assert.ok(connectionStart >= 0 && stateRead > connectionStart &&
-    stateApplied > stateRead && apiPublished > stateApplied &&
+  assert.ok(connectionStart >= 0 && pingGuard > connectionStart &&
+    stateRead > pingGuard && stateApplied > stateRead && apiPublished > stateApplied &&
     connectionPublished > apiPublished,
   "controls must not receive a backend API before get_state succeeds");
 
