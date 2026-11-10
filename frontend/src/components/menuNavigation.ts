@@ -66,6 +66,22 @@ export function focusAdjacentMenu(
   (firstItem ?? trigger)?.focus();
 }
 
+/** Focus an opened menu after the trigger key, unless focus has moved elsewhere.
+ * The popup ref becomes null when the menu closes before the animation frame.
+ */
+export function focusOpenedMenuEdgeItem(
+  popup: Pick<HTMLElement, "querySelectorAll"> | null,
+  edge: "first" | "last",
+  previouslyFocused: Element | null,
+  currentlyFocused: Element | null,
+  body: Element,
+  documentElement: Element,
+): void {
+  if (!popup || !canTransferDeferredMenuFocus(previouslyFocused, currentlyFocused, body, documentElement)) return;
+  const items = popup.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+  items[edge === "first" ? 0 : items.length - 1]?.focus();
+}
+
 /** Restore menu focus only when closing the popup left focus unclaimed.
  * An action may open a dialog that has already focused its own controls.
  */
