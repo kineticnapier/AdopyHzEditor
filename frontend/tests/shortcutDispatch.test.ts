@@ -338,3 +338,17 @@ test("save commits all supported contenteditable variants before invoking save",
     assert.deepEqual(calls, ["commit-editable", expected], value);
   }
 });
+
+test("held Space and Ctrl/Meta+Space never repeat transport requests", () => {
+  const { calls, press } = setup();
+  for (const mods of [{}, { ctrlKey: true }, { metaKey: true }]) {
+    assert.equal(press(" ", { ...mods, repeat: true }), true);
+    assert.equal(press(" ", mods), true);
+    assert.equal(press(" ", { ...mods, repeat: true }), true);
+  }
+  assert.deepEqual(calls, ["play", "stop", "stop"]);
+  // Unassigned modified Space chords retain native behavior.
+  for (const mods of [{ shiftKey: true }, { altKey: true }, { ctrlKey: true, shiftKey: true }]) {
+    assert.equal(press(" ", { ...mods, repeat: true }), false);
+  }
+});
