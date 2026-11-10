@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { formatPlaybackTime } from "./formatPlaybackTime";
 import type { PlaybackState, ViewState } from "./bridge";
 
 type Props = {
@@ -23,13 +24,6 @@ function TransportIcon({name}:{name:"start"|"stop"|"play"|"pause"}){
   return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5z"/></svg>;
 }
 
-function formatTime(seconds:number){
-  const totalMs=Math.max(0,Math.round((seconds||0)*1000));
-  const minutes=Math.floor(totalMs/60000);
-  const sec=Math.floor((totalMs%60000)/1000);
-  const ms=totalMs%1000;
-  return `${minutes}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
-}
 
 export default function TopToolbar(p:Props){
   return <>
@@ -53,7 +47,7 @@ export default function TopToolbar(p:Props){
         <button className={p.view.mode==="notes"?"selected":""} aria-pressed={p.view.mode==="notes"} onClick={()=>p.onMode("notes")}>Notes</button>
         <button className={p.view.mode==="both"?"selected":""} aria-pressed={p.view.mode==="both"} onClick={()=>p.onMode("both")}>Both</button>
       </div>
-      <output>{formatTime(p.playback.time)} / {formatTime(p.playback.duration)}</output>
+      <output>{formatPlaybackTime(p.playback.time)} / {formatPlaybackTime(p.playback.duration)}</output>
       <button className="panel-toggle" aria-label={p.panelOpen?"右パネルを閉じる":"右パネルを開く"} aria-pressed={p.panelOpen} onClick={p.onTogglePanel}>Inspector</button>
     </div>
   </>;
