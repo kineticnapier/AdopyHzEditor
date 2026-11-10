@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { playbackStatusMessage } from "../src/components/playbackStatusMessage.ts";
+import { playbackStatusMessage, playbackToggleEnabled } from "../src/components/playbackStatusMessage.ts";
 
 test("available playback without an error needs no warning", () => {
   assert.equal(playbackStatusMessage({ available: true, error: null }), null);
@@ -58,4 +58,19 @@ test("disconnected preview disables no-op Play and Stop buttons", () => {
   assert.match(toolbar, /aria-pressed=\{p\.playback\.playing\}[^>]*disabled=\{!p\.connected\}[^>]*onClick=\{p\.onPlay\}/);
   // Keep the locally functional seek-to-start action available in preview.
   assert.match(toolbar, /aria-label="先頭へ移動"[^>]*onClick=\{\(\)=>p\.onSeek\(0\)\}/);
+});
+
+
+test("Play is disabled for unavailable audio while Stop and Pause remain usable", () => {
+  assert.equal(playbackToggleEnabled(false, { available: true, playing: false }), false);
+  assert.equal(playbackToggleEnabled(true, { available: false, playing: false }), false);
+  assert.equal(playbackToggleEnabled(true, { available: true, playing: false }), true);
+  assert.equal(playbackToggleEnabled(true, { available: false, playing: true }), true);
+  assert.equal(playbackToggleEnabled(false, { available: true, playing: true }), false);
+
+  const toolbar = readFileSync(new URL("../src/components/TopToolbar.tsx", import.meta.url), "utf8");
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(toolbar, /disabled=\{!playbackToggleEnabled\(p\.connected, p\.playback\)\}/);
+  assert.match(toolbar, /aria-label="停止"[^>]*disabled=\{!p\.connected\}/);
+  assert.match(app, /if \(api && playbackToggleEnabled\(connected, playback\)\)/);
 });
