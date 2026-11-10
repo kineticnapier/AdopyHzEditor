@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
-import { focusAdjacentMenu, isPlainMenuNavigationEvent, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
+import { focusAdjacentMenu, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
 
 type Props = {
   hasSelection:boolean;
@@ -44,7 +44,14 @@ function Menu({id,label,active,setActive,children}:MenuProps){
     else if(event.key==="Home"){event.preventDefault();items[0]?.focus()}
     else if(event.key==="End"){event.preventDefault();items.at(-1)?.focus()}
   }
-  return <div className={open?"app-menu open":"app-menu"} onMouseEnter={()=>{if(active!==null&&!open)setActive(id)}}>
+  return <div className={open?"app-menu open":"app-menu"} onMouseEnter={event=>{
+    if(active===null||open)return;
+    const origin=menuHoverFocusOrigin(active,document.activeElement);
+    const root=event.currentTarget.closest<HTMLElement>(".app-menus");
+    setActive(id);
+    // Only transfer keyboard focus if it belonged to the menu being replaced.
+    if(origin)window.requestAnimationFrame(()=>focusAdjacentMenu(root,id,origin==="popup",true));
+  }}>
     <button id={triggerId} className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(!isPlainMenuNavigationEvent(event.nativeEvent))return;if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
     {open&&<div ref={popupRef} id={popupId} data-menu-popup={id} className="app-menu-popup" role="menu" aria-labelledby={triggerId} onKeyDown={navigate}>{children}</div>}
   </div>;
