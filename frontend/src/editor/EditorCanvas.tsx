@@ -208,7 +208,7 @@ export default function EditorCanvas(props: Props) {
   const selectedSet=useMemo(()=>new Set(props.selected),[props.selected]);
   const noteTimeIndex=useMemo(()=>buildNoteTimeIndex(props.notes),[props.notes]);
   const keyboardOrder=noteTimeIndex.order;
-  const decoded = useMemo(() => decodeSpectrum(props.spectrum), [props.spectrum]);
+  const decoded = useMemo(() => props.view.mode === "notes" ? null : decodeSpectrum(props.spectrum), [props.spectrum, props.view.mode]);
   // Notes-only mode has no Track drawing or hit targets. Defer unpacking the
   // potentially large packed payload until a spectrum view is selected.
   const decodedTracks = useMemo(() => props.view.mode === "notes" ? null : decodeFrequencyTracks(props.frequencyTracks), [props.frequencyTracks, props.view.mode]);
@@ -230,6 +230,9 @@ export default function EditorCanvas(props: Props) {
     return canvas;
   }, [decoded, props.settings.colormap]);
   const directSpectrumCanvas = useMemo(() => {
+    // A hidden spectrum must not unpack the potentially large payload.
+    // Recompute when switching back to Spectrum/Both.
+    if (props.view.mode === "notes") return null;
     const payload=props.directSpectrum;
     if (!payload?.data || typeof payload.timeBuckets !== "number" || typeof payload.pitchBuckets !== "number" || typeof payload.recordCount !== "number" || !isValidDirectSpectrumSize(payload.timeBuckets, payload.pitchBuckets)) return null;
     const bytes=decodePackedDirectSpectrumBytes(payload.data, payload.recordCount, payload.timeBuckets, payload.pitchBuckets);
@@ -244,7 +247,7 @@ export default function EditorCanvas(props: Props) {
       image.data[p]=r;image.data[p+1]=g;image.data[p+2]=b;image.data[p+3]=255;
     }
     maybeCtx.putImageData(image,0,0);return canvas;
-  },[props.directSpectrum,props.settings.colormap]);
+  },[props.directSpectrum,props.settings.colormap,props.view.mode]);
 
   useEffect(() => {
     const el = containerRef.current; if (!el) return;
