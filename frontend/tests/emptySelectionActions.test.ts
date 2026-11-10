@@ -6,7 +6,7 @@ const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 
 function actionSource(name: string, nextName: string): string {
   const start = app.indexOf(`  async function ${name}()`);
-  const end = app.indexOf(`  async function ${nextName}()`, start);
+  const end = app.indexOf(`  async function ${nextName}(`, start);
   assert.ok(start >= 0 && end > start, `could not locate ${name}`);
   return app.slice(start, end);
 }
