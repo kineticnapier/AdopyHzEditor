@@ -26,7 +26,26 @@ test("empty error strings do not hide the unavailable state", () => {
 test("toolbar displays the backend error in a named status without affecting browser preview", () => {
   const toolbar = readFileSync(new URL("../src/components/TopToolbar.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(toolbar, /p\.connected \? playbackStatusMessage\(p\.playback\) : null/);
+  assert.match(toolbar, /p\.connected \? playbackStatusMessage\(p\.playback, p\.hasPlayableContent\) : null/);
   assert.match(toolbar, /playbackStatus && <span className="playback-error" role="status" title=\{playbackStatus\}>/);
   assert.match(styles, /\.toolbar \.playback-error \{[^}]*text-overflow:ellipsis/);
+});
+
+
+test("empty workspace does not show an unavailable warning", () => {
+  assert.equal(playbackStatusMessage({ available: false, error: null }, false), null);
+  assert.equal(playbackStatusMessage({ available: false, error: " " }, false), null);
+});
+
+test("a real audio device error is still shown in an empty workspace", () => {
+  assert.equal(
+    playbackStatusMessage({ available: false, error: "  Device missing  " }, false),
+    "再生エラー: Device missing",
+  );
+});
+
+test("a workspace with notes or audio still reports unavailable playback", () => {
+  assert.equal(playbackStatusMessage({ available: false, error: null }, true), "再生できません");
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /hasPlayableContent=\{audioName !== null \|\| notes\.length > 0\}/);
 });
