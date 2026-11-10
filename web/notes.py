@@ -502,8 +502,12 @@ class NoteMixin:
             return {"status": self._status}
 
     def cut_notes(self, indices: list[int]) -> dict[str, Any]:
-        self.copy_notes(indices)
-        return self.delete_notes(indices)
+        # Copy and deletion must observe the same note indices. Both helpers
+        # acquire the reentrant lock, but without an outer lock another backend
+        # request could edit the note list between these two operations.
+        with self._lock:
+            self.copy_notes(indices)
+            return self.delete_notes(indices)
 
     def paste_notes(self, at_time: float) -> dict[str, Any]:
         with self._lock:
