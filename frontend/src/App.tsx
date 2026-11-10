@@ -1344,6 +1344,7 @@ export default function App() {
       <TopToolbar
         connected={connected}
         audioName={audioName}
+        hasPlayableContent={audioName !== null || notes.length > 0}
         dirty={dirty}
         playback={playback}
         view={view}
