@@ -9,3 +9,11 @@ export function playbackStatusMessage(
   if (error) return `再生エラー: ${error}`;
   return playback.available || !hasPlayableContent ? null : "再生できません";
 }
+
+/** Disable no-op Play, but keep Pause available for an already playing stream. */
+export function playbackToggleEnabled(
+  connected: boolean,
+  playback: Pick<PlaybackState, "available" | "playing">,
+): boolean {
+  return connected && (playback.available || playback.playing);
+}
