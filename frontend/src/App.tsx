@@ -19,6 +19,7 @@ import Timeline from "./editor/Timeline";
 import { clampTimeViewChange } from "./editor/timelineNavigation";
 import { clampPitchViewChange, hasEffectiveViewChange } from "./editor/pitchViewport";
 import TopToolbar from "./components/TopToolbar";
+import { playbackToggleEnabled } from "./components/playbackStatusMessage";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
 import {
   DirectSpectrumRegionCache,
@@ -1098,7 +1099,9 @@ export default function App() {
     else setPlayback((p) => ({ ...p, time: t }));
   }
   async function togglePlayback() {
-    if (api) await queuedPlaybackAction(() => api.toggle_playback());
+    // The Space shortcut must honor the same availability as the Play button.
+    if (api && playbackToggleEnabled(connected, playback))
+      await queuedPlaybackAction(() => api.toggle_playback());
   }
   async function stopPlayback() {
     if (api) await queuedPlaybackAction(() => api.stop_playback());
