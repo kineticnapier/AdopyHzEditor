@@ -62,13 +62,15 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   }
 
   // A held editing shortcut must not enqueue repeated mutations against stale
-  // selection indices. Navigation and Undo intentionally remain repeatable.
+  // selection indices. Repeated Escape must also not clear the selection after
+  // the first Escape cancels a focused numeric input and blurs it.
+  // Navigation and Undo intentionally remain repeatable.
   if (event.repeat && (
     (ctrl && !event.altKey && !event.shiftKey && ["x", "v", "d"].includes(key)) ||
     (ctrl && event.altKey && !event.shiftKey && key === "a") ||
     // Holding Space must not queue repeated Play/Pause or Stop requests.
     (key === " " && !event.altKey && !event.shiftKey) ||
-    (unmodified && ["q", "delete", "backspace"].includes(key))
+    (unmodified && ["q", "delete", "backspace", "escape"].includes(key))
   )) {
     event.preventDefault();
     return;
