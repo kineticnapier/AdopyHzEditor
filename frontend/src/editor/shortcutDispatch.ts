@@ -61,6 +61,17 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
     return;
   }
 
+  // A held editing shortcut must not enqueue repeated mutations against stale
+  // selection indices. Navigation and Undo intentionally remain repeatable.
+  if (event.repeat && (
+    (ctrl && !event.altKey && !event.shiftKey && ["x", "v", "d"].includes(key)) ||
+    (ctrl && event.altKey && !event.shiftKey && key === "a") ||
+    (unmodified && ["q", "delete", "backspace"].includes(key))
+  )) {
+    event.preventDefault();
+    return;
+  }
+
   if (helpKey) return handled(a.openHelp);
   if (ctrl && key === "o") return handled(a.openAudio);
   if (ctrl && event.shiftKey && key === "s")
