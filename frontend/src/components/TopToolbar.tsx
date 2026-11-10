@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { formatPlaybackTime } from "./formatPlaybackTime";
+import { playbackStatusMessage } from "./playbackStatusMessage";
 import type { PlaybackState, ViewState } from "./bridge";
 
 type Props = {
@@ -26,6 +27,7 @@ function TransportIcon({name}:{name:"start"|"stop"|"play"|"pause"}){
 
 
 export default function TopToolbar(p:Props){
+  const playbackStatus = p.connected ? playbackStatusMessage(p.playback) : null;
   return <>
     <header className="titlebar">
       <div className="title-left">
@@ -48,6 +50,7 @@ export default function TopToolbar(p:Props){
         <button className={p.view.mode==="both"?"selected":""} aria-pressed={p.view.mode==="both"} onClick={()=>p.onMode("both")}>Both</button>
       </div>
       <output>{formatPlaybackTime(p.playback.time)} / {formatPlaybackTime(p.playback.duration)}</output>
+      {playbackStatus && <span className="playback-error" role="status" title={playbackStatus}>{playbackStatus}</span>}
       <button className="panel-toggle" aria-label={p.panelOpen?"右パネルを閉じる":"右パネルを開く"} aria-pressed={p.panelOpen} onClick={p.onTogglePanel}>Inspector</button>
     </div>
   </>;
