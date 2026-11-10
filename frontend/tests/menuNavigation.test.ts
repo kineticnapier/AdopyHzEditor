@@ -158,7 +158,7 @@ test("hovered menu preserves the focus kind and ignores closed destinations", ()
 test("hover focus transfer is wired only for an already open different menu", () => {
   const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
   assert.match(source, /if\(active===null\|\|open\)return/);
-  assert.match(source, /menuHoverFocusOrigin\(active,document\.activeElement\)/);
+  assert.match(source, /menuHoverFocusOrigin\(active,focusedBeforeSwitch\)/);
   assert.match(source, /if\(origin\)window\.requestAnimationFrame\(\(\)=>\{/);
   assert.match(source, /focusAdjacentMenu\(root,id,origin==="popup",true\)/);
 });
