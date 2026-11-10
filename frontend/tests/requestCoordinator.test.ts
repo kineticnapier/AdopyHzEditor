@@ -58,6 +58,32 @@ test("async action guard is single-flight and reusable",async()=>{
   assert.equal(await guard.run(async()=>{calls+=1}),true);assert.equal(calls,2);
 });
 
+test("empty cut does not reserve the destructive guard or enqueue a backend mutation", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const cutStart = app.indexOf("  async function cutSelected()");
+  const cutEnd = app.indexOf("  async function pasteAtPlayback()", cutStart);
+  assert.ok(cutStart >= 0 && cutEnd > cutStart);
+  const cut = app.slice(cutStart, cutEnd);
+  assert.match(cut, /if \(api && selected\.length\)\s+await destructiveSelection\.current\.run\(/);
+  assert.ok(cut.indexOf("if (api && selected.length)") < cut.indexOf("destructiveSelection.current.run("));
+  assert.match(cut, /api\.cut_notes\(selected\)/);
+});
+
+test("cut, delete, and range-cut share the same in-flight destructive guard", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const start = app.indexOf("  async function deleteNotes(");
+  const end = app.indexOf("  async function pasteAtPlayback(", start);
+  assert.ok(start >= 0 && end > start);
+  const handlers = app.slice(start, end);
+  for (const name of ["deleteNotes", "cutRange", "cutSelected"]) {
+    const from = handlers.indexOf(`async function ${name}(`);
+    assert.ok(from >= 0, `missing ${name}`);
+    const next = handlers.indexOf("  async function ", from + 1);
+    const block = handlers.slice(from, next < 0 ? undefined : next);
+    assert.match(block, /destructiveSelection\.current\.run\(/, `${name} must use the shared guard`);
+  }
+});
+
 test("inspector and canvas mutations apply in the same queue order", async () => {
   const queue = new SerialTaskQueue();
   const applied: string[][] = [];
