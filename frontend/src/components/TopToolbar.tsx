@@ -42,8 +42,8 @@ export default function TopToolbar(p:Props){
     <div className="toolbar">
       <div className="transport-group" role="group" aria-label="再生">
         <button className="icon-button" aria-label="先頭へ移動" title="先頭へ (Home)" onClick={()=>p.onSeek(0)}><TransportIcon name="start"/></button>
-        <button className="icon-button" aria-label="停止" title="停止 (Ctrl+Space)" onClick={p.onStop}><TransportIcon name="stop"/></button>
-        <button className={p.playback.playing?"play active":"play"} aria-label={p.playback.playing?"一時停止":"再生"} aria-pressed={p.playback.playing} title="再生 / 一時停止 (Space)" onClick={p.onPlay}><TransportIcon name={p.playback.playing?"pause":"play"}/></button>
+        <button className="icon-button" aria-label="停止" title="停止 (Ctrl+Space)" disabled={!p.connected} onClick={p.onStop}><TransportIcon name="stop"/></button>
+        <button className={p.playback.playing?"play active":"play"} aria-label={p.playback.playing?"一時停止":"再生"} aria-pressed={p.playback.playing} title="再生 / 一時停止 (Space)" disabled={!p.connected} onClick={p.onPlay}><TransportIcon name={p.playback.playing?"pause":"play"}/></button>
       </div>
       <span className="toolbar-spacer"/>
       <div className="view-toggle" role="group" aria-label="表示モード">
