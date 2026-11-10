@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { focusAdjacentMenu, isPlainMenuNavigationEvent, nextMenuId, restoreMenuTriggerFocus } from "../src/components/menuNavigation.ts";
+import { focusAdjacentMenu, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "../src/components/menuNavigation.ts";
 
 const ids = ["file", "edit", "analyze", "tools", "options", "help"] as const;
 
@@ -126,4 +126,38 @@ test("menu close and Escape both use guarded focus restoration", () => {
   assert.match(source, /const focusTrigger=.*restoreMenuTriggerFocus/);
   assert.match(source, /consumeMenuEscape\(e,active,id=>\{setActive\(null\);focusTrigger\(id\)\}\)/);
   assert.match(source, /const close=\(\)=>\{const id=active;setActive\(null\);if\(id\)focusTrigger\(id\)\}/);
+});
+
+test("hovering an open menu transfers focus only from its active popup or trigger", () => {
+  const focused = (matchingSelector: string | null) => ({
+    closest: (selector: string) => selector === matchingSelector ? {} : null,
+  }) as unknown as Pick<Element, "closest">;
+  assert.equal(menuHoverFocusOrigin("file", focused('[data-menu-popup="file"]')), "popup");
+  assert.equal(menuHoverFocusOrigin("file", focused('[data-menu-id="file"]')), "trigger");
+  assert.equal(menuHoverFocusOrigin("file", focused('[data-menu-popup="edit"]')), null);
+  assert.equal(menuHoverFocusOrigin("file", focused(null)), null);
+  assert.equal(menuHoverFocusOrigin("file", null), null);
+});
+
+test("hovered menu preserves the focus kind and ignores closed destinations", () => {
+  const focused: string[] = [];
+  let open = true;
+  const root = { querySelector: (selector: string) => {
+    if (selector === '[data-menu-popup="edit"]') return open ? {} : null;
+    if (selector === '[data-menu-id="edit"]') return { focus: () => focused.push("trigger") };
+    if (selector === '[data-menu-popup="edit"] button:not(:disabled)') return { focus: () => focused.push("item") };
+    return null;
+  } } as unknown as HTMLElement;
+  focusAdjacentMenu(root, "edit", true, true);
+  focusAdjacentMenu(root, "edit", false, true);
+  open = false;
+  focusAdjacentMenu(root, "edit", true, true);
+  assert.deepEqual(focused, ["item", "trigger"]);
+});
+
+test("hover focus transfer is wired only for an already open different menu", () => {
+  const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
+  assert.match(source, /if\(active===null\|\|open\)return/);
+  assert.match(source, /menuHoverFocusOrigin\(active,document\.activeElement\)/);
+  assert.match(source, /if\(origin\)window\.requestAnimationFrame\(\(\)=>focusAdjacentMenu\(root,id,origin==="popup",true\)\)/);
 });
