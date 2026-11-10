@@ -412,6 +412,27 @@ export default function App() {
       window.clearInterval(id);
     };
   }, [api, playback.playing]);
+  // CQT requests are debounced by 140 ms below. Invalidate old responses
+  // immediately when their view or analysis inputs change; otherwise a slow
+  // response can repaint stale spectrum data (or report an obsolete error)
+  // before the replacement request is even issued.
+  useLayoutEffect(() => {
+    spectrumRequests.current.invalidate();
+  }, [
+    api,
+    analysisAvailable,
+    analysisSource,
+    settings.contrast,
+    settings.gamma,
+    settings.enhance,
+    settings.displayMode,
+    settings.harmonics,
+    view.mode,
+    view.start,
+    view.windowSeconds,
+    view.pitchBottom,
+    view.visibleNotes,
+  ]);
   useEffect(() => {
     if (
       !api ||
