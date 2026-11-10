@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { formatPlaybackTime } from "./formatPlaybackTime";
 import { playbackStatusMessage } from "./playbackStatusMessage";
+import { workspaceTitle } from "../editor/emptyState";
 import type { PlaybackState, ViewState } from "./bridge";
 
 type Props = {
@@ -33,7 +34,7 @@ export default function TopToolbar(p:Props){
     <header className="titlebar">
       <div className="title-left">
         <strong>AdopyHzEditor</strong>
-        <span className="document-name">{p.audioName??"空のワークスペース"}{p.dirty&&<span className="dirty-mark" aria-label="未保存">●</span>}</span>
+        <span className="document-name">{workspaceTitle(p.audioName,p.hasPlayableContent)}{p.dirty&&<span className="dirty-mark" aria-label="未保存">●</span>}</span>
         {p.menus}
       </div>
       <span className={p.connected?"status-pill on":"status-pill"}>{p.connected?"Python 接続済み":"ブラウザプレビュー"}</span>
