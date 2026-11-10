@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { canTransferDeferredMenuFocus, focusAdjacentMenu, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "../src/components/menuNavigation.ts";
+import { canTransferDeferredMenuFocus, focusAdjacentMenu, focusOpenedMenuEdgeItem, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "../src/components/menuNavigation.ts";
 
 const ids = ["file", "edit", "analyze", "tools", "options", "help"] as const;
 
@@ -184,4 +184,39 @@ test("deferred menu focus proceeds only while focus remains unclaimed", () => {
 test("hover and horizontal menu moves both guard deferred focus", () => {
   const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
   assert.equal(source.split("canTransferDeferredMenuFocus(").length - 1, 2);
+});
+
+test("opening a menu from its trigger focuses the requested enabled edge item", () => {
+  const focused: string[] = [];
+  const popup = { querySelectorAll: () => [
+    { focus: () => focused.push("first") },
+    { focus: () => focused.push("last") },
+  ] } as unknown as HTMLElement;
+  const trigger = { isConnected: true } as Element;
+  const body = { isConnected: true } as Element;
+  const html = { isConnected: true } as Element;
+  focusOpenedMenuEdgeItem(popup, "first", trigger, trigger, body, html);
+  focusOpenedMenuEdgeItem(popup, "last", trigger, body, body, html);
+  assert.deepEqual(focused, ["first", "last"]);
+});
+
+test("delayed trigger opening never steals focus from a new control or closed popup", () => {
+  const focused: string[] = [];
+  const popup = { querySelectorAll: () => [
+    { focus: () => focused.push("menu") },
+  ] } as unknown as HTMLElement;
+  const trigger = { isConnected: true } as Element;
+  const newInput = { isConnected: true } as Element;
+  const body = { isConnected: true } as Element;
+  const html = { isConnected: true } as Element;
+  focusOpenedMenuEdgeItem(popup, "first", trigger, newInput, body, html);
+  focusOpenedMenuEdgeItem(null, "first", trigger, trigger, body, html);
+  assert.deepEqual(focused, []);
+});
+
+test("trigger opening routes its animation-frame focus through the ownership guard", () => {
+  const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
+  assert.match(source, /const focusedBeforeOpen=document\.activeElement/);
+  assert.match(source, /requestAnimationFrame\(\(\)=>focusOpenedMenuEdgeItem\(/);
+  assert.match(source, /popupRef\.current,edge,focusedBeforeOpen,document\.activeElement/);
 });
