@@ -1045,7 +1045,9 @@ export default function App() {
     }
   }
   async function cutSelected() {
-    if (api)
+    // An empty cut must not reserve the destructive-action guard: a later
+    // valid Delete/Cut could otherwise be dropped while this no-op is queued.
+    if (api && selected.length)
       await destructiveSelection.current.run(async () => {
         await queuedSelectionMutation(
           () => api.cut_notes(selected),
