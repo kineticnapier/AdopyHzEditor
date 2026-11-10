@@ -6,6 +6,7 @@ import type { PlaybackState, ViewState } from "./bridge";
 type Props = {
   connected:boolean;
   audioName:string|null;
+  hasPlayableContent:boolean;
   dirty:boolean;
   playback:PlaybackState;
   view:ViewState;
@@ -27,7 +28,7 @@ function TransportIcon({name}:{name:"start"|"stop"|"play"|"pause"}){
 
 
 export default function TopToolbar(p:Props){
-  const playbackStatus = p.connected ? playbackStatusMessage(p.playback) : null;
+  const playbackStatus = p.connected ? playbackStatusMessage(p.playback, p.hasPlayableContent) : null;
   return <>
     <header className="titlebar">
       <div className="title-left">
