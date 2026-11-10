@@ -34,6 +34,18 @@ export function menuHoverFocusOrigin(
   return null;
 }
 
+/** A deferred focus move must not override a control focused after scheduling. */
+export function canTransferDeferredMenuFocus(
+  previouslyFocused: Element | null,
+  currentlyFocused: Element | null,
+  body: Element,
+  documentElement: Element,
+): boolean {
+  return !currentlyFocused || currentlyFocused === previouslyFocused ||
+    currentlyFocused === body || currentlyFocused === documentElement ||
+    !currentlyFocused.isConnected;
+}
+
 /** Focus the first enabled item when moving between open popups with Left/Right.
  * From a menu-bar trigger, keep focus on the adjacent trigger instead.
  * Fall back to the trigger if the destination popup has no enabled items.

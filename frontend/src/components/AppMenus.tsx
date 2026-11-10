@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
-import { focusAdjacentMenu, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
+import { canTransferDeferredMenuFocus, focusAdjacentMenu, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
 
 type Props = {
   hasSelection:boolean;
@@ -46,11 +46,15 @@ function Menu({id,label,active,setActive,children}:MenuProps){
   }
   return <div className={open?"app-menu open":"app-menu"} onMouseEnter={event=>{
     if(active===null||open)return;
-    const origin=menuHoverFocusOrigin(active,document.activeElement);
+    const focusedBeforeSwitch=document.activeElement;
+    const origin=menuHoverFocusOrigin(active,focusedBeforeSwitch);
     const root=event.currentTarget.closest<HTMLElement>(".app-menus");
     setActive(id);
-    // Only transfer keyboard focus if it belonged to the menu being replaced.
-    if(origin)window.requestAnimationFrame(()=>focusAdjacentMenu(root,id,origin==="popup",true));
+    // Do not override a new focus destination chosen before the next frame.
+    if(origin)window.requestAnimationFrame(()=>{
+      if(canTransferDeferredMenuFocus(focusedBeforeSwitch,document.activeElement,document.body,document.documentElement))
+        focusAdjacentMenu(root,id,origin==="popup",true);
+    });
   }}>
     <button id={triggerId} className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(!isPlainMenuNavigationEvent(event.nativeEvent))return;if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
     {open&&<div ref={popupRef} id={popupId} data-menu-popup={id} className="app-menu-popup" role="menu" aria-labelledby={triggerId} onKeyDown={navigate}>{children}</div>}
@@ -82,8 +86,12 @@ export default function AppMenus(p:Props){
     if(!next)return;
     event.preventDefault();
     const fromPopup=Boolean((event.target as HTMLElement).closest('[role="menu"]'));
+    const focusedBeforeMove=document.activeElement;
     if(active)setActive(next);
-    window.requestAnimationFrame(()=>focusAdjacentMenu(rootRef.current,next,Boolean(active && fromPopup),Boolean(active)));
+    window.requestAnimationFrame(()=>{
+      if(canTransferDeferredMenuFocus(focusedBeforeMove,document.activeElement,document.body,document.documentElement))
+        focusAdjacentMenu(rootRef.current,next,Boolean(active && fromPopup),Boolean(active));
+    });
   }
   return <nav className="app-menus" aria-label="アプリケーションメニュー" ref={rootRef} onKeyDown={traverseMenus} onBlur={event=>{if(active&&!event.currentTarget.contains(event.relatedTarget as Node|null))setActive(null)}}>
     <Menu id="file" label="ファイル" active={active} setActive={setActive}>

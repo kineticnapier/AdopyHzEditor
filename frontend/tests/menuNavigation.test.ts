@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { focusAdjacentMenu, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "../src/components/menuNavigation.ts";
+import { canTransferDeferredMenuFocus, focusAdjacentMenu, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "../src/components/menuNavigation.ts";
 
 const ids = ["file", "edit", "analyze", "tools", "options", "help"] as const;
 
@@ -159,5 +159,29 @@ test("hover focus transfer is wired only for an already open different menu", ()
   const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
   assert.match(source, /if\(active===null\|\|open\)return/);
   assert.match(source, /menuHoverFocusOrigin\(active,document\.activeElement\)/);
-  assert.match(source, /if\(origin\)window\.requestAnimationFrame\(\(\)=>focusAdjacentMenu\(root,id,origin==="popup",true\)\)/);
+  assert.match(source, /if\(origin\)window\.requestAnimationFrame\(\(\)=>\{/);
+  assert.match(source, /focusAdjacentMenu\(root,id,origin==="popup",true\)/);
+});
+
+test("deferred menu focus never overrides a newly focused connected control", () => {
+  const body = { isConnected: true } as Element;
+  const html = { isConnected: true } as Element;
+  const original = { isConnected: true } as Element;
+  const newControl = { isConnected: true } as Element;
+  assert.equal(canTransferDeferredMenuFocus(original, newControl, body, html), false);
+});
+
+test("deferred menu focus proceeds only while focus remains unclaimed", () => {
+  const body = { isConnected: true } as Element;
+  const html = { isConnected: true } as Element;
+  const original = { isConnected: true } as Element;
+  const detached = { isConnected: false } as Element;
+  for (const current of [original, body, html, detached, null]) {
+    assert.equal(canTransferDeferredMenuFocus(original, current, body, html), true);
+  }
+});
+
+test("hover and horizontal menu moves both guard deferred focus", () => {
+  const source = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
+  assert.equal(source.split("canTransferDeferredMenuFocus(").length - 1, 2);
 });
