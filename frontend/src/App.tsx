@@ -1029,7 +1029,8 @@ export default function App() {
       );
   }
   async function copySelected() {
-    if (api) {
+    // Empty selection must not occupy the edit queue or report a stale no-op.
+    if (api && selected.length) {
       const generation = documentGeneration.current;
       const snapshot = notes;
       await runWithErrorFeedback(
@@ -1065,7 +1066,8 @@ export default function App() {
       );
   }
   async function applyTargetAngle() {
-    if (api)
+    // No selected notes: avoid a needless backend call and status overwrite.
+    if (api && selected.length)
       await queuedSelectionMutation(
         () => api.apply_target_angle(selected, settings.targetAngle),
         () => selected,
