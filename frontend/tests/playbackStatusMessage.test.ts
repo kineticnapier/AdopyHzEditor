@@ -49,3 +49,13 @@ test("a workspace with notes or audio still reports unavailable playback", () =>
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /hasPlayableContent=\{audioName !== null \|\| notes\.length > 0\}/);
 });
+
+
+test("disconnected preview disables no-op Play and Stop buttons", () => {
+  const toolbar = readFileSync(new URL("../src/components/TopToolbar.tsx", import.meta.url), "utf8");
+  // Without a Python bridge, App.togglePlayback and App.stopPlayback have no effect.
+  assert.match(toolbar, /aria-label="停止"[^>]*disabled=\{!p\.connected\}[^>]*onClick=\{p\.onStop\}/);
+  assert.match(toolbar, /aria-pressed=\{p\.playback\.playing\}[^>]*disabled=\{!p\.connected\}[^>]*onClick=\{p\.onPlay\}/);
+  // Keep the locally functional seek-to-start action available in preview.
+  assert.match(toolbar, /aria-label="先頭へ移動"[^>]*onClick=\{\(\)=>p\.onSeek\(0\)\}/);
+});
