@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
-import { canTransferDeferredMenuFocus, focusAdjacentMenu, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
+import { canTransferDeferredMenuFocus, focusAdjacentMenu, focusOpenedMenuEdgeItem, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
 
 type Props = {
   hasSelection:boolean;
@@ -35,7 +35,12 @@ type MenuProps={id:MenuId;label:string;active:MenuId|null;setActive(v:MenuId|nul
 function Menu({id,label,active,setActive,children}:MenuProps){
   const open=active===id;
   const popupId=useId(),triggerId=useId(),popupRef=useRef<HTMLDivElement>(null);
-  const focusItem=(edge:"first"|"last")=>window.requestAnimationFrame(()=>{const items=popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');items?.[edge==="first"?0:Math.max(0,items.length-1)]?.focus()});
+  const focusItem=(edge:"first"|"last")=>{
+    const focusedBeforeOpen=document.activeElement;
+    window.requestAnimationFrame(()=>focusOpenedMenuEdgeItem(
+      popupRef.current,edge,focusedBeforeOpen,document.activeElement,document.body,document.documentElement
+    ));
+  };
   function navigate(event:ReactKeyboardEvent<HTMLDivElement>){
     if(!isPlainMenuNavigationEvent(event.nativeEvent))return;
     const items=Array.from(popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')??[]),index=items.indexOf(document.activeElement as HTMLButtonElement);
