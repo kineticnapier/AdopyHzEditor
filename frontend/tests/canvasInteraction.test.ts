@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, hasCanvasSizeChanged, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -569,4 +569,24 @@ test("Canvas releases stale note indices during the layout phase of a notes upda
   const cancel = handler.indexOf("setDrag(null);");
   assert.ok(updatePrevious >= 0 && guard > updatePrevious && reset > guard && release > reset && cancel > release);
   assert.ok(end < source.indexOf("async function onPointerUp("));
+});
+
+test("identical ResizeObserver measurements do not publish redundant canvas state", () => {
+  const before = { width: 800, height: 500 };
+  assert.equal(hasCanvasSizeChanged(before, { ...before }), false);
+  assert.equal(hasCanvasSizeChanged(before, { width: 801, height: 500 }), true);
+  assert.equal(hasCanvasSizeChanged(before, { width: 800, height: 499 }), true);
+});
+
+test("Canvas skips duplicate resize measurements before updating state or parent viewport", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const observer = new ResizeObserver(");
+  const end = source.indexOf("observer.observe(el);", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  const guard = handler.indexOf("if (!hasCanvasSizeChanged(previous, next)) return;");
+  const update = handler.indexOf("observedCanvasSizeRef.current = next;");
+  const state = handler.indexOf("setSize(next);");
+  const parent = handler.indexOf("props.onViewportSize?.(next);");
+  assert.ok(guard >= 0 && update > guard && state > update && parent > state);
 });

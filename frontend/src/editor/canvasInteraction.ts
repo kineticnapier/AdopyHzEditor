@@ -107,14 +107,21 @@ export function shouldCancelCanvasGestureForNotesChange(
   return activePointerId !== null && previous !== next;
 }
 
+/** Ignore duplicate ResizeObserver measurements before publishing React state. */
+export function hasCanvasSizeChanged(
+  previous: { width: number; height: number },
+  next: { width: number; height: number },
+): boolean {
+  return previous.width !== next.width || previous.height !== next.height;
+}
+
 /** Resizing the canvas changes pointer-to-note coordinates during an active edit. */
 export function shouldCancelCanvasGestureForResize(
   activePointerId: number | null,
   previous: { width: number; height: number },
   next: { width: number; height: number },
 ): boolean {
-  return activePointerId !== null &&
-    (previous.width !== next.width || previous.height !== next.height);
+  return activePointerId !== null && hasCanvasSizeChanged(previous, next);
 }
 
 type PageExitEventTarget = Pick<EventTarget, "addEventListener" | "removeEventListener">;

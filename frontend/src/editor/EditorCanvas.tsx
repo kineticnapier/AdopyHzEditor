@@ -8,7 +8,7 @@ import { createCanvasWheelHandler, observeWheelPitchCarryRelease, syncCanvasWhee
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, hasCanvasSizeChanged, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -251,6 +251,9 @@ export default function EditorCanvas(props: Props) {
     const observer = new ResizeObserver(([entry]) => {
       const next = { width: Math.max(1, entry.contentRect.width), height: Math.max(1, entry.contentRect.height) };
       const previous = observedCanvasSizeRef.current;
+      // ResizeObserver can repeat a measurement without any layout change.
+      // Do not publish a new object and trigger another Canvas/App render.
+      if (!hasCanvasSizeChanged(previous, next)) return;
       observedCanvasSizeRef.current = next;
       // A resize changes the coordinate mapping while a drag retains its start position.
       // Cancel before publishing the new size so the drag cannot commit with mixed coordinates.
