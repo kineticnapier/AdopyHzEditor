@@ -51,7 +51,7 @@ export default function TopToolbar(p:Props){
         <button className={p.view.mode==="notes"?"selected":""} aria-pressed={p.view.mode==="notes"} onClick={()=>p.onMode("notes")}>Notes</button>
         <button className={p.view.mode==="both"?"selected":""} aria-pressed={p.view.mode==="both"} onClick={()=>p.onMode("both")}>Both</button>
       </div>
-      <output>{formatPlaybackTime(p.playback.time)} / {formatPlaybackTime(p.playback.duration)}</output>
+      <output aria-live="off" aria-label="再生位置と総再生時間">{formatPlaybackTime(p.playback.time)} / {formatPlaybackTime(p.playback.duration)}</output>
       {playbackStatus && <span className="playback-error" role="status" title={playbackStatus}>{playbackStatus}</span>}
       <button className="panel-toggle" aria-label={p.panelOpen?"右パネルを閉じる":"右パネルを開く"} aria-pressed={p.panelOpen} onClick={p.onTogglePanel}>Inspector</button>
     </div>
