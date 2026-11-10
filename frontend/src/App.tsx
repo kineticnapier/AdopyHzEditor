@@ -20,6 +20,7 @@ import { clampTimeViewChange } from "./editor/timelineNavigation";
 import { clampPitchViewChange, hasEffectiveViewChange } from "./editor/pitchViewport";
 import TopToolbar from "./components/TopToolbar";
 import { playbackToggleEnabled } from "./components/playbackStatusMessage";
+import { shouldFetchCqtSpectrum } from "./editor/cqtFetchPolicy";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
 import {
   DirectSpectrumRegionCache,
@@ -372,10 +373,7 @@ export default function App() {
           applyState(state);
           setApi(backend);
           setConnected(ping.ok);
-          if (
-            state.analysis.available &&
-            state.analysis.source !== "vorbis_direct"
-          )
+          if (shouldFetchCqtSpectrum(state.analysis.available, state.analysis.source, state.view.mode))
             await refreshSpectrum(backend, state.view);
           return;
         } catch (e) {
@@ -434,12 +432,7 @@ export default function App() {
     view.visibleNotes,
   ]);
   useEffect(() => {
-    if (
-      !api ||
-      !analysisAvailable ||
-      analysisSource === "vorbis_direct" ||
-      view.mode === "notes"
-    ) {
+    if (!api || !shouldFetchCqtSpectrum(analysisAvailable, analysisSource, view.mode)) {
       setSpectrum(null);
       return;
     }
@@ -818,7 +811,7 @@ export default function App() {
           if (clearSelection) setSelected([]);
         },
       );
-      if (state.analysis.available && state.analysis.source !== "vorbis_direct")
+      if (shouldFetchCqtSpectrum(state.analysis.available, state.analysis.source, state.view.mode))
         await refreshSpectrum(api, state.view);
       else setSpectrum(null);
       if (!state.analysis.available) {
