@@ -214,3 +214,25 @@ test("window shortcut handler suppresses held Play/Pause and Stop keys", () => {
   }
   assert.deepEqual(calls, ["play", "stop", "stop"]);
 });
+
+test("window handler consumes Escape repeats after a numeric input loses focus", () => {
+  const calls: string[] = [];
+  const current = {
+    api: {}, disabled: false,
+    clearTracks: () => calls.push("clearTracks"),
+    select: (indices: number[]) => calls.push("select:" + indices.join(",")),
+  } as unknown as ShortcutListenerState;
+  const handler = createEditorShortcutHandler(() => current);
+  // The focused number input handled the initial Escape and blurred itself.
+  // Repeated events now reach the window listener with a non-input target.
+  for (let i = 0; i < 2; i++) {
+    const held = Object.assign(keyEvent("Escape"), { repeat: true });
+    handler(held);
+    assert.equal(held.defaultPrevented, true);
+  }
+  assert.deepEqual(calls, []);
+  const fresh = keyEvent("Escape");
+  handler(fresh);
+  assert.equal(fresh.defaultPrevented, true);
+  assert.deepEqual(calls, ["clearTracks", "select:"]);
+});
