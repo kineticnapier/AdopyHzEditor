@@ -22,6 +22,18 @@ export function nextMenuId<T extends string>(
   return menuIds[(index + step + menuIds.length) % menuIds.length];
 }
 
+/** Preserve the keyboard focus origin when a pointer hovers another open menu.
+ * Hover alone must not move focus if the user is working elsewhere.
+ */
+export function menuHoverFocusOrigin(
+  activeMenu: string,
+  focused: Pick<Element, "closest"> | null,
+): "popup" | "trigger" | null {
+  if (focused?.closest(`[data-menu-popup="${activeMenu}"]`)) return "popup";
+  if (focused?.closest(`[data-menu-id="${activeMenu}"]`)) return "trigger";
+  return null;
+}
+
 /** Focus the first enabled item when moving between open popups with Left/Right.
  * From a menu-bar trigger, keep focus on the adjacent trigger instead.
  * Fall back to the trigger if the destination popup has no enabled items.
