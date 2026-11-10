@@ -115,3 +115,19 @@ export async function enqueueRecoverableViewTask<T>(
     if (isCurrent()) await recover(error);
   }
 }
+
+/** Keep slow periodic backend reads from superseding one another. */
+export function createSingleFlightPoll(task: () => Promise<unknown>): () => Promise<void> {
+  let pending = false;
+  return async () => {
+    if (pending) return;
+    pending = true;
+    try {
+      await task();
+    } catch {
+      // A failed read must not block later polls; the UI retains its last state.
+    } finally {
+      pending = false;
+    }
+  };
+}

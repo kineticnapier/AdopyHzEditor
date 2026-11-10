@@ -52,6 +52,7 @@ import {
 } from "./api/bridge";
 import {
   AsyncActionGuard,
+  createSingleFlightPoll,
   enqueueAppliedTask,
   enqueueRecoverableViewTask,
   enqueueStateTaskAfterSettings,
@@ -391,19 +392,18 @@ export default function App() {
   useEffect(() => {
     if (!api) return;
     let active = true;
+    // A slow bridge call must not be superseded by the next timer tick:
+    // otherwise every response can be discarded when latency exceeds 50 ms.
+    const pollPlayback = createSingleFlightPoll(async () => {
+      const generation = documentGeneration.current;
+      const request = playbackRequests.current.issue();
+      const next = await api.get_playback_state();
+      if (active && generation === documentGeneration.current &&
+          playbackRequests.current.isCurrent(request))
+        setPlayback(next);
+    });
     const id = window.setInterval(
-      () => {
-        const generation = documentGeneration.current;
-        const request = playbackRequests.current.issue();
-        void api
-          .get_playback_state()
-          .then((x) => {
-            if (active && generation === documentGeneration.current &&
-                playbackRequests.current.isCurrent(request))
-              setPlayback(x);
-          })
-          .catch(() => {});
-      },
+      () => { void pollPlayback(); },
       playback.playing ? 50 : 500,
     );
     return () => {
