@@ -195,3 +195,22 @@ test("repeated Delete and Backspace are consumed only on the editor surface", ()
   handler(disabledRepeat);
   assert.equal(disabledRepeat.defaultPrevented, false);
 });
+
+test("window shortcut handler suppresses held Play/Pause and Stop keys", () => {
+  const calls: string[] = [];
+  const current = {
+    api: {}, disabled: false,
+    play: () => calls.push("play"),
+    stop: () => calls.push("stop"),
+  } as unknown as ShortcutListenerState;
+  const handler = createEditorShortcutHandler(() => current);
+  for (const mods of [{}, { ctrlKey: true }, { metaKey: true }]) {
+    const first = Object.assign(keyEvent(" "), mods);
+    handler(first);
+    assert.equal(first.defaultPrevented, true);
+    const held = Object.assign(keyEvent(" "), mods, { repeat: true });
+    handler(held);
+    assert.equal(held.defaultPrevented, true);
+  }
+  assert.deepEqual(calls, ["play", "stop", "stop"]);
+});
