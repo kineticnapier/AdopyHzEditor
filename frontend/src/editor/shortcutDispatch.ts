@@ -66,6 +66,8 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (event.repeat && (
     (ctrl && !event.altKey && !event.shiftKey && ["x", "v", "d"].includes(key)) ||
     (ctrl && event.altKey && !event.shiftKey && key === "a") ||
+    // Holding Space must not queue repeated Play/Pause or Stop requests.
+    (key === " " && !event.altKey && !event.shiftKey) ||
     (unmodified && ["q", "delete", "backspace"].includes(key))
   )) {
     event.preventDefault();
