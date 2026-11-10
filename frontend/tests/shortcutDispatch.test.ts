@@ -352,3 +352,15 @@ test("held Space and Ctrl/Meta+Space never repeat transport requests", () => {
     assert.equal(press(" ", { ...mods, repeat: true }), false);
   }
 });
+
+test("held Escape after an input blur does not clear editor selections", () => {
+  const { calls, press } = setup();
+  // The first Escape is handled by a numeric field, which then loses focus.
+  // Later key-repeat events can target the page rather than that field.
+  assert.equal(press("Escape", { repeat: true }), true);
+  assert.equal(press("Escape", { repeat: true }), true);
+  assert.deepEqual(calls, []);
+  // A fresh key press on the editor must still clear both selection layers.
+  assert.equal(press("Escape"), true);
+  assert.deepEqual(calls, ["clearTracks", "select:"]);
+});
