@@ -121,6 +121,36 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                 writer.writeframes(samples)
             return output.getvalue()
 
+    def test_large_valid_kick_wav_is_checked_in_bounded_chunks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "large.wav"
+            path.write_bytes(self._wav_bytes(b"\\x01\\x02" * 40_000))
+            requested: list[int] = []
+            original_open = wave.open
+
+            def tracked_open(*args, **kwargs):
+                reader = original_open(*args, **kwargs)
+                original_readframes = reader.readframes
+
+                def tracked_readframes(count: int):
+                    requested.append(count)
+                    return original_readframes(count)
+
+                reader.readframes = tracked_readframes
+                return reader
+
+            with mock.patch.object(adofai_assets.wave, "open", side_effect=tracked_open):
+                self.assertTrue(adofai_assets._valid_kick_wav(path))
+            self.assertGreater(len(requested), 1)
+            self.assertLessEqual(max(requested), 16_384)
+            self.assertEqual(sum(requested), 40_000)
+
+    def test_large_kick_wav_truncated_after_first_chunk_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "truncated.wav"
+            path.write_bytes(self._wav_bytes(b"\\x01\\x02" * 40_000)[:-2])
+            self.assertFalse(adofai_assets._valid_kick_wav(path))
+
     def _make_game(self, root: Path) -> Path:
         game = root / "steamapps" / "common" / "A Dance of Fire and Ice"
         data = game / "A Dance of Fire and Ice_Data"
