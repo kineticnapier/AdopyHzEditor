@@ -361,7 +361,7 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
     def test_riff_header_claiming_bytes_beyond_eof_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sndKick.wav"
-            valid = self._wav_bytes(b"\\x01\\x02" * 50)
+            valid = self._wav_bytes(bytes([1, 2]) * 50)
             # wave.open() can still read every PCM frame despite this
             # impossible outer RIFF size.
             malformed = valid[:4] + (len(valid) + 100).to_bytes(4, "little") + valid[8:]
@@ -375,7 +375,7 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
                 kick = adofai_assets.adofai_kick_cache_path()
                 kick.parent.mkdir(parents=True)
-                old = self._wav_bytes(b"\\x01\\x02" * 50)
+                old = self._wav_bytes(bytes([1, 2]) * 50)
                 kick.write_bytes(old)
                 manifest = adofai_assets._cache_manifest_path()
                 manifest.write_text(json.dumps(adofai_assets._source_signature(game)), encoding="utf-8")
