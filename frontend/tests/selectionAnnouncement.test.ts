@@ -55,7 +55,41 @@ test("Track selection includes IDs so a same-count change is announced", () => {
 test("long selections keep the first and last selected items readable", () => {
   const manyNotes = Array.from({ length: 10 }, (_, index) => ({ start: index, end: index + 0.5, midi: 60 }));
   assert.equal(selectionStatusText(manyNotes, [0, 1, 2, 3, 8], [], null),
-    "ノートを5件選択中（1番目、2番目、3番目、…、9番目）");
+    "ノートを5件選択中（1番目〜4番目、9番目）");
+});
+
+test("changing a hidden middle member of a long Note selection changes the live text", () => {
+  const manyNotes = Array.from({ length: 10 }, (_, index) => ({ start: index, end: index + 0.5, midi: 60 }));
+  const before = selectionStatusText(manyNotes, [0, 1, 2, 3, 8], [], null);
+  const after = selectionStatusText(manyNotes, [0, 1, 2, 4, 8], [], null);
+  assert.equal(before, "ノートを5件選択中（1番目〜4番目、9番目）");
+  assert.equal(after, "ノートを5件選択中（1番目〜3番目、5番目、9番目）");
+  assert.notEqual(before, after);
+});
+
+test("keyboard focus does not hide changed middle members in long selections", () => {
+  const manyNotes = Array.from({ length: 10 }, (_, index) => ({ start: index, end: index + 0.5, midi: 60 }));
+  const before = selectionStatusText(manyNotes, [0, 1, 2, 3, 8], [], 8);
+  const after = selectionStatusText(manyNotes, [0, 1, 2, 4, 8], [], 8);
+  assert.notEqual(before, after);
+  assert.match(after, /1番目〜3番目、5番目、9番目/);
+});
+
+test("long Track selections announce middle changes and compress adjacent IDs", () => {
+  const before = selectionStatusText(notes, [], [12, 13, 14, 16, 20], null);
+  const after = selectionStatusText(notes, [], [12, 13, 14, 17, 20], null);
+  assert.equal(before, "Trackを5件選択中（ID 12〜ID 14、ID 16、ID 20）");
+  assert.equal(after, "Trackを5件選択中（ID 12〜ID 14、ID 17、ID 20）");
+  assert.notEqual(before, after);
+});
+
+test("large contiguous selections remain short and do not mutate the selection", () => {
+  const manyNotes = Array.from({ length: 1000 }, (_, index) => ({ start: index, end: index + 0.5, midi: 60 }));
+  const selected = Array.from({ length: 1000 }, (_, index) => index);
+  assert.equal(selectionStatusText(manyNotes, selected, [], null),
+    "ノートを1000件選択中（1番目〜1000番目）");
+  assert.equal(selected[0], 0);
+  assert.equal(selected.at(-1), 999);
 });
 
 test("clearing selection is announced and stale keyboard focus is ignored", () => {
