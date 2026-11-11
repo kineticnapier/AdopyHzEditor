@@ -34,13 +34,18 @@ export function selectionStatusText(
   trackIds: readonly number[],
   keyboardNote: number | null,
 ): string {
-  const validSelected = selected.filter(
+  // A selection is a set of valid IDs. Keep the spoken count consistent
+  // with the actual unique selection and with selectionChangeText().
+  const validSelected = [...new Set(selected.filter(
     index => Number.isSafeInteger(index) && index >= 0 && index < notes.length,
-  );
+  ))];
+  const validTracks = [...new Set(trackIds.filter(
+    id => Number.isSafeInteger(id) && id >= 0,
+  ))];
   // Inspector can select Tracks without clearing selected Notes. Announce both
   // layers so changing Tracks does not leave the aria-live text unchanged.
-  const trackSummary = trackIds.length
-    ? `、Trackを${trackIds.length}件選択中（${selectionLabels(trackIds, id => `ID ${id}`)}）`
+  const trackSummary = validTracks.length
+    ? `、Trackを${validTracks.length}件選択中（${selectionLabels(validTracks, id => `ID ${id}`)}）`
     : "";
   const describeNote = (index: number): string => {
     const note = notes[index];
@@ -59,8 +64,8 @@ export function selectionStatusText(
   if (validSelected.length === 1) return `${describeNote(validSelected[0])}、選択1件${trackSummary}`;
   if (validSelected.length)
     return `ノートを${validSelected.length}件選択中（${selectionLabels(validSelected, index => `${index + 1}番目`)}）${trackSummary}`;
-  if (trackIds.length)
-    return `Trackを${trackIds.length}件選択中（${selectionLabels(trackIds, id => `ID ${id}`)}）`;
+  if (validTracks.length)
+    return `Trackを${validTracks.length}件選択中（${selectionLabels(validTracks, id => `ID ${id}`)}）`;
   return "選択なし";
 }
 
