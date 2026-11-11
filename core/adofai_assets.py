@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import wave
 from pathlib import Path
 from typing import Iterable
 
@@ -172,10 +173,28 @@ def _source_signature(game_root: Path) -> dict[str, object]:
     return result
 
 
+def _valid_kick_wav(path: Path) -> bool:
+    """Reject missing, truncated or non-PCM WAVs before caching them."""
+    try:
+        file_size = path.stat().st_size
+        if file_size <= 44:
+            return False
+        with wave.open(str(path), "rb") as reader:
+            frames = reader.getnframes()
+            expected_bytes = frames * reader.getnchannels() * reader.getsampwidth()
+            if (frames <= 0 or reader.getframerate() <= 0 or
+                    reader.getnchannels() <= 0 or reader.getsampwidth() <= 0 or
+                    expected_bytes > file_size):
+                return False
+            return len(reader.readframes(frames)) == expected_bytes
+    except (OSError, EOFError, ValueError, wave.Error):
+        return False
+
+
 def _cached_signature_matches(game_root: Path) -> bool:
     kick = adofai_kick_cache_path()
     manifest = _cache_manifest_path()
-    if not kick.is_file() or kick.stat().st_size <= 44 or not manifest.is_file():
+    if not manifest.is_file() or not _valid_kick_wav(kick):
         return False
     try:
         saved = json.loads(manifest.read_text(encoding="utf-8"))
@@ -268,7 +287,7 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
         staged = Path(temporary.name)
     try:
         _run_extractor(game_root, staged)
-        if not staged.is_file() or staged.stat().st_size <= 44:
+        if not _valid_kick_wav(staged):
             raise RuntimeError("ADOFAI Kick extractor finished without a valid sndKick.wav.")
         staged.replace(kick)
     finally:
