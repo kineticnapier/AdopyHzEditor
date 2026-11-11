@@ -37,6 +37,11 @@ export function selectionStatusText(
   const validSelected = selected.filter(
     index => Number.isSafeInteger(index) && index >= 0 && index < notes.length,
   );
+  // Inspector can select Tracks without clearing selected Notes. Announce both
+  // layers so changing Tracks does not leave the aria-live text unchanged.
+  const trackSummary = trackIds.length
+    ? `、Trackを${trackIds.length}件選択中（${selectionLabels(trackIds, id => `ID ${id}`)}）`
+    : "";
   const describeNote = (index: number): string => {
     const note = notes[index];
     return `${index + 1}番目の${(note.kind ?? "note") === "curve" ? "カーブノート" : "ノート"}、開始${note.start.toFixed(3)}秒、${midiLabel(note.midi)}`;
@@ -47,13 +52,13 @@ export function selectionStatusText(
     const members = validSelected.length > 1
       ? `（${selectionLabels(validSelected, index => `${index + 1}番目`)}）`
       : "";
-    return `${describeNote(keyboardNote)}、選択${validSelected.length}件${members}`;
+    return `${describeNote(keyboardNote)}、選択${validSelected.length}件${members}${trackSummary}`;
   }
   // Count-only text stays identical when a different note/track is selected.
   // A live region needs a changed description to announce that transition.
-  if (validSelected.length === 1) return `${describeNote(validSelected[0])}、選択1件`;
+  if (validSelected.length === 1) return `${describeNote(validSelected[0])}、選択1件${trackSummary}`;
   if (validSelected.length)
-    return `ノートを${validSelected.length}件選択中（${selectionLabels(validSelected, index => `${index + 1}番目`)}）`;
+    return `ノートを${validSelected.length}件選択中（${selectionLabels(validSelected, index => `${index + 1}番目`)}）${trackSummary}`;
   if (trackIds.length)
     return `Trackを${trackIds.length}件選択中（${selectionLabels(trackIds, id => `ID ${id}`)}）`;
   return "選択なし";
