@@ -164,5 +164,46 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                 extractor.assert_not_called()
 
 
+    def test_frozen_build_prefers_bundled_extractor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "AdopyHzEditor.exe"
+            expected = exe.parent / "AssetExtractor" / adofai_assets._EXTRACTOR_NAME
+            with (
+                mock.patch.object(adofai_assets.sys, "frozen", True, create=True),
+                mock.patch.object(adofai_assets.sys, "executable", str(exe)),
+            ):
+                self.assertEqual(adofai_assets._extractor_candidates()[0], expected)
+
+    def test_frozen_build_runs_bundled_extractor_without_dotnet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "AdopyHzEditor.exe"
+            bundled = exe.parent / "AssetExtractor" / adofai_assets._EXTRACTOR_NAME
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(b"test executable placeholder")
+            game_root = Path(tmp) / "game"
+            output = Path(tmp) / "sndKick.wav"
+
+            with (
+                mock.patch.object(adofai_assets.sys, "frozen", True, create=True),
+                mock.patch.object(adofai_assets.sys, "executable", str(exe)),
+                mock.patch.object(adofai_assets.shutil, "which", return_value=None) as which,
+                mock.patch.object(
+                    adofai_assets.subprocess,
+                    "run",
+                    return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+                ) as run,
+            ):
+                adofai_assets._run_extractor(game_root, output)
+
+            which.assert_not_called()
+            run.assert_called_once()
+            self.assertEqual(
+                run.call_args.args[0],
+                [str(bundled), "--adofai", str(game_root), "--output", str(output)],
+            )
+            self.assertEqual(run.call_args.kwargs["timeout"], 600)
+            self.assertFalse(run.call_args.kwargs["check"])
+
+
 if __name__ == "__main__":
     unittest.main()
