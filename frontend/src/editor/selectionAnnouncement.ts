@@ -1,12 +1,25 @@
 import type { NoteDto } from "./bridge.ts";
 import { midiLabel } from "./musicMath.ts";
 
-/** Keep long selections readable without hiding the active end of a range. */
+/** Describe every selected member, compressing adjacent IDs into ranges. */
 function selectionLabels(ids: readonly number[], label: (id: number) => string): string {
-  const shown = ids.length <= 4 ? ids : [...ids.slice(0, 3), ids[ids.length - 1]];
-  const labels = shown.map(label);
-  if (ids.length > 4) labels.splice(3, 0, "…");
-  return labels.join("、");
+  const sorted = [...ids].sort((a, b) => a - b);
+  if (sorted.length <= 4) return sorted.map(label).join("、");
+
+  // Keep every member identifiable, while compressing contiguous selections.
+  // Omitting the middle caused different selections to have identical aria-live text.
+  const ranges: string[] = [];
+  let first = sorted[0], last = first;
+  for (const id of sorted.slice(1)) {
+    if (id === last + 1) {
+      last = id;
+      continue;
+    }
+    ranges.push(first === last ? label(first) : `${label(first)}〜${label(last)}`);
+    first = last = id;
+  }
+  ranges.push(first === last ? label(first) : `${label(first)}〜${label(last)}`);
+  return ranges.join("、");
 }
 
 /** Announce mouse, Inspector and keyboard selection changes to screen readers. */
