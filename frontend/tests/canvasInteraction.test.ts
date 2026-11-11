@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, hasCanvasSizeChanged, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
+import { canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, canStartCanvasGesture, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, hasCanvasSizeChanged, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, shouldCancelCanvasGestureForGeneration, observeCanvasPageExit, createTrailingReporter } from "../src/editor/canvasInteraction.ts";
 
 test("Escape cancels a live canvas gesture without clearing the note selection", () => {
   assert.equal(canvasEscapeAction(true), "cancel-drag");
@@ -436,6 +436,37 @@ test("wheel input cannot move the viewport while a canvas pointer gesture is act
   assert.ok(canvas.includes("createCanvasWheelHandler({"));
   assert.ok(canvas.includes("activePointerId: activePointerIdRef"));
 });
+test("document generation cancels a captured gesture even when view and notes are unchanged", () => {
+  const notes: unknown[] = [];
+  const view = { start: 0, windowSeconds: 10, pitchBottom: 48, visibleNotes: 48, mode: "notes" };
+  assert.equal(shouldCancelCanvasGestureForNotesChange(7, notes, notes), false);
+  assert.equal(shouldCancelCanvasGestureForViewChange(7, view, view), false);
+  assert.equal(shouldCancelCanvasGestureForGeneration(7, 1, 2), true);
+  assert.equal(shouldCancelCanvasGestureForGeneration(7, 2, 2), false);
+  assert.equal(shouldCancelCanvasGestureForGeneration(null, 1, 2), false);
+});
+
+test("canvas document transition clears keyboard and pointer state before a stale pointer-up", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const wheelGenerationRef = useRef(props.documentGeneration);");
+  const end = source.indexOf("useEffect(() => observeWheelPitchCarryRelease(", start);
+  assert.ok(start >= 0 && end > start);
+  const effect = source.slice(start, end);
+  const reset = effect.indexOf("syncCanvasWheelDocument(");
+  const boundary = effect.indexOf("if (previousGeneration === props.documentGeneration) return;");
+  const keyboard = effect.indexOf("keyboardAnchorRef.current = null;");
+  const reporter = effect.indexOf("cursorReporterRef.current.cancel();");
+  const hover = effect.indexOf("trackHoverRef.current?.(null);");
+  const guard = effect.indexOf("shouldCancelCanvasGestureForGeneration(");
+  const ownership = effect.indexOf("activePointerIdRef.current = null;");
+  const release = effect.indexOf("releaseCanvasPointerCapture(");
+  const cancel = effect.indexOf("setDrag(null);");
+  assert.ok(reset >= 0 && boundary > reset && keyboard > boundary && reporter > keyboard && hover > reporter);
+  assert.ok(guard > hover && ownership > guard && release > ownership && cancel > release);
+  assert.match(effect, /keyboardSelectionRef\\.current = null;/);
+  assert.match(effect, /setKeyboardNote\\(null\\);/);
+});
+
 test("window blur and page hiding cancel a canvas gesture, with cleanup", () => {
   const windowTarget = new EventTarget();
   const documentTarget = Object.assign(new EventTarget(), { visibilityState: "visible" });
