@@ -12,7 +12,21 @@ const notes: NoteDto[] = [
 
 test("keyboard selection keeps detailed Note announcement", () => {
   assert.equal(selectionStatusText(notes, [0, 1], [], 1),
-    "2番目のカーブノート、開始2.500秒、E4、選択2件");
+    "2番目のカーブノート、開始2.500秒、E4、選択2件（1番目、2番目）");
+});
+
+test("keyboard focus keeps identifying changed members of an equal-size multi-selection", () => {
+  const extended = [...notes, { start: 4, end: 4.5, midi: 69 }];
+  const before = selectionStatusText(extended, [0, 1, 3], [], 3);
+  const after = selectionStatusText(extended, [0, 2, 3], [], 3);
+  assert.match(before, /1番目、2番目、4番目/);
+  assert.match(after, /1番目、3番目、4番目/);
+  assert.notEqual(before, after);
+});
+
+test("single keyboard-selected Note still uses the concise detail", () => {
+  assert.equal(selectionStatusText(notes, [1], [], 1),
+    "2番目のカーブノート、開始2.500秒、E4、選択1件");
 });
 
 test("mouse or Inspector selection identifies the selected Note", () => {
