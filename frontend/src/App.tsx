@@ -1381,6 +1381,7 @@ export default function App() {
         <section className="editor">
           <div className="editor-stage">
             <EditorCanvas
+              documentGeneration={documentGeneration.current}
               notes={notes}
               selected={selected}
               settings={settings}
