@@ -118,6 +118,24 @@ test("clearing selection is announced and stale keyboard focus is ignored", () =
   assert.equal(selectionStatusText(notes, [999], [], 999), "選択なし");
 });
 
+test("Inspector Track changes are announced even while a Note remains selected", () => {
+  const first = selectionStatusText(notes, [0], [12], null);
+  const second = selectionStatusText(notes, [0], [13], null);
+  assert.equal(first, "1番目のノート、開始1.250秒、C4、選択1件、Trackを1件選択中（ID 12）");
+  assert.equal(second, "1番目のノート、開始1.250秒、C4、選択1件、Trackを1件選択中（ID 13）");
+  assert.notEqual(first, second);
+});
+
+test("keyboard-focused multi-Note selection also reports the selected Tracks", () => {
+  assert.equal(selectionStatusText(notes, [0, 1], [12, 13], 1),
+    "2番目のカーブノート、開始2.500秒、E4、選択2件（1番目、2番目）、Trackを2件選択中（ID 12、ID 13）");
+});
+
+test("multiple mouse-selected Notes do not hide Track selection", () => {
+  const text = selectionStatusText(notes, [0, 2], [7], null);
+  assert.equal(text, "ノートを2件選択中（1番目、3番目）、Trackを1件選択中（ID 7）");
+});
+
 test("Canvas memoizes selection announcements across playback-only renders", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   assert.match(source, /const selectionAnnouncement = useMemo\(\s*\(\) => selectionStatusText\(props\.notes, props\.selected, props\.trackSelection\.ids, keyboardNote\),/);
