@@ -1,12 +1,12 @@
 import type { NoteDto } from "./bridge.ts";
 import { midiLabel } from "./musicMath.ts";
 
-/** Describe every selected member, compressing adjacent IDs into ranges. */
+/** Describe selected members compactly, preserving full detail for up to 16 ranges. */
 function selectionLabels(ids: readonly number[], label: (id: number) => string): string {
   const sorted = [...ids].sort((a, b) => a - b);
   if (sorted.length <= 4) return sorted.map(label).join("、");
 
-  // Keep every member identifiable, while compressing contiguous selections.
+  // Keep ordinary selections identifiable while compressing contiguous IDs.
   // Omitting the middle caused different selections to have identical aria-live text.
   const ranges: string[] = [];
   let first = sorted[0], last = first;
@@ -19,6 +19,11 @@ function selectionLabels(ids: readonly number[], label: (id: number) => string):
     first = last = id;
   }
   ranges.push(first === last ? label(first) : `${label(first)}〜${label(last)}`);
+  // Avoid reading thousands of sparse IDs aloud. A very fragmented selection
+  // still uses a short preview; those rare middle-only changes need a
+  // change-aware live announcement in a future UI pass.
+  if (ranges.length > 16)
+    return `${ranges.slice(0, 3).join("、")}、…、${ranges[ranges.length - 1]}`;
   return ranges.join("、");
 }
 
