@@ -196,3 +196,10 @@ test("mixed selection announcement excludes invalid and duplicate Track IDs", ()
   assert.equal(selectionStatusText(notes, [0], [7, 7, -3, Infinity], null),
     "1番目のノート、開始1.250秒、C4、選択1件、Trackを1件選択中（ID 7）");
 });
+
+test("Canvas never compares hidden selection changes across editor generations", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /previous && previous\.generation === props\.documentGeneration/);
+  assert.match(source, /generation: props\.documentGeneration/);
+  assert.match(source, /Different editor states must not report changes between unrelated selections/);
+});
