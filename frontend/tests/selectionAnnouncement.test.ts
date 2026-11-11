@@ -179,3 +179,20 @@ test("Canvas has a separate live region only for changes hidden by the bounded p
   assert.match(source, /oldStatus === newStatus \? difference : ""/);
   assert.match(source, /id="editor-selection-change"[^>]*aria-live="polite"[^>]*>\{selectionChangeAnnouncement\}<\/span>/);
 });
+
+
+test("duplicate or invalid Track IDs do not inflate spoken selection counts", () => {
+  assert.equal(selectionStatusText(notes, [], [12, 12, -1, NaN, Infinity, 13.5], null),
+    "Trackを1件選択中（ID 12）");
+  assert.equal(selectionStatusText(notes, [], [-1, NaN, Infinity, 1.5], null), "選択なし");
+});
+
+test("duplicate Note indices count as one selected Note", () => {
+  assert.equal(selectionStatusText(notes, [0, 0, -1, 999, 1.5], [], null),
+    "1番目のノート、開始1.250秒、C4、選択1件");
+});
+
+test("mixed selection announcement excludes invalid and duplicate Track IDs", () => {
+  assert.equal(selectionStatusText(notes, [0], [7, 7, -3, Infinity], null),
+    "1番目のノート、開始1.250秒、C4、選択1件、Trackを1件選択中（ID 7）");
+});
