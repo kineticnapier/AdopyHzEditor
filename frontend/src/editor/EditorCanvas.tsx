@@ -9,7 +9,7 @@ import { createCanvasWheelHandler, observeWheelPitchCarryRelease, syncCanvasWhee
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
-import { canStartCanvasGesture, canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, hasCanvasSizeChanged, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
+import { canStartCanvasGesture, canvasEscapeAction, shouldHandleCanvasEscape, shouldIgnoreRepeatedCanvasEscape, clearIdleCanvasSelection, isCanvasGesturePointer, releaseCanvasPointerCapture, shouldSuppressCanvasArrowDuringPointerGesture, shouldSuppressCanvasNonArrowKeyDuringPointerGesture, hasCanvasSizeChanged, shouldCancelCanvasGestureForResize, shouldCancelCanvasGestureForViewChange, shouldCancelCanvasGestureForNotesChange, shouldCancelCanvasGestureForGeneration, observeCanvasPageExit, createTrailingReporter } from "./canvasInteraction";
 
 export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duration:number;magnitude:number};
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
@@ -187,7 +187,21 @@ export default function EditorCanvas(props: Props) {
   const wheelDurationRef = useRef(props.playback.duration);
   const wheelGenerationRef = useRef(props.documentGeneration);
   useLayoutEffect(() => {
+    const previousGeneration = wheelGenerationRef.current;
     syncCanvasWheelDocument(wheelGenerationRef, wheelPitchAccumulatorRef, props.documentGeneration);
+    if (previousGeneration === props.documentGeneration) return;
+    // A document can be replaced without changing the viewport or even the
+    // notes array identity. Never commit a drag or keyboard range from it.
+    keyboardSelectionRef.current = null;
+    keyboardAnchorRef.current = null;
+    setKeyboardNote(null);
+    cursorReporterRef.current.cancel();
+    trackHoverRef.current?.(null);
+    if (!shouldCancelCanvasGestureForGeneration(activePointerIdRef.current, previousGeneration, props.documentGeneration)) return;
+    const pointerId = activePointerIdRef.current;
+    activePointerIdRef.current = null;
+    if (canvasRef.current) releaseCanvasPointerCapture(canvasRef.current, pointerId);
+    setDrag(null);
   }, [props.documentGeneration]);
   useEffect(() => observeWheelPitchCarryRelease(window, wheelPitchAccumulatorRef, document), []);
   useLayoutEffect(() => {
