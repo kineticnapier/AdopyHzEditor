@@ -1163,6 +1163,12 @@ export default function App() {
       /* Cursor diagnostics must not interrupt editing. */
     }
   }
+  // A newer Note selection must supersede any pending asynchronous Track range.
+  // Otherwise a slow range lookup can erase a later Ctrl+A or canvas selection.
+  function changeNoteSelection(indices: number[]) {
+    trackSelectionRequests.current.invalidate();
+    setSelected(indices);
+  }
   function changeTrackSelection(selection: TrackSelectionState) {
     // Inspector edits must supersede an in-flight canvas range lookup too.
     trackSelectionRequests.current.invalidate();
@@ -1296,7 +1302,7 @@ export default function App() {
     redo: () => void redo(),
     duplicate: () => void duplicate(),
     quantize: () => void quantize(),
-    select: setSelected,
+    select: changeNoteSelection,
     clearTracks: () => changeTrackSelection({ ids: [], range: null, useRange: false }),
     copy: () => void copySelected(),
     cut: () => void cutSelected(),
@@ -1392,7 +1398,7 @@ export default function App() {
               frequencyTracks={visibleFrequencyTracks}
               trackSelection={trackSelection}
               onViewportSize={setViewportSize}
-              onSelect={setSelected}
+              onSelect={changeNoteSelection}
               onAdd={addNote}
               onMove={moveNotes}
               onDuplicateMove={duplicateMove}
