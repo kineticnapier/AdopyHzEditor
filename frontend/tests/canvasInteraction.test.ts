@@ -463,8 +463,8 @@ test("canvas document transition clears keyboard and pointer state before a stal
   const cancel = effect.indexOf("setDrag(null);");
   assert.ok(reset >= 0 && boundary > reset && keyboard > boundary && reporter > keyboard && hover > reporter);
   assert.ok(guard > hover && ownership > guard && release > ownership && cancel > release);
-  assert.match(effect, /keyboardSelectionRef\\.current = null;/);
-  assert.match(effect, /setKeyboardNote\\(null\\);/);
+  assert.ok(effect.includes("keyboardSelectionRef.current = null;"));
+  assert.ok(effect.includes("setKeyboardNote(null);"));
 });
 
 test("window blur and page hiding cancel a canvas gesture, with cleanup", () => {
