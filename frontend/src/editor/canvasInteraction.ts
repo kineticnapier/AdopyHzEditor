@@ -107,6 +107,16 @@ export function shouldCancelCanvasGestureForNotesChange(
   return activePointerId !== null && previous !== next;
 }
 
+/** A document replacement invalidates a held gesture even when view and notes
+ * happen to retain the same values or array identity. */
+export function shouldCancelCanvasGestureForGeneration(
+  activePointerId: number | null,
+  previousGeneration: number,
+  nextGeneration: number,
+): boolean {
+  return activePointerId !== null && previousGeneration !== nextGeneration;
+}
+
 /** Ignore duplicate ResizeObserver measurements before publishing React state. */
 export function hasCanvasSizeChanged(
   previous: { width: number; height: number },
