@@ -92,6 +92,25 @@ test("large contiguous selections remain short and do not mutate the selection",
   assert.equal(selected.at(-1), 999);
 });
 
+test("sixteen sparse ranges remain fully identifiable", () => {
+  const manyNotes = Array.from({ length: 32 }, (_, index) => ({ start: index, end: index + 0.5, midi: 60 }));
+  const selected = Array.from({ length: 16 }, (_, index) => index * 2);
+  const before = selectionStatusText(manyNotes, selected, [], null);
+  const changed = [...selected];
+  changed[8] += 1;
+  const after = selectionStatusText(manyNotes, changed, [], null);
+  assert.notEqual(before, after);
+  assert.match(after, /18番目/);
+});
+
+test("very fragmented selections keep aria-live announcements bounded", () => {
+  const manyNotes = Array.from({ length: 2000 }, (_, index) => ({ start: index, end: index + 0.5, midi: 60 }));
+  const selected = Array.from({ length: 1000 }, (_, index) => index * 2);
+  const message = selectionStatusText(manyNotes, selected, [], null);
+  assert.equal(message, "ノートを1000件選択中（1番目、3番目、5番目、…、1999番目）");
+  assert.ok(message.length < 100);
+});
+
 test("clearing selection is announced and stale keyboard focus is ignored", () => {
   assert.equal(selectionStatusText(notes, [], [], null), "選択なし");
   assert.equal(selectionStatusText(notes, [0], [], 1),
