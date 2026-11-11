@@ -187,7 +187,7 @@ def _valid_kick_wav(path: Path) -> bool:
                     expected_bytes > file_size):
                 return False
             return len(reader.readframes(frames)) == expected_bytes
-    except (OSError, EOFError, ValueError, wave.Error):
+    except (OSError, EOFError, ValueError, RuntimeError, wave.Error):
         return False
 
 
