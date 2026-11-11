@@ -179,23 +179,32 @@ def _valid_kick_wav(path: Path) -> bool:
         file_size = path.stat().st_size
         if file_size <= 44:
             return False
-        with wave.open(str(path), "rb") as reader:
-            frames = reader.getnframes()
-            expected_bytes = frames * reader.getnchannels() * reader.getsampwidth()
-            if (frames <= 0 or reader.getframerate() <= 0 or
-                    reader.getnchannels() <= 0 or reader.getsampwidth() <= 0 or
-                    expected_bytes > file_size):
+        with path.open("rb") as source:
+            header = source.read(12)
+            # wave.open() accepts a RIFF header claiming more bytes than the
+            # file contains when the PCM data chunk itself is complete.
+            if (len(header) != 12 or header[:4] != b"RIFF" or
+                    header[8:12] != b"WAVE" or
+                    int.from_bytes(header[4:8], "little") > file_size - 8):
                 return False
-            # Read in bounded blocks: a valid large WAV must not be loaded
-            # into memory in full on every cache lookup.
-            frame_bytes = reader.getnchannels() * reader.getsampwidth()
-            remaining = frames
-            while remaining:
-                chunk_frames = min(remaining, 16_384)
-                if len(reader.readframes(chunk_frames)) != chunk_frames * frame_bytes:
+            source.seek(0)
+            with wave.open(source, "rb") as reader:
+                frames = reader.getnframes()
+                expected_bytes = frames * reader.getnchannels() * reader.getsampwidth()
+                if (frames <= 0 or reader.getframerate() <= 0 or
+                        reader.getnchannels() <= 0 or reader.getsampwidth() <= 0 or
+                        expected_bytes > file_size):
                     return False
-                remaining -= chunk_frames
-            return True
+                # Read in bounded blocks: a valid large WAV must not be loaded
+                # into memory in full on every cache lookup.
+                frame_bytes = reader.getnchannels() * reader.getsampwidth()
+                remaining = frames
+                while remaining:
+                    chunk_frames = min(remaining, 16_384)
+                    if len(reader.readframes(chunk_frames)) != chunk_frames * frame_bytes:
+                        return False
+                    remaining -= chunk_frames
+                return True
     except (OSError, EOFError, ValueError, RuntimeError, wave.Error):
         return False
 
