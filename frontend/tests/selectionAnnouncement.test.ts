@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { selectionStatusText } from "../src/editor/selectionAnnouncement.ts";
+import { selectionChangeText, selectionStatusText } from "../src/editor/selectionAnnouncement.ts";
 import type { NoteDto } from "../src/editor/bridge.ts";
 
 const notes: NoteDto[] = [
@@ -145,4 +145,37 @@ test("Canvas memoizes selection announcements across playback-only renders", () 
 test("Canvas renders the memoized selection status in its live region", () => {
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   assert.match(source, /aria-live="polite">\{selectionAnnouncement\}<\/span>/);
+});
+
+test("17 sparse Note ranges announce a changed hidden middle member", () => {
+  const manyNotes = Array.from({ length: 50 }, (_, index) => ({ start: index, end: index + 0.5, midi: 60 }));
+  const before = Array.from({ length: 17 }, (_, index) => index * 3);
+  const after = [...before];
+  after[8] = 25;
+  assert.equal(selectionStatusText(manyNotes, before, [], null), selectionStatusText(manyNotes, after, [], null));
+  assert.equal(selectionChangeText(before, after, [], [], manyNotes.length),
+    "選択変更：ノート追加 26番目、ノート解除 25番目");
+});
+
+test("17 sparse Track ranges announce a changed hidden middle ID", () => {
+  const before = Array.from({ length: 17 }, (_, index) => 100 + index * 3);
+  const after = [...before];
+  after[8] = 125;
+  assert.equal(selectionStatusText(notes, [], before, null), selectionStatusText(notes, [], after, null));
+  assert.equal(selectionChangeText([], [], before, after, notes.length),
+    "選択変更：Track追加 ID 125、Track解除 ID 124");
+});
+
+test("selection difference ignores invalid Notes and unchanged members", () => {
+  assert.equal(selectionChangeText([0, 1], [1, 0], [7], [7], notes.length), "");
+  assert.equal(selectionChangeText([0, 999], [0], [], [], notes.length), "");
+  assert.equal(selectionChangeText([0], [2], [], [], notes.length),
+    "選択変更：ノート追加 3番目、ノート解除 1番目");
+});
+
+test("Canvas has a separate live region only for changes hidden by the bounded preview", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /const difference = selectionChangeText\(/);
+  assert.match(source, /oldStatus === newStatus \? difference : ""/);
+  assert.match(source, /id="editor-selection-change"[^>]*aria-live="polite"[^>]*>\{selectionChangeAnnouncement\}<\/span>/);
 });

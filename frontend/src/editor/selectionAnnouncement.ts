@@ -63,3 +63,37 @@ export function selectionStatusText(
     return `Trackを${trackIds.length}件選択中（${selectionLabels(trackIds, id => `ID ${id}`)}）`;
   return "選択なし";
 }
+
+/**
+ * Explain a selection change when the bounded status preview cannot show it.
+ * Report the actual added/removed members instead of a meaningless checksum.
+ */
+export function selectionChangeText(
+  previousNotes: readonly number[],
+  currentNotes: readonly number[],
+  previousTracks: readonly number[],
+  currentTracks: readonly number[],
+  noteCount: number,
+): string {
+  const validNotes = (ids: readonly number[]) => new Set(
+    ids.filter(id => Number.isSafeInteger(id) && id >= 0 && id < noteCount),
+  );
+  const validTracks = (ids: readonly number[]) => new Set(
+    ids.filter(id => Number.isSafeInteger(id) && id >= 0),
+  );
+  const parts: string[] = [];
+  const describeChanges = (
+    previous: Set<number>,
+    current: Set<number>,
+    name: string,
+    label: (id: number) => string,
+  ) => {
+    const added = [...current].filter(id => !previous.has(id));
+    const removed = [...previous].filter(id => !current.has(id));
+    if (added.length) parts.push(`${name}追加 ${selectionLabels(added, label)}`);
+    if (removed.length) parts.push(`${name}解除 ${selectionLabels(removed, label)}`);
+  };
+  describeChanges(validNotes(previousNotes), validNotes(currentNotes), "ノート", id => `${id + 1}番目`);
+  describeChanges(validTracks(previousTracks), validTracks(currentTracks), "Track", id => `ID ${id}`);
+  return parts.length ? `選択変更：${parts.join("、")}` : "";
+}
