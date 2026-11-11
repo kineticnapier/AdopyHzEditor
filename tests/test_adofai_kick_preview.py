@@ -124,7 +124,7 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
     def test_large_valid_kick_wav_is_checked_in_bounded_chunks(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "large.wav"
-            path.write_bytes(self._wav_bytes(b"\\x01\\x02" * 40_000))
+            path.write_bytes(self._wav_bytes(b"AB" * 40_000))
             requested: list[int] = []
             original_open = wave.open
 
@@ -148,7 +148,7 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
     def test_large_kick_wav_truncated_after_first_chunk_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "truncated.wav"
-            path.write_bytes(self._wav_bytes(b"\\x01\\x02" * 40_000)[:-2])
+            path.write_bytes(self._wav_bytes(b"AB" * 40_000)[:-2])
             self.assertFalse(adofai_assets._valid_kick_wav(path))
 
     def _make_game(self, root: Path) -> Path:
