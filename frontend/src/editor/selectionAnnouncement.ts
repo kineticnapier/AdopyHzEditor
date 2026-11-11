@@ -23,8 +23,14 @@ export function selectionStatusText(
     const note = notes[index];
     return `${index + 1}番目の${(note.kind ?? "note") === "curve" ? "カーブノート" : "ノート"}、開始${note.start.toFixed(3)}秒、${midiLabel(note.midi)}`;
   };
-  if (keyboardNote !== null && validSelected.includes(keyboardNote))
-    return `${describeNote(keyboardNote)}、選択${validSelected.length}件`;
+  if (keyboardNote !== null && validSelected.includes(keyboardNote)) {
+    // The active keyboard note can remain unchanged while other selected notes change.
+    // Include the members so an aria-live region receives different text.
+    const members = validSelected.length > 1
+      ? `（${selectionLabels(validSelected, index => `${index + 1}番目`)}）`
+      : "";
+    return `${describeNote(keyboardNote)}、選択${validSelected.length}件${members}`;
+  }
   // Count-only text stays identical when a different note/track is selected.
   // A live region needs a changed description to announce that transition.
   if (validSelected.length === 1) return `${describeNote(validSelected[0])}、選択1件`;
