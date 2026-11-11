@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { ViewState } from "../src/editor/bridge.ts";
-import { createCanvasWheelHandler, syncCanvasWheelView } from "../src/editor/canvasWheelHandler.ts";
+import { createCanvasWheelHandler, syncCanvasWheelDocument, syncCanvasWheelView } from "../src/editor/canvasWheelHandler.ts";
 import type { WheelPitchAccumulator } from "../src/editor/wheelNavigation.ts";
 
 const initial: ViewState = {
@@ -89,4 +90,24 @@ test("playback-follow time changes and wheel echoes preserve the current pitch g
   assert.deepEqual(s.pitchAccumulator.current, { modifier: "shift", remainder: -.5 });
   syncCanvasWheelView(s.view, s.pitchAccumulator, { ...s.view.current, mode: "notes" });
   assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
+});
+
+test("changing editor generation clears fractional pitch-wheel carry", () => {
+  const s = setup();
+  const generation = { current: 4 };
+  s.pitchAccumulator.current = { modifier: "shift", remainder: .75 };
+  syncCanvasWheelDocument(generation, s.pitchAccumulator, 4);
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: "shift", remainder: .75 });
+  syncCanvasWheelDocument(generation, s.pitchAccumulator, 5);
+  assert.equal(generation.current, 5);
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
+  s.handler(s.event(20, { shiftKey: true }));
+  assert.equal(s.first.length, 0, "old fractional carry must not move the new document");
+});
+
+test("App passes its generation to the canvas wheel reset", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const canvas = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(app, /<EditorCanvas\s+documentGeneration=\{documentGeneration\.current\}/);
+  assert.match(canvas, /syncCanvasWheelDocument\(wheelGenerationRef, wheelPitchAccumulatorRef, props\.documentGeneration\)/);
 });
