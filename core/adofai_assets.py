@@ -186,7 +186,16 @@ def _valid_kick_wav(path: Path) -> bool:
                     reader.getnchannels() <= 0 or reader.getsampwidth() <= 0 or
                     expected_bytes > file_size):
                 return False
-            return len(reader.readframes(frames)) == expected_bytes
+            # Read in bounded blocks: a valid large WAV must not be loaded
+            # into memory in full on every cache lookup.
+            frame_bytes = reader.getnchannels() * reader.getsampwidth()
+            remaining = frames
+            while remaining:
+                chunk_frames = min(remaining, 16_384)
+                if len(reader.readframes(chunk_frames)) != chunk_frames * frame_bytes:
+                    return False
+                remaining -= chunk_frames
+            return True
     except (OSError, EOFError, ValueError, RuntimeError, wave.Error):
         return False
 
