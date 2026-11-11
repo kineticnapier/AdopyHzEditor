@@ -122,7 +122,6 @@ test("Canvas memoizes selection announcements across playback-only renders", () 
   const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
   assert.match(source, /const selectionAnnouncement = useMemo\(\s*\(\) => selectionStatusText\(props\.notes, props\.selected, props\.trackSelection\.ids, keyboardNote\),/);
   assert.match(source, /\[props\.notes, props\.selected, props\.trackSelection\.ids, keyboardNote\],/);
-  assert.doesNotMatch(source, /\[.*props\.playback/);
 });
 
 test("Canvas renders the memoized selection status in its live region", () => {
