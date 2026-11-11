@@ -56,6 +56,17 @@ export function syncCanvasWheelView(
   view.current = next;
 }
 
+/** Reset fractional wheel movement when the editor loads a new state generation. */
+export function syncCanvasWheelDocument(
+  generation: { current: number },
+  carry: { current: WheelPitchAccumulator },
+  nextGeneration: number,
+): void {
+  if (generation.current !== nextGeneration)
+    carry.current = { modifier: null, remainder: 0 };
+  generation.current = nextGeneration;
+}
+
 /**
  * Pitch-wheel fractions belong to one held-modifier gesture. Releasing the
  * modifier (or leaving the window) must not carry sub-MIDI steps into a later
