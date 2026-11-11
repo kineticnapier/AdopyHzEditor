@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -259,10 +260,19 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
 
     kick = adofai_kick_cache_path()
     kick.parent.mkdir(parents=True, exist_ok=True)
-    _run_extractor(game_root, kick)
-
-    if not kick.is_file() or kick.stat().st_size <= 44:
-        raise RuntimeError("ADOFAI Kick extractor finished without a valid sndKick.wav.")
+    # Extract into a separate file: a failed forced refresh must not destroy
+    # the last working cache while its source manifest still matches.
+    with tempfile.NamedTemporaryFile(
+        prefix="sndKick-", suffix=".wav", dir=kick.parent, delete=False
+    ) as temporary:
+        staged = Path(temporary.name)
+    try:
+        _run_extractor(game_root, staged)
+        if not staged.is_file() or staged.stat().st_size <= 44:
+            raise RuntimeError("ADOFAI Kick extractor finished without a valid sndKick.wav.")
+        staged.replace(kick)
+    finally:
+        staged.unlink(missing_ok=True)
 
     manifest = _cache_manifest_path()
     temp = manifest.with_suffix(manifest.suffix + ".tmp")
