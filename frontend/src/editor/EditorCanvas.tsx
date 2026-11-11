@@ -5,7 +5,7 @@ import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type Tr
 import { midiLabel, midiToHz } from "./musicMath";
 import { selectionChangeText, selectionStatusText } from "./selectionAnnouncement";
 import type { WheelPitchAccumulator } from "./wheelNavigation";
-import { createCanvasWheelHandler, observeWheelPitchCarryRelease, syncCanvasWheelView } from "./canvasWheelHandler";
+import { createCanvasWheelHandler, observeWheelPitchCarryRelease, syncCanvasWheelDocument, syncCanvasWheelView } from "./canvasWheelHandler";
 import { decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "./base64Payload";
 import { pitchBottomToRevealNote } from "./pitchViewport";
 import { isNoteNavigationKey, keyboardRangeSelection, reconcileKeyboardNote } from "./noteKeyboardNavigation";
@@ -15,6 +15,7 @@ export type TrackHoverInfo = {id:number;frequency:number;noteName:string;duratio
 export type TrackSelectionState = {ids:number[];range:TrackSelectionRange|null;useRange:boolean};
 
 type Props = {
+  documentGeneration: number;
   notes: NoteDto[];
   selected: number[];
   settings: EditorSettings;
@@ -184,6 +185,10 @@ export default function EditorCanvas(props: Props) {
   const wheelViewRef = useRef(props.view);
   const wheelOnViewRef = useRef(props.onView);
   const wheelDurationRef = useRef(props.playback.duration);
+  const wheelGenerationRef = useRef(props.documentGeneration);
+  useLayoutEffect(() => {
+    syncCanvasWheelDocument(wheelGenerationRef, wheelPitchAccumulatorRef, props.documentGeneration);
+  }, [props.documentGeneration]);
   useEffect(() => observeWheelPitchCarryRelease(window, wheelPitchAccumulatorRef, document), []);
   useLayoutEffect(() => {
     wheelOnViewRef.current = props.onView;
@@ -689,23 +694,27 @@ export default function EditorCanvas(props: Props) {
   );
   // The compact preview intentionally omits the middle of very fragmented
   // selections. When it stays unchanged, announce the actual added/removed IDs.
-  const previousAnnouncedSelectionRef = useRef<{ notes: number[]; tracks: number[] } | null>(null);
+  const previousAnnouncedSelectionRef = useRef<{ generation: number; notes: number[]; tracks: number[] } | null>(null);
   const [selectionChangeAnnouncement, setSelectionChangeAnnouncement] = useState("");
   useEffect(() => {
     const previous = previousAnnouncedSelectionRef.current;
-    if (previous) {
+    if (previous && previous.generation === props.documentGeneration) {
       const oldStatus = selectionStatusText(props.notes, previous.notes, previous.tracks, keyboardNote);
       const newStatus = selectionStatusText(props.notes, props.selected, props.trackSelection.ids, keyboardNote);
       const difference = selectionChangeText(
         previous.notes, props.selected, previous.tracks, props.trackSelection.ids, props.notes.length,
       );
       setSelectionChangeAnnouncement(oldStatus === newStatus ? difference : "");
+    } else if (previous) {
+      // Different editor states must not report changes between unrelated selections.
+      setSelectionChangeAnnouncement("");
     }
     previousAnnouncedSelectionRef.current = {
+      generation: props.documentGeneration,
       notes: [...props.selected],
       tracks: [...props.trackSelection.ids],
     };
-  }, [props.notes, props.selected, props.trackSelection.ids, keyboardNote]);
+  }, [props.notes, props.selected, props.trackSelection.ids, keyboardNote, props.documentGeneration]);
   return <div className="canvas-wrap" ref={containerRef}>
     <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onBlur={onCanvasBlur} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>{cursorReporterRef.current.cancel();props.onTrackHover?.(null)}} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
