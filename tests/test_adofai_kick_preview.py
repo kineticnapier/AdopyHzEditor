@@ -328,6 +328,17 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                 self.assertEqual(kick.read_bytes(), old)
                 self.assertEqual(list(kick.parent.glob("sndKick-*.wav")), [])
 
+    def test_malformed_riff_chunk_length_is_rejected_without_raising(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sndKick.wav"
+            # The RIFF chunk claims only 16 bytes, but its JUNK child claims
+            # far more. Python's wave reader can raise RuntimeError here.
+            path.write_bytes(
+                b"RIFF" + (16).to_bytes(4, "little") + b"WAVE" +
+                b"JUNK" + (0xffffffff).to_bytes(4, "little") + b"x" * 80
+            )
+            self.assertFalse(adofai_assets._valid_kick_wav(path))
+
     def test_frozen_build_prefers_bundled_extractor(self):
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "AdopyHzEditor.exe"
