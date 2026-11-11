@@ -650,6 +650,10 @@ export default function EditorCanvas(props: Props) {
     keyboardAnchorRef.current = anchor;
     keyboardSelectionRef.current = nextSelection;
     setKeyboardNote(next);
+    // Keyboard Note navigation must supersede a pending Track range lookup.
+    // This shared handler invalidates the lookup before its async reply can
+    // overwrite the newly selected Note(s).
+    clearTrackSelection();
     props.onSelect(nextSelection);
     const note = props.notes[next], changes: Partial<ViewState> = {};
     if (note.start < props.view.start || note.end > props.view.start + props.view.windowSeconds)
