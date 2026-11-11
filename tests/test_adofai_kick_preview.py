@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest import mock
 
@@ -109,6 +111,16 @@ class AdoFaiKickPreviewTests(unittest.TestCase):
 
 
 class AdoFaiAssetLocatorTests(unittest.TestCase):
+    @staticmethod
+    def _wav_bytes(samples: bytes) -> bytes:
+        with io.BytesIO() as output:
+            with wave.open(output, "wb") as writer:
+                writer.setnchannels(1)
+                writer.setsampwidth(2)
+                writer.setframerate(44100)
+                writer.writeframes(samples)
+            return output.getvalue()
+
     def _make_game(self, root: Path) -> Path:
         game = root / "steamapps" / "common" / "A Dance of Fire and Ice"
         data = game / "A Dance of Fire and Ice_Data"
@@ -151,7 +163,7 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(local)}, clear=False):
                 kick = adofai_assets.adofai_kick_cache_path()
                 kick.parent.mkdir(parents=True)
-                kick.write_bytes(b"RIFF" + b"\0" * 100)
+                kick.write_bytes(self._wav_bytes(b"\x01\x02" * 50))
                 adofai_assets._cache_manifest_path().write_text(
                     json.dumps(adofai_assets._source_signature(game)),
                     encoding="utf-8",
@@ -171,7 +183,7 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
                 kick = adofai_assets.adofai_kick_cache_path()
                 kick.parent.mkdir(parents=True)
-                original = b"RIFF" + b"x" * 100
+                original = self._wav_bytes(b"\x03\x04" * 50)
                 kick.write_bytes(original)
                 manifest = adofai_assets._cache_manifest_path()
                 manifest.write_text(json.dumps(adofai_assets._source_signature(game)), encoding="utf-8")
@@ -201,8 +213,8 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
                 kick = adofai_assets.adofai_kick_cache_path()
                 kick.parent.mkdir(parents=True)
-                old = b"RIFF" + b"o" * 100
-                new = b"RIFF" + b"n" * 100
+                old = self._wav_bytes(b"\x05\x06" * 50)
+                new = self._wav_bytes(b"\x07\x08" * 50)
                 kick.write_bytes(old)
 
                 def write_new_kick(_game: Path, output: Path) -> None:
@@ -229,7 +241,7 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
                 kick = adofai_assets.adofai_kick_cache_path()
                 kick.parent.mkdir(parents=True)
-                old = b"RIFF" + b"o" * 100
+                old = self._wav_bytes(b"\x05\x06" * 50)
                 kick.write_bytes(old)
 
                 def write_short_kick(_game: Path, output: Path) -> None:
@@ -238,6 +250,77 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                 with (
                     mock.patch.object(adofai_assets, "find_adofai_installation", return_value=game),
                     mock.patch.object(adofai_assets, "_run_extractor", side_effect=write_short_kick),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "without a valid sndKick.wav"):
+                        adofai_assets.ensure_adofai_kick(force=True)
+
+                self.assertEqual(kick.read_bytes(), old)
+                self.assertEqual(list(kick.parent.glob("sndKick-*.wav")), [])
+
+    def test_invalid_cached_wav_is_not_reused_even_with_matching_signature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            game = self._make_game(base / "game-root")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
+                kick = adofai_assets.adofai_kick_cache_path()
+                kick.parent.mkdir(parents=True)
+                kick.write_bytes(b"RIFF" + b"x" * 100)
+                adofai_assets._cache_manifest_path().write_text(
+                    json.dumps(adofai_assets._source_signature(game)), encoding="utf-8"
+                )
+                replacement = self._wav_bytes(b"\x09\x0a" * 50)
+
+                def extract(_game: Path, output: Path) -> None:
+                    output.write_bytes(replacement)
+
+                with (
+                    mock.patch.object(adofai_assets, "find_adofai_installation", return_value=game),
+                    mock.patch.object(adofai_assets, "_run_extractor", side_effect=extract) as extractor,
+                ):
+                    self.assertEqual(adofai_assets.ensure_adofai_kick(), kick)
+
+                extractor.assert_called_once()
+                self.assertEqual(kick.read_bytes(), replacement)
+
+    def test_truncated_wav_header_does_not_replace_cached_audio(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            game = self._make_game(base / "game-root")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
+                kick = adofai_assets.adofai_kick_cache_path()
+                kick.parent.mkdir(parents=True)
+                old = self._wav_bytes(b"\x01\x02" * 50)
+                kick.write_bytes(old)
+                manifest = adofai_assets._cache_manifest_path()
+                manifest.write_text(json.dumps(adofai_assets._source_signature(game)), encoding="utf-8")
+                original_manifest = manifest.read_bytes()
+                truncated = self._wav_bytes(b"\x03\x04" * 50)[:-20]
+
+                with (
+                    mock.patch.object(adofai_assets, "find_adofai_installation", return_value=game),
+                    mock.patch.object(adofai_assets, "_run_extractor",
+                                      side_effect=lambda _game, output: output.write_bytes(truncated)),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "without a valid sndKick.wav"):
+                        adofai_assets.ensure_adofai_kick(force=True)
+
+                self.assertEqual(kick.read_bytes(), old)
+                self.assertEqual(manifest.read_bytes(), original_manifest)
+                self.assertEqual(list(kick.parent.glob("sndKick-*.wav")), [])
+
+    def test_invalid_wav_header_over_44_bytes_does_not_replace_cached_audio(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            game = self._make_game(base / "game-root")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
+                kick = adofai_assets.adofai_kick_cache_path()
+                kick.parent.mkdir(parents=True)
+                old = self._wav_bytes(b"\x01\x02" * 50)
+                kick.write_bytes(old)
+                with (
+                    mock.patch.object(adofai_assets, "find_adofai_installation", return_value=game),
+                    mock.patch.object(adofai_assets, "_run_extractor",
+                                      side_effect=lambda _game, output: output.write_bytes(b"not-wav" * 30)),
                 ):
                     with self.assertRaisesRegex(RuntimeError, "without a valid sndKick.wav"):
                         adofai_assets.ensure_adofai_kick(force=True)
