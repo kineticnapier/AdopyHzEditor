@@ -358,6 +358,40 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                 self.assertEqual(kick.read_bytes(), old)
                 self.assertEqual(list(kick.parent.glob("sndKick-*.wav")), [])
 
+    def test_riff_header_claiming_bytes_beyond_eof_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sndKick.wav"
+            valid = self._wav_bytes(b"\\x01\\x02" * 50)
+            # wave.open() can still read every PCM frame despite this
+            # impossible outer RIFF size.
+            malformed = valid[:4] + (len(valid) + 100).to_bytes(4, "little") + valid[8:]
+            path.write_bytes(malformed)
+            self.assertFalse(adofai_assets._valid_kick_wav(path))
+
+    def test_oversized_riff_header_does_not_replace_existing_kick(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            game = self._make_game(base / "game-root")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
+                kick = adofai_assets.adofai_kick_cache_path()
+                kick.parent.mkdir(parents=True)
+                old = self._wav_bytes(b"\\x01\\x02" * 50)
+                kick.write_bytes(old)
+                manifest = adofai_assets._cache_manifest_path()
+                manifest.write_text(json.dumps(adofai_assets._source_signature(game)), encoding="utf-8")
+                old_manifest = manifest.read_bytes()
+                bad = old[:4] + (len(old) + 100).to_bytes(4, "little") + old[8:]
+                with (
+                    mock.patch.object(adofai_assets, "find_adofai_installation", return_value=game),
+                    mock.patch.object(adofai_assets, "_run_extractor",
+                                      side_effect=lambda _game, output: output.write_bytes(bad)),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "without a valid sndKick.wav"):
+                        adofai_assets.ensure_adofai_kick(force=True)
+                self.assertEqual(kick.read_bytes(), old)
+                self.assertEqual(manifest.read_bytes(), old_manifest)
+                self.assertEqual(list(kick.parent.glob("sndKick-*.wav")), [])
+
     def test_malformed_riff_chunk_length_is_rejected_without_raising(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sndKick.wav"
