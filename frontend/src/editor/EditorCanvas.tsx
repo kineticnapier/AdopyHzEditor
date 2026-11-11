@@ -681,10 +681,16 @@ export default function EditorCanvas(props: Props) {
     canvas.addEventListener("wheel", handler, { passive: false });
     return () => canvas.removeEventListener("wheel", handler);
   }, []);
+  // Playback updates rerender the canvas, but do not change the selection.
+  // Avoid re-sorting large Note/Track selections for every playback tick.
+  const selectionAnnouncement = useMemo(
+    () => selectionStatusText(props.notes, props.selected, props.trackSelection.ids, keyboardNote),
+    [props.notes, props.selected, props.trackSelection.ids, keyboardNote],
+  );
   return <div className="canvas-wrap" ref={containerRef}>
     <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onBlur={onCanvasBlur} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>{cursorReporterRef.current.cancel();props.onTrackHover?.(null)}} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
     <span id="editor-keyboard-help" className="sr-only">左右矢印で時間順にノートを選択します。Shiftと矢印で複数選択、Escapeで選択解除します。F1で操作方法を確認できます。</span>
-    <span id="editor-selection-status" className="sr-only" aria-live="polite">{selectionStatusText(props.notes, props.selected, props.trackSelection.ids, keyboardNote)}</span>
+    <span id="editor-selection-status" className="sr-only" aria-live="polite">{selectionAnnouncement}</span>
   </div>;
 }
