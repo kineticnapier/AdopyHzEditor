@@ -340,9 +340,16 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
                 except Exception as rollback_error:
                     rollback_errors.append(rollback_error)
             if rollback_errors:
-                raise ExceptionGroup(
-                    "ADOFAI Kick cache publication and rollback failed",
-                    [publication_error, *rollback_errors],
-                )
+                if sys.version_info >= (3, 11):
+                    raise ExceptionGroup(
+                        "ADOFAI Kick cache publication and rollback failed",
+                        [publication_error, *rollback_errors],
+                    )
+                # ExceptionGroup is unavailable before Python 3.11. Preserve
+                # the original error as the cause and report every rollback error.
+                details = "; ".join(repr(error) for error in rollback_errors)
+                raise RuntimeError(
+                    f"ADOFAI Kick cache publication and rollback failed: {details}"
+                ) from publication_error
             raise
     return kick
