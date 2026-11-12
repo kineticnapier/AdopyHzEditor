@@ -297,25 +297,43 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
 
     kick = adofai_kick_cache_path()
     kick.parent.mkdir(parents=True, exist_ok=True)
-    # Extract into a separate file: a failed forced refresh must not destroy
-    # the last working cache while its source manifest still matches.
-    with tempfile.NamedTemporaryFile(
-        prefix="sndKick-", suffix=".wav", dir=kick.parent, delete=False
-    ) as temporary:
-        staged = Path(temporary.name)
-    try:
+    manifest = _cache_manifest_path()
+    # Prepare both files before replacing either published cache file.
+    with tempfile.TemporaryDirectory(prefix="sndKick-refresh-", dir=kick.parent) as tmp:
+        staging = Path(tmp)
+        staged = staging / "sndKick.wav"
+        staged_manifest = staging / "sndKick.source.json"
         _run_extractor(game_root, staged)
         if not _valid_kick_wav(staged):
             raise RuntimeError("ADOFAI Kick extractor finished without a valid sndKick.wav.")
-        staged.replace(kick)
-    finally:
-        staged.unlink(missing_ok=True)
+        staged_manifest.write_text(
+            json.dumps(_source_signature(game_root), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
-    manifest = _cache_manifest_path()
-    temp = manifest.with_suffix(manifest.suffix + ".tmp")
-    temp.write_text(
-        json.dumps(_source_signature(game_root), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temp.replace(manifest)
+        # Backups are on the same volume. Roll back both files if either
+        # publication step raises; never leave a new WAV with an old signature.
+        old_kick = staging / "old-sndKick.wav"
+        old_manifest = staging / "old-sndKick.source.json"
+        had_kick = kick.exists()
+        had_manifest = manifest.exists()
+        if had_kick:
+            shutil.copy2(kick, old_kick)
+        if had_manifest:
+            shutil.copy2(manifest, old_manifest)
+        try:
+            staged.replace(kick)
+            staged_manifest.replace(manifest)
+        except Exception:
+            # Keep the original error if rollback succeeds; report rollback
+            # failure instead of silently treating an inconsistent cache as safe.
+            if had_kick:
+                old_kick.replace(kick)
+            else:
+                kick.unlink(missing_ok=True)
+            if had_manifest:
+                old_manifest.replace(manifest)
+            else:
+                manifest.unlink(missing_ok=True)
+            raise
     return kick
