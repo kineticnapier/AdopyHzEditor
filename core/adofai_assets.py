@@ -295,7 +295,7 @@ def _kick_cache_lock(cache_dir: Path, timeout: float = 660.0):
     with lock_path.open("a+b") as handle:
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
-            handle.write(b"\\0")
+            handle.write(b"\x00")
             handle.flush()
         deadline = time.monotonic() + timeout
         while True:
@@ -329,11 +329,10 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
             "ADOFAI installation was not found. Set ADOPYHZ_ADOFAI_PATH to the game directory."
         )
 
+    kick = adofai_kick_cache_path()
     with _kick_cache_lock(kick.parent):
         if not force and _cached_signature_matches(game_root):
             return kick
-        kick = adofai_kick_cache_path()
-        kick.parent.mkdir(parents=True, exist_ok=True)
         manifest = _cache_manifest_path()
         # Prepare both files before replacing either published cache file.
         with tempfile.TemporaryDirectory(prefix="sndKick-refresh-", dir=kick.parent) as tmp:
