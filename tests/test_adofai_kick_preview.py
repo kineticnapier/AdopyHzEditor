@@ -236,6 +236,39 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                 self.assertEqual(manifest.read_bytes(), original_manifest)
                 self.assertEqual(list(kick.parent.glob("sndKick-*.wav")), [])
 
+    def test_manifest_publish_failure_restores_both_cache_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            game = self._make_game(base / "game-root")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
+                kick = adofai_assets.adofai_kick_cache_path()
+                kick.parent.mkdir(parents=True)
+                old = self._wav_bytes(b"\\x01\\x02" * 50)
+                new = self._wav_bytes(b"\\x03\\x04" * 50)
+                kick.write_bytes(old)
+                manifest = adofai_assets._cache_manifest_path()
+                manifest.write_text(json.dumps(adofai_assets._source_signature(game)), encoding="utf-8")
+                old_manifest = manifest.read_bytes()
+                original_replace = Path.replace
+
+                def fail_manifest_publish(source: Path, target: Path):
+                    if source.name == "sndKick.source.json" and target == manifest:
+                        raise OSError("simulated manifest publication failure")
+                    return original_replace(source, target)
+
+                with (
+                    mock.patch.object(adofai_assets, "find_adofai_installation", return_value=game),
+                    mock.patch.object(adofai_assets, "_run_extractor",
+                                      side_effect=lambda _game, output: output.write_bytes(new)),
+                    mock.patch.object(Path, "replace", autospec=True, side_effect=fail_manifest_publish),
+                ):
+                    with self.assertRaisesRegex(OSError, "simulated manifest publication failure"):
+                        adofai_assets.ensure_adofai_kick(force=True)
+
+                self.assertEqual(kick.read_bytes(), old)
+                self.assertEqual(manifest.read_bytes(), old_manifest)
+                self.assertEqual(list(kick.parent.glob("sndKick-refresh-*")), [])
+
     def test_successful_forced_refresh_replaces_cache_after_extraction(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
