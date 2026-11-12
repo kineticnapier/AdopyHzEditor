@@ -325,15 +325,24 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
             staged.replace(kick)
             staged_manifest.replace(manifest)
         except Exception:
-            # Keep the original error if rollback succeeds; report rollback
-            # failure instead of silently treating an inconsistent cache as safe.
-            if had_kick:
-                old_kick.replace(kick)
-            else:
-                kick.unlink(missing_ok=True)
-            if had_manifest:
-                old_manifest.replace(manifest)
-            else:
-                manifest.unlink(missing_ok=True)
+            # Attempt both restores even when one fails. Otherwise a failed
+            # WAV restore prevents the manifest restore from running at all.
+            rollback_errors: list[Exception] = []
+            for existed, backup, destination in (
+                (had_kick, old_kick, kick),
+                (had_manifest, old_manifest, manifest),
+            ):
+                try:
+                    if existed:
+                        backup.replace(destination)
+                    else:
+                        destination.unlink(missing_ok=True)
+                except Exception as rollback_error:
+                    rollback_errors.append(rollback_error)
+            if rollback_errors:
+                raise ExceptionGroup(
+                    "ADOFAI Kick cache publication and rollback failed",
+                    rollback_errors,
+                )
             raise
     return kick
