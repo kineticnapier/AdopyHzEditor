@@ -324,7 +324,7 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
         try:
             staged.replace(kick)
             staged_manifest.replace(manifest)
-        except Exception:
+        except Exception as publication_error:
             # Attempt both restores even when one fails. Otherwise a failed
             # WAV restore prevents the manifest restore from running at all.
             rollback_errors: list[Exception] = []
@@ -342,7 +342,7 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
             if rollback_errors:
                 raise ExceptionGroup(
                     "ADOFAI Kick cache publication and rollback failed",
-                    rollback_errors,
+                    [publication_error, *rollback_errors],
                 )
             raise
     return kick
