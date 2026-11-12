@@ -236,6 +236,45 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                 self.assertEqual(manifest.read_bytes(), original_manifest)
                 self.assertEqual(list(kick.parent.glob("sndKick-*.wav")), [])
 
+    def test_rollback_attempts_manifest_restore_after_wav_restore_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            game = self._make_game(base / "game-root")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "local")}, clear=False):
+                kick = adofai_assets.adofai_kick_cache_path()
+                kick.parent.mkdir(parents=True)
+                old = self._wav_bytes(bytes([1, 2]) * 50)
+                new = self._wav_bytes(bytes([3, 4]) * 50)
+                kick.write_bytes(old)
+                manifest = adofai_assets._cache_manifest_path()
+                manifest.write_text(json.dumps(adofai_assets._source_signature(game)), encoding="utf-8")
+                old_manifest = manifest.read_bytes()
+                original_replace = Path.replace
+                attempted: list[str] = []
+
+                def fail_publish_and_wav_restore(source: Path, target: Path):
+                    if source.name == "sndKick.source.json" and target == manifest:
+                        raise OSError("manifest publish failed")
+                    if source.name == "old-sndKick.wav" and target == kick:
+                        attempted.append("wav")
+                        raise OSError("wav restore failed")
+                    if source.name == "old-sndKick.source.json" and target == manifest:
+                        attempted.append("manifest")
+                    return original_replace(source, target)
+
+                with (
+                    mock.patch.object(adofai_assets, "find_adofai_installation", return_value=game),
+                    mock.patch.object(adofai_assets, "_run_extractor",
+                                      side_effect=lambda _game, output: output.write_bytes(new)),
+                    mock.patch.object(Path, "replace", autospec=True,
+                                      side_effect=fail_publish_and_wav_restore),
+                ):
+                    with self.assertRaisesRegex(ExceptionGroup, "rollback failed"):
+                        adofai_assets.ensure_adofai_kick(force=True)
+
+                self.assertEqual(attempted, ["wav", "manifest"])
+                self.assertEqual(manifest.read_bytes(), old_manifest)
+
     def test_manifest_publish_failure_restores_both_cache_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
