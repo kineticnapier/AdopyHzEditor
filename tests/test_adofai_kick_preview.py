@@ -269,9 +269,14 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                     mock.patch.object(Path, "replace", autospec=True,
                                       side_effect=fail_publish_and_wav_restore),
                 ):
-                    with self.assertRaisesRegex(ExceptionGroup, "rollback failed"):
+                    with self.assertRaisesRegex(ExceptionGroup, "rollback failed") as caught:
                         adofai_assets.ensure_adofai_kick(force=True)
 
+                # Preserve both the original publication failure and the
+                # rollback failure for diagnostics.
+                self.assertEqual(len(caught.exception.exceptions), 2)
+                self.assertIn("manifest", str(caught.exception.exceptions[0]).lower())
+                self.assertIn("restore", str(caught.exception.exceptions[1]).lower())
                 self.assertEqual(attempted, ["wav", "manifest"])
                 self.assertEqual(manifest.read_bytes(), old_manifest)
 
