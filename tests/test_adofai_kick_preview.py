@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 import wave
@@ -269,14 +270,19 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
                     mock.patch.object(Path, "replace", autospec=True,
                                       side_effect=fail_publish_and_wav_restore),
                 ):
-                    with self.assertRaisesRegex(ExceptionGroup, "rollback failed") as caught:
+                    expected_error = ExceptionGroup if sys.version_info >= (3, 11) else RuntimeError
+                    with self.assertRaisesRegex(expected_error, "rollback failed") as caught:
                         adofai_assets.ensure_adofai_kick(force=True)
 
-                # Preserve both the original publication failure and the
-                # rollback failure for diagnostics.
-                self.assertEqual(len(caught.exception.exceptions), 2)
-                self.assertIn("manifest", str(caught.exception.exceptions[0]).lower())
-                self.assertIn("restore", str(caught.exception.exceptions[1]).lower())
+                # Preserve the publication failure and rollback failure on
+                # both supported exception-reporting paths.
+                if sys.version_info >= (3, 11):
+                    self.assertEqual(len(caught.exception.exceptions), 2)
+                    self.assertIn("manifest", str(caught.exception.exceptions[0]).lower())
+                    self.assertIn("restore", str(caught.exception.exceptions[1]).lower())
+                else:
+                    self.assertIn("manifest", str(caught.exception.__cause__).lower())
+                    self.assertIn("restore", str(caught.exception).lower())
                 self.assertEqual(attempted, ["wav", "manifest"])
                 self.assertEqual(manifest.read_bytes(), old_manifest)
 
