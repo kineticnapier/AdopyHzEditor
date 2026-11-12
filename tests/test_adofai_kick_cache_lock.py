@@ -50,6 +50,36 @@ class KickCacheLockTests(unittest.TestCase):
                             process.join(5)
             self.assertEqual(waiter.exitcode, 0)
 
+    def test_lock_timeout_does_not_enter_critical_section(self):
+        context = multiprocessing.get_context("spawn")
+        with tempfile.TemporaryDirectory() as tmp:
+            entered = context.Event()
+            release = context.Event()
+            holder = context.Process(target=_hold_lock, args=(tmp, entered, release))
+            try:
+                holder.start()
+                self.assertTrue(entered.wait(5), "holder failed to acquire lock")
+                with self.assertRaises(TimeoutError):
+                    with _kick_cache_lock(Path(tmp), timeout=0.2):
+                        self.fail("entered a critical section while lock was held")
+            finally:
+                release.set()
+                if holder.pid is not None:
+                    holder.join(5)
+                    if holder.is_alive():
+                        holder.terminate()
+                        holder.join(5)
+            self.assertEqual(holder.exitcode, 0)
+
+    def test_lock_is_released_when_context_body_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            with self.assertRaisesRegex(ValueError, "deliberate"):
+                with _kick_cache_lock(directory, timeout=1):
+                    raise ValueError("deliberate")
+            with _kick_cache_lock(directory, timeout=1):
+                pass
+
     def test_other_process_waits_until_lock_is_released(self):
         context = multiprocessing.get_context("spawn")
         with tempfile.TemporaryDirectory() as tmp:
