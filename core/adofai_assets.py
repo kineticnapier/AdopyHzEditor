@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+from contextlib import contextmanager
 import os
 import re
 import shutil
@@ -285,6 +287,41 @@ def _run_extractor(game_root: Path, output_path: Path) -> None:
         )
 
 
+@contextmanager
+def _kick_cache_lock(cache_dir: Path, timeout: float = 660.0):
+    """Serialize cache readers/writers across processes on Windows and POSIX."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = cache_dir / "sndKick.lock"
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\\0")
+            handle.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except (OSError, BlockingIOError) as exc:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Timed out waiting for ADOFAI Kick cache lock") from exc
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def ensure_adofai_kick(*, force: bool = False) -> Path:
     game_root = find_adofai_installation()
     if game_root is None:
@@ -292,64 +329,64 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
             "ADOFAI installation was not found. Set ADOPYHZ_ADOFAI_PATH to the game directory."
         )
 
-    if not force and _cached_signature_matches(game_root):
-        return adofai_kick_cache_path()
-
-    kick = adofai_kick_cache_path()
-    kick.parent.mkdir(parents=True, exist_ok=True)
-    manifest = _cache_manifest_path()
-    # Prepare both files before replacing either published cache file.
-    with tempfile.TemporaryDirectory(prefix="sndKick-refresh-", dir=kick.parent) as tmp:
-        staging = Path(tmp)
-        staged = staging / "sndKick.wav"
-        staged_manifest = staging / "sndKick.source.json"
-        _run_extractor(game_root, staged)
-        if not _valid_kick_wav(staged):
-            raise RuntimeError("ADOFAI Kick extractor finished without a valid sndKick.wav.")
-        staged_manifest.write_text(
-            json.dumps(_source_signature(game_root), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-        # Backups are on the same volume. Roll back both files if either
-        # publication step raises; never leave a new WAV with an old signature.
-        old_kick = staging / "old-sndKick.wav"
-        old_manifest = staging / "old-sndKick.source.json"
-        had_kick = kick.exists()
-        had_manifest = manifest.exists()
-        if had_kick:
-            shutil.copy2(kick, old_kick)
-        if had_manifest:
-            shutil.copy2(manifest, old_manifest)
-        try:
-            staged.replace(kick)
-            staged_manifest.replace(manifest)
-        except Exception as publication_error:
-            # Attempt both restores even when one fails. Otherwise a failed
-            # WAV restore prevents the manifest restore from running at all.
-            rollback_errors: list[Exception] = []
-            for existed, backup, destination in (
-                (had_kick, old_kick, kick),
-                (had_manifest, old_manifest, manifest),
-            ):
-                try:
-                    if existed:
-                        backup.replace(destination)
-                    else:
-                        destination.unlink(missing_ok=True)
-                except Exception as rollback_error:
-                    rollback_errors.append(rollback_error)
-            if rollback_errors:
-                if sys.version_info >= (3, 11):
-                    raise ExceptionGroup(
-                        "ADOFAI Kick cache publication and rollback failed",
-                        [publication_error, *rollback_errors],
-                    )
-                # ExceptionGroup is unavailable before Python 3.11. Preserve
-                # the original error as the cause and report every rollback error.
-                details = "; ".join(repr(error) for error in rollback_errors)
-                raise RuntimeError(
-                    f"ADOFAI Kick cache publication and rollback failed: {details}"
-                ) from publication_error
-            raise
-    return kick
+    with _kick_cache_lock(kick.parent):
+        if not force and _cached_signature_matches(game_root):
+            return kick
+        kick = adofai_kick_cache_path()
+        kick.parent.mkdir(parents=True, exist_ok=True)
+        manifest = _cache_manifest_path()
+        # Prepare both files before replacing either published cache file.
+        with tempfile.TemporaryDirectory(prefix="sndKick-refresh-", dir=kick.parent) as tmp:
+            staging = Path(tmp)
+            staged = staging / "sndKick.wav"
+            staged_manifest = staging / "sndKick.source.json"
+            _run_extractor(game_root, staged)
+            if not _valid_kick_wav(staged):
+                raise RuntimeError("ADOFAI Kick extractor finished without a valid sndKick.wav.")
+            staged_manifest.write_text(
+                json.dumps(_source_signature(game_root), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+    
+            # Backups are on the same volume. Roll back both files if either
+            # publication step raises; never leave a new WAV with an old signature.
+            old_kick = staging / "old-sndKick.wav"
+            old_manifest = staging / "old-sndKick.source.json"
+            had_kick = kick.exists()
+            had_manifest = manifest.exists()
+            if had_kick:
+                shutil.copy2(kick, old_kick)
+            if had_manifest:
+                shutil.copy2(manifest, old_manifest)
+            try:
+                staged.replace(kick)
+                staged_manifest.replace(manifest)
+            except Exception as publication_error:
+                # Attempt both restores even when one fails. Otherwise a failed
+                # WAV restore prevents the manifest restore from running at all.
+                rollback_errors: list[Exception] = []
+                for existed, backup, destination in (
+                    (had_kick, old_kick, kick),
+                    (had_manifest, old_manifest, manifest),
+                ):
+                    try:
+                        if existed:
+                            backup.replace(destination)
+                        else:
+                            destination.unlink(missing_ok=True)
+                    except Exception as rollback_error:
+                        rollback_errors.append(rollback_error)
+                if rollback_errors:
+                    if sys.version_info >= (3, 11):
+                        raise ExceptionGroup(
+                            "ADOFAI Kick cache publication and rollback failed",
+                            [publication_error, *rollback_errors],
+                        )
+                    # ExceptionGroup is unavailable before Python 3.11. Preserve
+                    # the original error as the cause and report every rollback error.
+                    details = "; ".join(repr(error) for error in rollback_errors)
+                    raise RuntimeError(
+                        f"ADOFAI Kick cache publication and rollback failed: {details}"
+                    ) from publication_error
+                raise
+        return kick
