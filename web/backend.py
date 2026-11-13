@@ -535,8 +535,12 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
 
             def worker() -> None:
                 try:
-                    path = ensure_adofai_kick()
-                    decoded = decode_audio_file(path, sr=max(1, int(self.player.sr)))
+                    # Keep the cache generation stable until decoding completes.
+                    decoded = ensure_adofai_kick(
+                        _read_locked=lambda path: decode_audio_file(
+                            path, sr=max(1, int(self.player.sr))
+                        )
+                    )
                     self.player.set_note_sample(decoded.samples)
                     with self._lock:
                         if self.settings.get("previewSound") == "adofai_kick":
