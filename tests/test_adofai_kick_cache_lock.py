@@ -156,5 +156,49 @@ class KickCacheLockTests(unittest.TestCase):
                 with _kick_cache_lock(Path(tmp), timeout=1):
                     pass
 
+
+    def test_reader_callback_after_refresh_holds_lock(self):
+        """A forced refresh must publish both files before protected decoding."""
+        context = multiprocessing.get_context("spawn")
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            cache_path = directory / "sndKick.wav"
+            manifest_path = directory / "sndKick.source.json"
+            waiting = context.Event()
+            finished = context.Event()
+            waiter = context.Process(target=_wait_for_lock, args=(tmp, waiting, finished))
+
+            def fake_extract(_game_root, output):
+                Path(output).write_bytes(b"new wav")
+
+            try:
+                with patch.object(adofai_assets, "find_adofai_installation", return_value=directory), \
+                     patch.object(adofai_assets, "adofai_kick_cache_path", return_value=cache_path), \
+                     patch.object(adofai_assets, "_cache_manifest_path", return_value=manifest_path), \
+                     patch.object(adofai_assets, "_run_extractor", side_effect=fake_extract), \
+                     patch.object(adofai_assets, "_valid_kick_wav", return_value=True), \
+                     patch.object(adofai_assets, "_source_signature", return_value={"source": "new"}):
+                    def read_locked(path):
+                        self.assertEqual(path, cache_path)
+                        self.assertEqual(path.read_bytes(), b"new wav")
+                        self.assertIn('"source": "new"', manifest_path.read_text(encoding="utf-8"))
+                        waiter.start()
+                        self.assertTrue(waiting.wait(5), "writer failed to start")
+                        self.assertFalse(finished.wait(0.25), "writer acquired lock during refreshed decode")
+                        return "refreshed decoded"
+
+                    self.assertEqual(
+                        adofai_assets.ensure_adofai_kick(force=True, _read_locked=read_locked),
+                        "refreshed decoded",
+                    )
+                    self.assertTrue(finished.wait(5), "writer did not acquire released lock")
+            finally:
+                if waiter.pid is not None:
+                    waiter.join(5)
+                    if waiter.is_alive():
+                        waiter.terminate()
+                        waiter.join(5)
+            self.assertEqual(waiter.exitcode, 0)
+
 if __name__ == "__main__":
     unittest.main()
