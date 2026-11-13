@@ -322,7 +322,11 @@ def _kick_cache_lock(cache_dir: Path, timeout: float = 660.0):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def ensure_adofai_kick(*, force: bool = False) -> Path:
+def ensure_adofai_kick(*, force: bool = False, _read_locked=None):
+    """Prepare the cache; optionally consume its WAV while holding the cache lock.
+
+    _read_locked is an internal callback. Ordinary callers still receive a Path.
+    """
     game_root = find_adofai_installation()
     if game_root is None:
         raise FileNotFoundError(
@@ -332,7 +336,7 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
     kick = adofai_kick_cache_path()
     with _kick_cache_lock(kick.parent):
         if not force and _cached_signature_matches(game_root):
-            return kick
+            return _read_locked(kick) if _read_locked is not None else kick
         manifest = _cache_manifest_path()
         # Prepare both files before replacing either published cache file.
         with tempfile.TemporaryDirectory(prefix="sndKick-refresh-", dir=kick.parent) as tmp:
@@ -388,4 +392,4 @@ def ensure_adofai_kick(*, force: bool = False) -> Path:
                         f"ADOFAI Kick cache publication and rollback failed: {details}"
                     ) from publication_error
                 raise
-        return kick
+        return _read_locked(kick) if _read_locked is not None else kick
