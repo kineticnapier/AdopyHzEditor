@@ -4,6 +4,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from core import adofai_assets
 
 from core.adofai_assets import _kick_cache_lock
 
@@ -108,6 +111,50 @@ class KickCacheLockTests(unittest.TestCase):
             self.assertEqual(holder.exitcode, 0)
             self.assertEqual(waiter.exitcode, 0)
 
+
+    def test_reader_callback_holds_lock_and_preserves_path_api(self):
+        context = multiprocessing.get_context("spawn")
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "sndKick.wav"
+            with patch.object(adofai_assets, "find_adofai_installation", return_value=Path(tmp)), \
+                 patch.object(adofai_assets, "adofai_kick_cache_path", return_value=cache_path), \
+                 patch.object(adofai_assets, "_cached_signature_matches", return_value=True):
+                self.assertEqual(adofai_assets.ensure_adofai_kick(), cache_path)
+                waiting = context.Event()
+                finished = context.Event()
+                waiter = context.Process(target=_wait_for_lock, args=(tmp, waiting, finished))
+                try:
+                    def read_locked(path):
+                        self.assertEqual(path, cache_path)
+                        waiter.start()
+                        self.assertTrue(waiting.wait(5))
+                        self.assertFalse(finished.wait(0.25), "writer acquired lock during decode")
+                        return "decoded"
+                    self.assertEqual(
+                        adofai_assets.ensure_adofai_kick(_read_locked=read_locked),
+                        "decoded",
+                    )
+                    self.assertTrue(finished.wait(5), "lock was not released after decode")
+                finally:
+                    if waiter.pid is not None:
+                        waiter.join(5)
+                        if waiter.is_alive():
+                            waiter.terminate()
+                            waiter.join(5)
+                self.assertEqual(waiter.exitcode, 0)
+
+    def test_reader_callback_exception_releases_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "sndKick.wav"
+            with patch.object(adofai_assets, "find_adofai_installation", return_value=Path(tmp)), \
+                 patch.object(adofai_assets, "adofai_kick_cache_path", return_value=cache_path), \
+                 patch.object(adofai_assets, "_cached_signature_matches", return_value=True):
+                def fail(_path):
+                    raise ValueError("decode failed")
+                with self.assertRaisesRegex(ValueError, "decode failed"):
+                    adofai_assets.ensure_adofai_kick(_read_locked=fail)
+                with _kick_cache_lock(Path(tmp), timeout=1):
+                    pass
 
 if __name__ == "__main__":
     unittest.main()
