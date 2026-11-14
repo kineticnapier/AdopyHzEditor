@@ -156,6 +156,18 @@ jobs:
           faulthandler.dump_traceback_later(120, repeat=True)
           try:
               suite = unittest.defaultTestLoader.discover("tests", pattern="test_*.py")
+              # Print the initial execution order before any setUpClass runs.
+              def iter_test_ids(node):
+                  for item in node:
+                      if isinstance(item, unittest.TestSuite):
+                          yield from iter_test_ids(item)
+                      else:
+                          yield item.id()
+
+              for index, test_id in enumerate(iter_test_ids(suite)):
+                  if index >= 16:
+                      break
+                  print(f"Initial test {index + 1}: {test_id}", flush=True)
               result = unittest.TextTestRunner(verbosity=2).run(suite)
           finally:
               faulthandler.cancel_dump_traceback_later()
