@@ -145,7 +145,22 @@ jobs:
       - name: Backend and lifecycle regression tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -u -m unittest discover -s tests -p "test_*.py" -v
+        run: |
+          python -u - <<'PY'
+          import faulthandler
+          import sys
+          import unittest
+
+          # Diagnose long-running tests without altering their assertions.
+          faulthandler.enable()
+          faulthandler.dump_traceback_later(120, repeat=True)
+          try:
+              suite = unittest.defaultTestLoader.discover("tests", pattern="test_*.py")
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+          finally:
+              faulthandler.cancel_dump_traceback_later()
+          sys.exit(0 if result.wasSuccessful() else 1)
+          PY
 
       - name: Auto Route and Harmony timing invariants
         run: python -m unittest tests.test_auto_route_twirl tests.test_harmony_auto_route
