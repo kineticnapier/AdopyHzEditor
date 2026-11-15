@@ -145,34 +145,9 @@ jobs:
       - name: Backend and lifecycle regression tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: |
-          python -u - <<'PY'
-          import faulthandler
-          import sys
-          import unittest
-
-          # Diagnose long-running tests without altering their assertions.
-          faulthandler.enable()
-          faulthandler.dump_traceback_later(120, repeat=True)
-          try:
-              suite = unittest.defaultTestLoader.discover("tests", pattern="test_*.py")
-              # Print the initial execution order before any setUpClass runs.
-              def iter_test_ids(node):
-                  for item in node:
-                      if isinstance(item, unittest.TestSuite):
-                          yield from iter_test_ids(item)
-                      else:
-                          yield item.id()
-
-              for index, test_id in enumerate(iter_test_ids(suite)):
-                  if index >= 16:
-                      break
-                  print(f"Initial test {index + 1}: {test_id}", flush=True)
-              result = unittest.TextTestRunner(verbosity=2).run(suite)
-          finally:
-              faulthandler.cancel_dump_traceback_later()
-          sys.exit(0 if result.wasSuccessful() else 1)
-          PY
+          PYTHONFAULTHANDLER: "1"
+        # Run as a real module: multiprocessing spawn cannot re-import <stdin>.
+        run: python -u -m unittest discover -s tests -p 'test_*.py' -v
 
       - name: Auto Route and Harmony timing invariants
         run: python -m unittest tests.test_auto_route_twirl tests.test_harmony_auto_route
