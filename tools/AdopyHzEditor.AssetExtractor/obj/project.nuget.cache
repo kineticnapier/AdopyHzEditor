@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "dgSpecHash": "OxdH7AhwkNQ=",
+  "success": true,
+  "projectFilePath": "F:\\dev\\Adopy-Hz-Editor\\tools\\AdopyHzEditor.AssetExtractor\\AdopyHzEditor.AssetExtractor.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\assetstools.net\\3.0.5\\assetstools.net.3.0.5.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\fmod5sharp\\3.1.0\\fmod5sharp.3.1.0.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\indexrange\\1.1.0\\indexrange.1.1.0.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\microsoft.bcl.memory\\9.0.0\\microsoft.bcl.memory.9.0.0.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\naudio.core\\2.2.1\\naudio.core.2.2.1.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\nvorbis\\0.10.5\\nvorbis.0.10.5.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\oggvorbisencoder\\1.2.2\\oggvorbisencoder.1.2.2.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\system.io.pipelines\\10.0.3\\system.io.pipelines.10.0.3.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\system.memory\\4.5.5\\system.memory.4.5.5.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\system.text.encodings.web\\10.0.3\\system.text.encodings.web.10.0.3.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\system.text.json\\10.0.3\\system.text.json.10.0.3.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\system.valuetuple\\4.5.0\\system.valuetuple.4.5.0.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.30\\microsoft.netcore.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.30\\microsoft.windowsdesktop.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.30\\microsoft.aspnetcore.app.ref.8.0.30.nupkg.sha512",
+    "C:\\Users\\Kinetic Napier\\.nuget\\packages\\microsoft.netcore.app.host.win-x64\\8.0.30\\microsoft.netcore.app.host.win-x64.8.0.30.nupkg.sha512"
+  ],
+  "logs": []
+}
