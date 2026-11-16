@@ -146,8 +146,9 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONFAULTHANDLER: "1"
-        # Run as a real module: multiprocessing spawn cannot re-import <stdin>.
-        run: python -u -m unittest discover -s tests -p 'test_*.py' -v
+        # A real script keeps multiprocessing spawn compatible and prints stacks
+        # every 120 seconds if a test blocks. Bound the CI step to 30 minutes.
+        run: timeout --signal=TERM --kill-after=30s 30m python -u scripts/ci_unittest_runner.py
 
       - name: Auto Route and Harmony timing invariants
         run: python -m unittest tests.test_auto_route_twirl tests.test_harmony_auto_route
