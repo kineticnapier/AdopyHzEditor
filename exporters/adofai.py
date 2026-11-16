@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
 import json
+import functools
 import math
 from typing import Any
 from core.note_model import Note, note_name
@@ -671,9 +672,15 @@ def shape_visual_relative(
     *,
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
+    final_tile_mode: str | None = None,
 ) -> tuple[float, bool, bool]:
     """
     Convert a timing/pitch relative angle into a visual-path relative angle.
+
+    final_tile_mode:
+      pass the note's final-tile mode for a note's final tile.  A mode other
+      than "scaled" (horizontal, cardinal, custom) is an explicit per-note
+      marker, so Upward / Upward avoid keep that tile's angle as given.
 
     Returns:
       relative_angle, changed_or_twirled, twirled_for_this_tile
@@ -701,6 +708,12 @@ def shape_visual_relative(
         # Planning is deliberately deferred until the complete relative-angle
         # sequence is known.  This keeps generation identical to raw mode and
         # prevents a one-tile local decision from changing timing data.
+        return base_rel, False, current_twirl
+
+    final_key = (final_tile_mode or "").lower().replace(" ", "_").replace("-", "_")
+    # A relative of 360 points straight back over the previous tile; that
+    # marker would hide the path, so the path keeps such a tile instead.
+    if final_key and final_key != "scaled" and 1e-6 < base_rel < 360.0 - 1e-6:
         return base_rel, False, current_twirl
 
     if visual_path_avoid_enabled(visual_path_mode):
@@ -1557,6 +1570,7 @@ def emit_angle_only_curve_continuous(
             final_rel,
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
+            final_tile_mode=final_angle_mode if is_final else None,
         )
         consume_pending_visual_twirl(actions, floor)
 
@@ -1633,6 +1647,7 @@ def emit_direct_curve_continuous(
             rel,
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
+            final_tile_mode=final_angle_mode if is_final else None,
         )
         consume_pending_visual_twirl(actions, floor)
 
@@ -1732,6 +1747,7 @@ def emit_angle_compression_curve_continuous(
             rel,
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
+            final_tile_mode=effective_final_angle_mode if is_final and frac > 1e-6 else None,
         )
         consume_pending_visual_twirl(actions, floor)
         if shaped:
@@ -1951,6 +1967,7 @@ def emit_angle_only(
                 final_angle,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
+                final_tile_mode=final_angle_mode,
             )
             consume_pending_visual_twirl(actions, floor)
             final_visual_used = final_visual_used or twirled
@@ -2006,6 +2023,7 @@ def emit_angle_only(
                 final_angle,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
+                final_tile_mode=final_angle_mode,
             )
             consume_pending_visual_twirl(actions, floor)
             final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
@@ -2174,6 +2192,7 @@ def emit_angle_compression(
                 final_angle,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
+                final_tile_mode=effective_final_angle_mode,
             )
             consume_pending_visual_twirl(actions, floor)
             final_visual_used = final_visual_used or twirled
@@ -2224,6 +2243,7 @@ def emit_angle_compression(
                 final_angle,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
+                final_tile_mode=effective_final_angle_mode,
             )
             consume_pending_visual_twirl(actions, floor)
             final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
@@ -2640,6 +2660,99 @@ def build_harmony_ratio_polyrhythm_pattern(
     }
 
 
+_AUTO_CYCLE_PREVIEW_CYCLES = 12
+_AUTO_CYCLE_SEARCH_STEP = 5.0
+_AUTO_CYCLE_NEAR_RADIUS = 0.25
+
+
+def _ratio_path_near_overlaps(
+    gaps: tuple[float, ...],
+    cycle_angle: float,
+    *,
+    cycles: int,
+    twirl_each_cycle: bool,
+    radius: float = _AUTO_CYCLE_NEAR_RADIUS,
+) -> int:
+    """Count non-adjacent tile pairs closer than radius for a repeated cycle."""
+    heading = 0.0
+    x = y = 0.0
+    twirled = False
+    points: list[tuple[float, float]] = []
+    count = len(gaps)
+    for index in range(count * max(1, int(cycles))):
+        if twirl_each_cycle and index and index % count == 0:
+            twirled = not twirled
+        rel = gaps[index % count] * cycle_angle
+        heading = heading - 180.0 + rel if twirled else heading + 180.0 - rel
+        x += math.cos(math.radians(heading))
+        y += math.sin(math.radians(heading))
+        points.append((x, y))
+
+    cells: dict[tuple[int, int], list[int]] = {}
+    r2 = radius * radius
+    overlaps = 0
+    for i, (px, py) in enumerate(points):
+        cx, cy = math.floor(px / radius), math.floor(py / radius)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for j in cells.get((cx + dx, cy + dy), ()):
+                    if i - j > 2:
+                        qx, qy = points[j]
+                        if (px - qx) ** 2 + (py - qy) ** 2 < r2:
+                            overlaps += 1
+        cells.setdefault((cx, cy), []).append(i)
+    return overlaps
+
+
+@functools.lru_cache(maxsize=64)
+def _harmony_poly_auto_cycle_angle(gaps: tuple[float, ...], twirl_each_cycle: bool) -> float:
+    """
+    Choose the emitted angle per cycle for a ratio-polyrhythm grid.
+
+    180 degrees per tile on average means zero net turn per cycle, so cycles
+    advance along a line.  The angle is capped so no single gap exceeds one
+    tile's 360 degrees.  If that line still overlaps itself (the cap was hit,
+    or the cycle folds onto itself), search the allowed range for the angle
+    with the fewest near-overlaps, preferring wider minimum angles.
+    """
+    tiles = max(1, len(gaps))
+    widest = max(gaps) if gaps else 1.0
+    cap = 360.0 / max(EPS, widest)
+    preferred = min(180.0 * tiles, cap)
+
+    def score(angle: float) -> int:
+        return _ratio_path_near_overlaps(
+            gaps, angle, cycles=_AUTO_CYCLE_PREVIEW_CYCLES, twirl_each_cycle=twirl_each_cycle,
+        )
+
+    if score(preferred) == 0:
+        return preferred
+    narrowest = min(gaps) if gaps else 1.0
+    best_key: tuple[float, float, float] | None = None
+    best = preferred
+    angle = 180.0
+    while angle <= cap + 1e-9:
+        key = (float(score(angle)), -narrowest * angle, abs(angle - preferred))
+        if best_key is None or key < best_key:
+            best_key, best = key, angle
+        angle += _AUTO_CYCLE_SEARCH_STEP
+    return best
+
+
+def _harmony_poly_emitted_cycle_angle(
+    pattern: dict[str, Any],
+    timing_cycle_angle: float,
+    cycle_mode: str,
+    twirl_each_cycle: bool = False,
+) -> tuple[float, str]:
+    """Return the angle emitted per cycle and the normalised mode name."""
+    key = (cycle_mode or "fixed").lower().replace(" ", "_").replace("-", "_")
+    if key not in ("auto", "automatic", "auto_180", "line"):
+        return float(timing_cycle_angle), "fixed"
+    gaps = tuple(float(g) for g in (pattern.get("position_gaps") or []) if float(g) > 0) or (1.0,)
+    return _harmony_poly_auto_cycle_angle(gaps, bool(twirl_each_cycle)), "auto"
+
+
 def build_harmony_ratio_polyrhythm_events(
     notes: list[Note],
     *,
@@ -2655,6 +2768,8 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_poly_pseudo_angle: float = 30.0,
     harmony_poly_max_denominator: int = 24,
     harmony_poly_ratio_octave_mode: str = "octave-folded",
+    harmony_poly_cycle_mode: str = "fixed",
+    harmony_poly_cycle_twirl: bool = False,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]], dict[str, Any]]:
     """
     Build Harmony events by repeating a Scratch-style ratio-derived grid.
@@ -2669,12 +2784,31 @@ def build_harmony_ratio_polyrhythm_events(
     derived from the global Harmony BPM and cycle_angle, so emitted tiles do
     not require per-tile SetSpeed compensation.  Pitch/frequency is retained
     only as metadata for labels/debugging.
+
+    The grid always uses the presets' just-intonation ratios.  Only the ratio
+    shapes the rhythm, and equal-tempered intervals are irrational: limiting
+    them to a small denominator gives arbitrary grids such as 46:58:69 for a
+    major triad (148 tiles, 0.2 degree angles) instead of 4:5:6.  harmony_tuning
+    and harmony_root_mode are accepted for signature compatibility only.
+
+    harmony_poly_cycle_mode:
+        "fixed" emits harmony_poly_cycle_angle per cycle.
+        "auto" keeps the cycle duration given by harmony_poly_cycle_angle at
+        play_bpm, but emits 180 degrees per tile on average (zero net turn
+        per cycle) and scales the BPM to match, so successive cycles advance
+        along a line instead of overlapping.  The effective BPM is returned as
+        pattern_stats["effective_play_bpm"].
+
+    harmony_poly_cycle_twirl:
+        the emitter will mirror every other cycle with a Twirl (auto mode on
+        a raw path); the automatic angle is chosen for that geometry.
     """
+    del harmony_tuning, harmony_root_mode
     voice_specs = build_harmony_voice_specs(
         harmony_mode,
         harmony_custom_semitone,
-        harmony_tuning=harmony_tuning,
-        harmony_root_mode=harmony_root_mode,
+        harmony_tuning="just intonation",
+        harmony_root_mode="fixed root",
     )
     pattern = build_harmony_ratio_polyrhythm_pattern(
         voice_specs,
@@ -2686,7 +2820,14 @@ def build_harmony_ratio_polyrhythm_events(
     _unused_pseudo_angle = clean_relative_angle(max(0.001, float(harmony_poly_pseudo_angle)))
     merge_epsilon_sec = max(1e-9, float(harmony_epsilon_ms) / 1000.0)
 
-    cycle_angle = max(0.001, float(harmony_poly_cycle_angle))
+    # The cycle duration always follows the requested cycle angle at play_bpm.
+    timing_cycle_angle = max(0.001, float(harmony_poly_cycle_angle))
+    cycle_seconds = timing_cycle_angle * 60.0 / (180.0 * max(EPS, float(play_bpm)))
+    cycle_angle, cycle_mode = _harmony_poly_emitted_cycle_angle(
+        pattern, timing_cycle_angle, harmony_poly_cycle_mode, harmony_poly_cycle_twirl,
+    )
+    cycle_twirl = bool(harmony_poly_cycle_twirl) and cycle_mode == "auto"
+    effective_play_bpm = max(EPS, float(play_bpm)) * cycle_angle / timing_cycle_angle
     common_root_cycles = max(1, int(pattern.get("common_root_cycles", 1)))
     root_ratio = max(EPS, float(pattern.get("root_ratio", 1.0)))
     merged_positions: list[dict[str, Any]] = list(pattern.get("merged_positions", []))
@@ -2725,7 +2866,6 @@ def build_harmony_ratio_polyrhythm_events(
         # angles themselves at one global BPM.  Do not derive cycle length from
         # root_freq, otherwise every pitch change needs SetSpeed compensation
         # and the result behaves like Hz Charting again.
-        cycle_seconds = cycle_angle * 60.0 / (180.0 * max(EPS, float(play_bpm)))
         if cycle_seconds <= EPS:
             continue
 
@@ -2816,6 +2956,9 @@ def build_harmony_ratio_polyrhythm_events(
                 event["poly_has_next_in_note"] = False
                 next_phase = math.floor(cur_phase) + 1.0
             gap = max(EPS, next_phase - cur_phase)
+            # The unwrapped angle is the timing; it may exceed 360 degrees,
+            # which one tile can only show with SetSpeed compensation.
+            event["poly_timing_rel_to_next"] = gap * cycle_angle
             event["poly_rel_to_next"] = clean_relative_angle(gap * cycle_angle)
 
         events.extend(note_events)
@@ -2863,6 +3006,10 @@ def build_harmony_ratio_polyrhythm_events(
         "fraction_text": str(pattern.get("fraction_text", "")),
         "common_root_cycles": int(pattern.get("common_root_cycles", 1)),
         "cycle_angle": round(cycle_angle, 6),
+        "cycle_angle_mode": cycle_mode,
+        "cycle_twirl": "true" if cycle_twirl else "false",
+        "timing_cycle_angle": round(timing_cycle_angle, 6),
+        "tuning": "just intonation",
         "pseudo_angle": 0.0,
         "max_denominator": int(harmony_poly_max_denominator),
         "ratio_octave_mode": str(pattern.get("ratio_octave_mode", harmony_poly_ratio_octave_mode)),
@@ -2872,8 +3019,10 @@ def build_harmony_ratio_polyrhythm_events(
         "global_simultaneous_merged": int(global_simultaneous_merged),
         "unique_positions": int(len(merged_positions)),
         "timing_source": "global_bpm",
-        "cycle_seconds": round(float(cycle_angle * 60.0 / (180.0 * max(EPS, float(play_bpm)))), 9),
-        "play_bpm": round(float(play_bpm), 6),
+        "cycle_seconds": round(float(cycle_seconds), 9),
+        "play_bpm": round(float(effective_play_bpm), 6),
+        "requested_play_bpm": round(float(play_bpm), 6),
+        "effective_play_bpm": float(effective_play_bpm),
     }
     return events, duplicate_hits_merged_total, voice_specs, pattern_stats
 
@@ -3103,6 +3252,7 @@ def emit_harmony_polyrhythm(
     harmony_visual_step: float = 45.0,
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
+    ratio_cycle_twirl: bool = False,
 ) -> tuple[int, int, float | None, int, int, int, int, int, int, float]:
     """
     Emit a single serial ADOFAI path from merged harmony impulse times.
@@ -3120,7 +3270,9 @@ def emit_harmony_polyrhythm(
 
     Ratio-polyrhythm mode:
         the Scratch-derived relative angles are the timing.  It stays at the
-        global Harmony BPM and does not emit per-tile SetSpeed events.
+        global Harmony BPM; SetSpeed appears only on tiles whose drawn angle
+        differs from the timing angle.  With ratio_cycle_twirl, every cycle
+        start toggles Twirl so successive cycles mirror instead of overlapping.
     """
     if not events:
         return floor, 0, current_bpm, 0, 0, 0, 0, 0, 0, 0.0
@@ -3138,6 +3290,7 @@ def emit_harmony_polyrhythm(
     harmony_pause_events = 0
     harmony_rest_seconds = 0.0
     now = 0.0
+    previous_cycle_key: tuple[Any, int] | None = None
 
     for i, e in enumerate(events):
         if max_tiles > 0 and emitted >= max_tiles:
@@ -3185,13 +3338,15 @@ def emit_harmony_polyrhythm(
             # Ratio-polyrhythm mode: the Scratch-derived relative angle is the
             # timing.  Keep one global BPM; do not compensate with SetSpeed.
             # The very last event also keeps its final position->cycle-end gap.
-            old_rel = clean_relative_angle(float(poly_rel))
+            # Use the unwrapped angle: a gap over 360 degrees is drawn wrapped
+            # and its duration is restored with SetSpeed below.
+            old_rel = max(EPS, float(e.get("poly_timing_rel_to_next", poly_rel)))
             base_bpm_for_tile = float(play_bpm)
         elif ratio_polyrhythm_timing:
             # If global event sorting inserted another note before this note's
             # next pattern hit, encode that real gap as an angle at the same
-            # global BPM instead of changing speed.
-            old_rel = harmony_timing_angle(dt, play_bpm)
+            # global BPM (unwrapped; see above).
+            old_rel = max(EPS, float(dt) * float(play_bpm) * 180.0 / 60.0)
             base_bpm_for_tile = float(play_bpm)
         elif angle_only_timing:
             # In Harmony Angle-only mode, the raw angle itself represents the
@@ -3214,7 +3369,7 @@ def emit_harmony_polyrhythm(
         elif ratio_polyrhythm_timing and poly_rel is not None and poly_rel_matches_next:
             # Keep the ratio-derived angle sequence exact. Use Visual path / Twirl
             # for shape control instead of snapping these gaps to another grid.
-            rel = old_rel
+            rel = clean_relative_angle(old_rel)
         else:
             rel = remap_harmony_visual_angle(
                 old_rel,
@@ -3242,18 +3397,36 @@ def emit_harmony_polyrhythm(
         if abs(rel - old_rel) > 1e-6:
             remapped_angles += 1
 
-        if ratio_polyrhythm_timing:
-            # Polyrhythm uses angle timing: speed remains the global Harmony BPM.
-            need_setspeed = False
+        # Angle timing (Angle-only and ratio-polyrhythm) stays at the global
+        # Harmony BPM.  Only a tile whose drawn angle differs from its timing
+        # angle (target angle, upward paths, gaps over 360 degrees, rounded
+        # cross-note gaps) gets a compensating SetSpeed, reset on the next tile.
+        angle_timing = angle_only_timing or ratio_polyrhythm_timing
+        if ratio_polyrhythm_timing and i + 1 >= len(events):
+            # No hit follows the final tile, so its angle carries no timing.
             bpm = float(play_bpm)
-        else:
-            need_setspeed = (not angle_only_timing) or abs(bpm - float(play_bpm)) > 1e-6
-        if need_setspeed:
+        if not angle_timing:
             actions.append(set_bpm(floor, bpm))
             setspeed_events += 1
             current_bpm = bpm
         else:
-            current_bpm = float(play_bpm)
+            # Write a SetSpeed only when this tile's speed differs from the
+            # speed already in effect; uncompensated tiles return to play_bpm.
+            tile_bpm = bpm if abs(bpm - float(play_bpm)) > 1e-6 else float(play_bpm)
+            if current_bpm is None or abs(tile_bpm - float(current_bpm)) > 1e-6:
+                actions.append(set_bpm(floor, tile_bpm))
+                setspeed_events += 1
+            current_bpm = tile_bpm
+
+        if ratio_cycle_twirl and ratio_polyrhythm_timing:
+            cycle_key = (e.get("note_id"), int(e.get("poly_cycle_index", 0)))
+            if previous_cycle_key is not None and cycle_key != previous_cycle_key:
+                context = _build_context()
+                context.twirl_active = not context.twirl_active
+                # A Twirl on floor N applies to the tile appended at angleData[N].
+                actions.append(twirl_event(floor + 1))
+            previous_cycle_key = cycle_key
+            twirled_for_this_tile = _build_context().twirl_active
 
         add_relative(angle_data, rel, twirled=twirled_for_this_tile)
 
@@ -3261,12 +3434,6 @@ def emit_harmony_polyrhythm(
             pause_seconds(actions, floor + 1, rest_after, current_bpm)
             harmony_pause_events += 1
             harmony_rest_seconds += rest_after
-
-        if (angle_only_timing and not ratio_polyrhythm_timing) and need_setspeed:
-            # Return to the global Harmony BPM for the next raw Angle-only tile.
-            actions.append(set_bpm(floor + 1, play_bpm))
-            setspeed_events += 1
-            current_bpm = float(play_bpm)
 
         floor += 1
         emitted += 1
@@ -3313,6 +3480,7 @@ def build_adofai_level(
     harmony_poly_pseudo_angle: float = 30.0,
     harmony_poly_max_denominator: int = 24,
     harmony_poly_ratio_octave_mode: str = "octave-folded",
+    harmony_poly_cycle_mode: str = "fixed",
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
@@ -3385,7 +3553,13 @@ def build_adofai_level(
                 harmony_poly_pseudo_angle=harmony_poly_pseudo_angle,
                 harmony_poly_max_denominator=harmony_poly_max_denominator,
                 harmony_poly_ratio_octave_mode=harmony_poly_ratio_octave_mode,
+                harmony_poly_cycle_mode=harmony_poly_cycle_mode,
+                harmony_poly_cycle_twirl=visual_path_key(visual_path_mode) == "raw",
             )
+            # Auto cycle angle scales the global BPM to keep cycle durations.
+            play_bpm = max(1e-6, float(harmony_ratio_pattern_stats.get("effective_play_bpm", play_bpm)))
+            level.setdefault("settings", {})["bpm"] = round(play_bpm, 6)
+            current_bpm = play_bpm
         else:
             events, simultaneous_adjusted, voice_specs = build_harmony_impulse_events(
                 sorted_notes,
@@ -3410,6 +3584,7 @@ def build_adofai_level(
             harmony_visual_step=harmony_visual_step,
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
+            ratio_cycle_twirl=harmony_ratio_pattern_stats.get("cycle_twirl") == "true",
         )
         apply_twirl_angledata_rebuild(
             angle_data,
@@ -3451,6 +3626,9 @@ def build_adofai_level(
             "harmony_visual_mode": harmony_visual_mode,
             "harmony_visual_step": round(float(harmony_visual_step), 6),
             "harmony_poly_cycle_angle": round(float(harmony_poly_cycle_angle), 6),
+            "harmony_poly_cycle_mode": str(harmony_ratio_pattern_stats.get("cycle_angle_mode", "")),
+            "harmony_poly_emitted_cycle_angle": float(harmony_ratio_pattern_stats.get("cycle_angle", 0.0) or 0.0),
+            "harmony_poly_cycle_twirl": str(harmony_ratio_pattern_stats.get("cycle_twirl", "")),
             "harmony_poly_pseudo_angle": round(float(harmony_poly_pseudo_angle), 6),
             "harmony_poly_max_denominator": int(harmony_poly_max_denominator),
             "harmony_poly_ratio_octave_mode": str(harmony_poly_ratio_octave_mode),

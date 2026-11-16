@@ -270,7 +270,11 @@ export default function AdoFAIExportDialogJa({
                 }
               />
             </Field>
-            <div className="info-card">音律は平均律に固定されています。</div>
+            <div className="info-card">
+              {options.harmonyTimingMode === "ratio-polyrhythm"
+                ? "比率ポリリズムは純正比（長三和音なら4:5:6）でリズムを作ります。"
+                : "音律は平均律に固定されています。"}
+            </div>
           </>
         )}
         <Field label="音声" group>
@@ -534,7 +538,28 @@ export default function AdoFAIExportDialogJa({
                 )}
                 {options.harmonyTimingMode === "ratio-polyrhythm" && (
                   <>
-                    <Field label="周期角度">
+                    <Field label="周期角">
+                      <Select
+                        value={options.harmonyPolyCycleMode}
+                        options={[
+                          ["auto", "自動（形を整える）"],
+                          ["fixed", "固定"],
+                        ]}
+                        onChange={(v) =>
+                          patch(
+                            "harmonyPolyCycleMode",
+                            v as AdoFAIExportOptions["harmonyPolyCycleMode"],
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field
+                      label={
+                        options.harmonyPolyCycleMode === "auto"
+                          ? "周期の長さ"
+                          : "周期角度"
+                      }
+                    >
                       <Num
                         value={options.harmonyPolyCycleAngle}
                         min={1}
@@ -544,6 +569,11 @@ export default function AdoFAIExportDialogJa({
                         onChange={(v) => patch("harmonyPolyCycleAngle", v)}
                       />
                     </Field>
+                    {options.harmonyPolyCycleMode === "auto" && (
+                      <div className="info-card">
+                        1周期の長さは「周期の長さ」とBPMで決まります。角度は1枚平均180°になるよう自動で決め、BPMも同じ比率で合わせるので、リズムは変わりません。
+                      </div>
+                    )}
                     <Field label="最大分母">
                       <Num
                         value={options.harmonyPolyMaxDenominator}
