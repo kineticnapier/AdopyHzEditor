@@ -58,6 +58,18 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
     event.preventDefault();
     return;
   }
+  // Selection-editing commands capture the selection indices of the render that
+  // received the first keydown. Auto-repeats arrive before the selection is
+  // refreshed, so a held Ctrl+X would cut the notes that shifted into those
+  // indices. Treat these commands as one-shot per physical key press.
+  if (event.repeat && (
+    (ctrl && !event.altKey && ["x", "v", "d"].includes(key)) ||
+    (ctrl && event.altKey && key === "a") ||
+    (plain && ["q", "delete", "backspace"].includes(key))
+  )) {
+    event.preventDefault();
+    return;
+  }
 
   if (key === "f1") return handled(a.openHelp);
   if (ctrl && key === "o") return handled(a.openAudio);

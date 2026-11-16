@@ -258,3 +258,33 @@ test("global Track clearing is wired through the request-invalidating App handle
   assert.match(source, /clearTracks:\s*\(\)\s*=>\s*changeTrackSelection\(\{\s*ids:\s*\[\],\s*range:\s*null,\s*useRange:\s*false\s*\}\)/);
   assert.match(source, /function changeTrackSelection\([\s\S]*?trackSelectionRequests\.current\.invalidate\(\)/);
 });
+
+// Audit #1: holding Ctrl+X sent one cut per auto-repeat with the stale
+// selection indices, deleting unrelated notes that shifted into those slots.
+test("held selection-editing shortcuts run once and consume their repeats", () => {
+  const { calls, press } = setup();
+  assert.equal(press("x", { ctrlKey: true }), true);
+  for (const [key, mods] of [
+    ["x", { ctrlKey: true, repeat: true }],
+    ["X", { ctrlKey: true, repeat: true }],
+    ["x", { metaKey: true, repeat: true }],
+    ["v", { ctrlKey: true, repeat: true }],
+    ["d", { ctrlKey: true, repeat: true }],
+    ["a", { ctrlKey: true, altKey: true, repeat: true }],
+    ["q", { repeat: true }],
+    ["Delete", { repeat: true }],
+    ["Backspace", { repeat: true }],
+  ] as const) assert.equal(press(key, mods), true, `${key} repeat must not reach the browser`);
+  assert.deepEqual(calls, ["cut"]);
+});
+
+test("selection-editing shortcuts still run on every distinct key press", () => {
+  const { calls, press } = setup();
+  press("x", { ctrlKey: true });
+  press("x", { ctrlKey: true });
+  press("d", { ctrlKey: true });
+  press("v", { ctrlKey: true });
+  press("q");
+  press("Delete");
+  assert.deepEqual(calls, ["cut", "cut", "duplicate", "paste", "quantize", "delete"]);
+});

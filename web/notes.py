@@ -59,6 +59,30 @@ class NoteMixin:
         checkpoint = getattr(self, "_saved_checkpoint", None)
         self._dirty = checkpoint is None or self._document_checkpoint() != checkpoint
 
+    def _rebase_history_to_current_source(self, source_duration: float) -> None:
+        """Make existing Undo/Redo entries follow a newly committed audio source.
+
+        Loading or re-analysing audio is not an undoable step. Snapshots taken
+        against the previous source would otherwise restore its timeline length
+        and analysed pitch range together with the notes, leaving the editor
+        shorter or longer than the audio that is actually loaded. Only the
+        notes remain historical; duration is rebuilt from the current source
+        and the snapshot's own notes, so tail notes stay reachable.
+        """
+        base = max(0.001, float(source_duration))
+
+        def rebase(state: EditorSnapshot) -> EditorSnapshot:
+            note_end = max((float(n.end) for n in state.notes), default=0.0)
+            return EditorSnapshot(
+                notes=state.notes,
+                duration=max(base, note_end),
+                midi_min=int(self.midi_min),
+                midi_max=int(self.midi_max),
+            )
+
+        self._undo_stack[:] = [rebase(s) for s in self._undo_stack]
+        self._redo_stack[:] = [rebase(s) for s in self._redo_stack]
+
     def _push_undo(self) -> None:
         self._undo_stack.append(self._snapshot())
         if len(self._undo_stack) > 200:
