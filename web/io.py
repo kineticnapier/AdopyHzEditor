@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -100,8 +101,15 @@ class IOMixin:
         for project_key, setting_key, _value_type in PROJECT_SETTING_FIELDS:
             if project_key in data and setting_key in settings:
                 settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
+        canonical_keys_present = {
+            setting_key
+            for project_key, setting_key, _value_type in PROJECT_SETTING_FIELDS
+            if project_key in data
+        }
         for project_key, setting_key in PROJECT_SETTING_ALIASES.items():
-            if project_key in data and setting_key in settings:
+            # A legacy alias fills a missing setting; it must not override a
+            # newer canonical field when both occur in the same project.
+            if project_key in data and setting_key in settings and setting_key not in canonical_keys_present:
                 settings[setting_key] = self._normalize_setting(setting_key, data[project_key])
         return settings
 
@@ -149,8 +157,44 @@ class IOMixin:
         if not path:return self.get_state()
         audio_path,notes,settings=load_project(path)
         prepared_notes=[n.normalized() for n in notes]
+        # Reject non-finite values before replacing the document or clearing
+        # Undo/Redo. Note.normalized() preserves NaN/Infinity from JSON.
+        for note in prepared_notes:
+            for value in (
+                note.start, note.end, note.midi, note.midi_end,
+                note.ctrl1_midi, note.ctrl2_midi, note.target_angle,
+            ):
+                if value is not None and not math.isfinite(float(value)):
+                    raise ValueError("project note contains a non-finite numeric value")
         prepared_settings=self._normalized_project_settings(settings)
         prepared_audio=None
+        # Validate audio-less workspace metadata before replacing the current
+        # document or clearing its Undo/Redo history. Corrupt numeric fields in
+        # an imported project must not leave the previous project half-loaded.
+        workspace_bounds: tuple[float, int, int] | None = None
+        if not (audio_path and Path(audio_path).exists()):
+            note_end = max((n.end for n in prepared_notes), default=0.0)
+            saved_duration = settings.get("workspace_duration")
+            if saved_duration is None:
+                workspace_duration = max(60.0, note_end)
+            else:
+                parsed_duration = float(saved_duration)
+                if not math.isfinite(parsed_duration):
+                    raise ValueError("workspace_duration must be finite")
+                workspace_duration = max(1.0, parsed_duration, note_end)
+            saved_midi_min = settings.get("workspace_midi_min")
+            saved_midi_max = settings.get("workspace_midi_max")
+            if saved_midi_min is None or saved_midi_max is None:
+                workspace_midi_min, workspace_midi_max = 12, 120
+            else:
+                workspace_midi_min = max(0, min(127, int(saved_midi_min)))
+                workspace_midi_max = max(0, min(127, int(saved_midi_max)))
+                if workspace_midi_max <= workspace_midi_min:
+                    workspace_midi_max = min(127, workspace_midi_min + 1)
+                    if workspace_midi_max <= workspace_midi_min:
+                        workspace_midi_min = max(0, workspace_midi_max - 1)
+            workspace_bounds = (workspace_duration, workspace_midi_min, workspace_midi_max)
+
         source_request=self._reserve_source_request()
         if audio_path and Path(audio_path).exists():
             with self._lock:self._busy=True
@@ -165,6 +209,7 @@ class IOMixin:
                 )
             finally:
                 with self._lock:self._busy=False
+
 
         with self._lock:
             if source_request != self._source_generation:
@@ -196,23 +241,8 @@ class IOMixin:
                     self._status=f"{Path(path).name} と音声を読み込みました"
             else:
                 self._detach_active_audio()
-                note_end=max((n.end for n in self.notes),default=0.0)
-                saved_duration=settings.get("workspace_duration")
-                saved_midi_min=settings.get("workspace_midi_min")
-                saved_midi_max=settings.get("workspace_midi_max")
-                if saved_duration is None:
-                    self.duration=max(60.0,note_end)
-                else:
-                    self.duration=max(1.0,float(saved_duration),note_end)
-                if saved_midi_min is None or saved_midi_max is None:
-                    self.midi_min=12;self.midi_max=120
-                else:
-                    self.midi_min=max(0,min(127,int(saved_midi_min)))
-                    self.midi_max=max(0,min(127,int(saved_midi_max)))
-                    if self.midi_max <= self.midi_min:
-                        self.midi_max=min(127,self.midi_min+1)
-                        if self.midi_max <= self.midi_min:
-                            self.midi_min=max(0,self.midi_max-1)
+                assert workspace_bounds is not None
+                self.duration, self.midi_min, self.midi_max = workspace_bounds
                 self.pitch_step=1.0;self.player.clear_audio();self._apply_player_settings();self._sync_notes_to_player()
                 if audio_path:
                     self._status=f"{Path(path).name} の音源が見つかりません。ファイル → プロジェクト音源を再指定… から選び直せます"
@@ -253,11 +283,39 @@ class IOMixin:
     def import_midi_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.OPEN,file_types=MIDI_FILE_TYPES)
         if not path:return self.get_state()
-        result=import_midi(path);imported=result.notes
+        result = import_midi(path)
+        imported = result.notes
         with self._lock:
-            self._push_undo();self.notes.extend(imported);self.notes.sort(key=lambda n:(n.start,n.midi,n.end))
-            if imported:self.duration=max(self.duration,max(n.end for n in imported))
-            self._dirty=True;self._sync_notes_to_player();self._status=f"MIDIから{len(imported)}個のノートを読み込みました";return self._state_dict()
+            # An empty MIDI import must not create an Undo step, erase Redo,
+            # or mark an otherwise unchanged project as modified.
+            if not imported:
+                self._status = "MIDIに読み込めるノートがありませんでした"
+                return self._state_dict()
+            # Prepare and validate every incoming note before modifying history
+            # or the document. A malformed later note must not leave a partial
+            # import or erase Redo.
+            prepared = [note.normalized() for note in imported]
+            # Reject malformed MIDI notes before touching Undo/Redo or the document.
+            # Sorting NaN timestamps does not raise, so explicit checks are needed.
+            for note in prepared:
+                for value in (
+                    note.start, note.end, note.midi, note.midi_end,
+                    note.ctrl1_midi, note.ctrl2_midi, note.target_angle,
+                ):
+                    if value is not None and not math.isfinite(float(value)):
+                        raise ValueError("MIDI import contains a non-finite note value")
+            merged_notes = sorted(
+                [*self.notes, *prepared],
+                key=lambda n: (n.start, n.midi, n.end),
+            )
+            new_duration = max(self.duration, max(note.end for note in prepared))
+            self._push_undo()
+            self.notes = merged_notes
+            self.duration = new_duration
+            self._dirty = True
+            self._sync_notes_to_player()
+            self._status = f"MIDIから{len(prepared)}個のノートを読み込みました"
+            return self._state_dict()
 
     def export_midi_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.SAVE,file_types=MIDI_FILE_TYPES,save_filename="notes.mid")

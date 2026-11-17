@@ -49,6 +49,7 @@ button:disabled { cursor: default; opacity: .48; }
 .toolbar .selected { background: #1d5c83; border-color: #397fa8; }
 .toolbar-spacer { flex: 1; min-width: 4px; }
 .toolbar output { min-width:154px;padding: 5px 8px; border: 1px solid #111519; border-radius: var(--radius); background: #12161a; font: 11px var(--font-data); font-variant-numeric:tabular-nums;white-space: nowrap; }
+.toolbar .playback-error { color:var(--warning);font-size:11px;max-width:220px;min-width:100px;flex:0 1 220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .panel-toggle{font-size:11px;white-space:nowrap}
 .workspace { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(480px, 1fr) 286px; overflow-x: auto; overflow-y: hidden; }
 .workspace.panel-collapsed{grid-template-columns:minmax(480px,1fr)}

@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+import math
+import unittest
+from unittest import mock
+
+from core.note_model import Note
+from web.notes import _clamp
+from web_ui import Bridge
+
+
+class NonFiniteNoteInputTests(unittest.TestCase):
+    def make_bridge(self) -> Bridge:
+        bridge = Bridge()
+        bridge.duration = 10.0
+        bridge.notes = [Note(1.0, 2.0, 60.0).normalized()]
+        bridge._clipboard = [Note(0.0, 1.0, 64.0).normalized()]
+        bridge._saved_checkpoint = bridge._document_checkpoint()
+        bridge._redo_stack.append(bridge._snapshot())
+        return bridge
+
+    def assert_unchanged(self, bridge: Bridge, original: list[Note]) -> None:
+        self.assertEqual(bridge.notes, original)
+        self.assertEqual(bridge.duration, 10.0)
+        self.assertFalse(bridge._dirty)
+        self.assertEqual(len(bridge._undo_stack), 0)
+        self.assertEqual(len(bridge._redo_stack), 1)
+
+    def test_inspector_rejects_nonfinite_time_and_pitch(self):
+        for field in ("start", "end", "midi"):
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(field=field, value=value):
+                    bridge = self.make_bridge()
+                    original = list(bridge.notes)
+                    with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                        with self.assertRaisesRegex(ValueError, "finite"):
+                            bridge.set_note_properties(0, {field: value})
+                    self.assert_unchanged(bridge, original)
+                    sync.assert_not_called()
+
+    def test_move_rejects_nonfinite_time_and_pitch_deltas(self):
+        for field in ("dx", "dy"):
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(field=field, value=value):
+                    bridge = self.make_bridge()
+                    original = list(bridge.notes)
+                    args = {"dx": 0.0, "dy": 0.0}
+                    args[field] = value
+                    with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                        with self.assertRaisesRegex(ValueError, "finite"):
+                            bridge.move_notes([0], **args)
+                    self.assert_unchanged(bridge, original)
+                    sync.assert_not_called()
+
+    def test_paste_rejects_nonfinite_insertion_time(self):
+        for value in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=value):
+                bridge = self.make_bridge()
+                original = list(bridge.notes)
+                with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                    with self.assertRaisesRegex(ValueError, "finite"):
+                        bridge.paste_notes(value)
+                self.assert_unchanged(bridge, original)
+                sync.assert_not_called()
+
+    def test_add_rejects_nonfinite_time_and_pitch(self):
+        for field in ("start", "end", "midi"):
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(field=field, value=value):
+                    bridge = self.make_bridge()
+                    original = list(bridge.notes)
+                    args = {"start": 1.0, "end": 2.0, "midi": 60.0}
+                    args[field] = value
+                    with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                        with self.assertRaisesRegex(ValueError, "finite"):
+                            bridge.add_note(**args)
+                    self.assert_unchanged(bridge, original)
+                    sync.assert_not_called()
+
+    def test_curve_end_pitch_rejects_nonfinite_without_history(self):
+        for value in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=value):
+                bridge = self.make_bridge()
+                original = list(bridge.notes)
+                with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                    with self.assertRaisesRegex(ValueError, "finite"):
+                        bridge.add_note(2.0, 3.0, 60.0, kind="curve", end_midi=value)
+                self.assert_unchanged(bridge, original)
+                sync.assert_not_called()
+
+    def test_valid_curve_add_keeps_one_undo_step(self):
+        bridge = self.make_bridge()
+        with mock.patch.object(bridge, "_sync_notes_to_player"):
+            result = bridge.add_note(2.0, 3.0, 60.0, kind="curve", end_midi=72.0)
+        self.assertEqual(result["index"], 1)
+        self.assertTrue(bridge.notes[-1].is_curve)
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        self.assertTrue(bridge._dirty)
+        with mock.patch.object(bridge, "_sync_notes_to_player"):
+            bridge.undo()
+        self.assertEqual(len(bridge.notes), 1)
+        self.assertFalse(bridge._dirty)
+
+    def test_inspector_rejects_nonfinite_duration_and_velocity_without_history(self):
+        for field in ("duration", "velocity"):
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(field=field, value=value):
+                    bridge = self.make_bridge()
+                    original = list(bridge.notes)
+                    with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                        with self.assertRaisesRegex(ValueError, "finite"):
+                            bridge.set_note_properties(0, {field: value})
+                    self.assert_unchanged(bridge, original)
+                    sync.assert_not_called()
+
+    def test_inspector_accepts_finite_duration_and_velocity(self):
+        bridge = self.make_bridge()
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            result = bridge.set_note_properties(0, {"duration": 1.5, "velocity": 88})
+        self.assertTrue(result["changed"])
+        self.assertEqual(bridge.notes[0].start, 1.0)
+        self.assertEqual(bridge.notes[0].end, 2.5)
+        self.assertEqual(bridge.notes[0].velocity, 88)
+        self.assertTrue(bridge._dirty)
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        sync.assert_called_once()
+        with mock.patch.object(bridge, "_sync_notes_to_player"):
+            bridge.undo()
+        self.assertEqual(bridge.notes, [Note(1.0, 2.0, 60.0).normalized()])
+        self.assertFalse(bridge._dirty)
+
+    def test_bulk_edit_rejects_nonfinite_inputs_without_history(self):
+        for field in ("timeDelta", "pitchDelta", "duration"):
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(field=field, value=value):
+                    bridge = self.make_bridge()
+                    original = list(bridge.notes)
+                    with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                        with self.assertRaisesRegex(ValueError, "finite"):
+                            bridge.bulk_edit_notes([0], {field: value})
+                    self.assert_unchanged(bridge, original)
+                    sync.assert_not_called()
+
+    def test_drag_duplicate_rejects_nonfinite_deltas_without_history(self):
+        for field in ("dx", "dy"):
+            for value in (math.nan, math.inf, -math.inf):
+                with self.subTest(field=field, value=value):
+                    bridge = self.make_bridge()
+                    original = list(bridge.notes)
+                    args = {"dx": 0.0, "dy": 0.0}
+                    args[field] = value
+                    with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                        with self.assertRaisesRegex(ValueError, "finite"):
+                            bridge.duplicate_notes_shifted([0], **args)
+                    self.assert_unchanged(bridge, original)
+                    sync.assert_not_called()
+
+    def test_bulk_edit_noop_preserves_redo_and_clean_state(self):
+        bridge = self.make_bridge()
+        original = list(bridge.notes)
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            result = bridge.bulk_edit_notes(
+                [0], {"timeDelta": 0.0, "pitchDelta": 0.0, "duration": 1.0}
+            )
+        self.assertFalse(result["changed"])
+        self.assertFalse(result["dirty"])
+        self.assert_unchanged(bridge, original)
+        sync.assert_not_called()
+
+    def test_bulk_edit_valid_change_can_be_undone(self):
+        bridge = self.make_bridge()
+        original = list(bridge.notes)
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            result = bridge.bulk_edit_notes([0], {"pitchDelta": 2.0, "duration": 1.5})
+        self.assertTrue(result["changed"])
+        self.assertEqual(bridge.notes[0].midi, 62.0)
+        self.assertEqual(bridge.notes[0].end, 2.5)
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        self.assertTrue(bridge._dirty)
+        sync.assert_called_once()
+        with mock.patch.object(bridge, "_sync_notes_to_player"):
+            bridge.undo()
+        self.assertEqual(bridge.notes, original)
+        self.assertFalse(bridge._dirty)
+
+    def test_invalid_note_indices_cannot_delete_other_notes(self):
+        # Fractional, non-finite and non-numeric API indices must not be
+        # truncated to a valid note index or corrupt the Undo/Redo history.
+        for index in (0.5, 1.5, math.nan, math.inf, -math.inf, "0", True, None):
+            with self.subTest(index=index):
+                bridge = self.make_bridge()
+                bridge.notes.append(Note(3.0, 4.0, 62.0).normalized())
+                original = list(bridge.notes)
+                with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                    result = bridge.delete_notes([index])
+                self.assertIn("選択されていません", result["status"])
+                self.assert_unchanged(bridge, original)
+                sync.assert_not_called()
+
+    def test_curve_interpolation_rejects_invalid_indices(self):
+        # This API previously used its own int(i) conversion, bypassing
+        # _valid_indices and potentially editing the wrong curve.
+        for index in (0.5, math.nan, math.inf, "0", True, None):
+            with self.subTest(index=index):
+                bridge = self.make_bridge()
+                bridge.notes = [Note(1.0, 2.0, 60.0, 100, "curve", 72.0).normalized()]
+                original = list(bridge.notes)
+                with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+                    result = bridge.apply_interpolation([index], "linear_pitch")
+                self.assertIn("選択されていません", result["status"])
+                self.assert_unchanged(bridge, original)
+                sync.assert_not_called()
+
+    def test_integral_float_indices_remain_compatible(self):
+        bridge = self.make_bridge()
+        with mock.patch.object(bridge, "_sync_notes_to_player") as sync:
+            bridge.delete_notes([0.0])
+        self.assertEqual(bridge.notes, [])
+        self.assertEqual(len(bridge._undo_stack), 1)
+        self.assertEqual(len(bridge._redo_stack), 0)
+        sync.assert_called_once()
+
+    def test_finite_bounds_still_clamp(self):
+        self.assertEqual(_clamp(-5.0, 0.0, 10.0), 0.0)
+        self.assertEqual(_clamp(5.5, 0.0, 10.0), 5.5)
+        self.assertEqual(_clamp(50.0, 0.0, 10.0), 10.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { previewIsCurrent } from "../src/dialogs/previewFreshness.ts";
+import { harmonicErrorIsCurrent, previewIsCurrent } from "../src/dialogs/previewFreshness.ts";
 
 const original = JSON.stringify({ rootHz: 440, harmonics: "1,2,3" });
 const changed = JSON.stringify({ rootHz: 442, harmonics: "1,2,3" });
@@ -20,4 +20,13 @@ test("missing preview cannot become current even when keys match", () => {
 test("returning to the exact original options permits the matching preview", () => {
   assert.equal(previewIsCurrent({ rows: [1] }, original, original), true);
   assert.equal(previewIsCurrent({ rows: [1] }, original, changed), false);
+});
+
+test("harmonic errors are visible only for their originating options", () => {
+  assert.equal(harmonicErrorIsCurrent(null, original), false);
+  assert.equal(harmonicErrorIsCurrent({ optionsKey: original }, original), true);
+  assert.equal(harmonicErrorIsCurrent({ optionsKey: original }, changed), false);
+  assert.equal(harmonicErrorIsCurrent({ optionsKey: original }, null), false);
+  // Defaults-loading errors have no options yet and remain visible for retry.
+  assert.equal(harmonicErrorIsCurrent({}, null), true);
 });

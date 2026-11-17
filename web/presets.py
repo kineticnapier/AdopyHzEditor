@@ -82,9 +82,10 @@ class PresetMixin:
         if len(preset_name) > 80:
             raise ValueError("プリセット名が長すぎます")
         with self._lock:
-            i = int(index)
-            if i < 0 or i >= len(self.notes):
+            valid = self._valid_indices([index])
+            if not valid:
                 raise ValueError("1個のノートを選択してください")
+            i = valid[0]
             note = self.notes[i].normalized().with_time_offset(-self.notes[i].normalized().start)
         presets = self._load_note_preset_map()
         presets[preset_name] = note.to_dict()

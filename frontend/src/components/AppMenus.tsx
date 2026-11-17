@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
+import { canTransferDeferredMenuFocus, focusAdjacentMenu, focusOpenedMenuEdgeItem, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
 
 type Props = {
   hasSelection:boolean;
@@ -33,18 +34,35 @@ type MenuProps={id:MenuId;label:string;active:MenuId|null;setActive(v:MenuId|nul
 
 function Menu({id,label,active,setActive,children}:MenuProps){
   const open=active===id;
-  const popupId=useId(),popupRef=useRef<HTMLDivElement>(null);
-  const focusItem=(edge:"first"|"last")=>window.requestAnimationFrame(()=>{const items=popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');items?.[edge==="first"?0:Math.max(0,items.length-1)]?.focus()});
+  const popupId=useId(),triggerId=useId(),popupRef=useRef<HTMLDivElement>(null);
+  const focusItem=(edge:"first"|"last")=>{
+    const focusedBeforeOpen=document.activeElement;
+    window.requestAnimationFrame(()=>focusOpenedMenuEdgeItem(
+      popupRef.current,edge,focusedBeforeOpen,document.activeElement,document.body,document.documentElement
+    ));
+  };
   function navigate(event:ReactKeyboardEvent<HTMLDivElement>){
+    if(!isPlainMenuNavigationEvent(event.nativeEvent))return;
     const items=Array.from(popupRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')??[]),index=items.indexOf(document.activeElement as HTMLButtonElement);
     if(event.key==="ArrowDown"){event.preventDefault();items[(index+1+items.length)%items.length]?.focus()}
     else if(event.key==="ArrowUp"){event.preventDefault();items[(index-1+items.length)%items.length]?.focus()}
     else if(event.key==="Home"){event.preventDefault();items[0]?.focus()}
     else if(event.key==="End"){event.preventDefault();items.at(-1)?.focus()}
   }
-  return <div className={open?"app-menu open":"app-menu"} onMouseEnter={()=>{if(active!==null&&!open)setActive(id)}}>
-    <button className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
-    {open&&<div ref={popupRef} id={popupId} className="app-menu-popup" role="menu" onKeyDown={navigate}>{children}</div>}
+  return <div className={open?"app-menu open":"app-menu"} onMouseEnter={event=>{
+    if(active===null||open)return;
+    const focusedBeforeSwitch=document.activeElement;
+    const origin=menuHoverFocusOrigin(active,focusedBeforeSwitch);
+    const root=event.currentTarget.closest<HTMLElement>(".app-menus");
+    setActive(id);
+    // Do not override a new focus destination chosen before the next frame.
+    if(origin)window.requestAnimationFrame(()=>{
+      if(canTransferDeferredMenuFocus(focusedBeforeSwitch,document.activeElement,document.body,document.documentElement))
+        focusAdjacentMenu(root,id,origin==="popup",true);
+    });
+  }}>
+    <button id={triggerId} className="app-menu-trigger" data-menu-id={id} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={open?popupId:undefined} onKeyDown={event=>{if(!isPlainMenuNavigationEvent(event.nativeEvent))return;if(event.key==="ArrowDown"||event.key==="Enter"||event.key===" "){event.preventDefault();setActive(id);focusItem("first")}else if(event.key==="ArrowUp"){event.preventDefault();setActive(id);focusItem("last")}}} onClick={()=>setActive(open?null:id)}>{label}</button>
+    {open&&<div ref={popupRef} id={popupId} data-menu-popup={id} className="app-menu-popup" role="menu" aria-labelledby={triggerId} onKeyDown={navigate}>{children}</div>}
   </div>;
 }
 
@@ -55,24 +73,30 @@ function Action({children,shortcut,disabled,onClick,close}:{children:string;shor
 export default function AppMenus(p:Props){
   const[active,setActive]=useState<MenuId|null>(null);
   const rootRef=useRef<HTMLElement>(null);
+  const focusTrigger=(id:MenuId)=>window.requestAnimationFrame(()=>restoreMenuTriggerFocus(rootRef.current,id,document.activeElement,document.body,document.documentElement));
   useEffect(()=>{
     const down=(e:PointerEvent)=>{const r=rootRef.current;if(r&&!r.contains(e.target as Node))setActive(null)};
-    const key=(e:KeyboardEvent)=>{consumeMenuEscape(e,active,id=>{setActive(null);window.requestAnimationFrame(()=>rootRef.current?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`)?.focus())})};
+    const key=(e:KeyboardEvent)=>{consumeMenuEscape(e,active,id=>{setActive(null);focusTrigger(id)})};
     window.addEventListener("pointerdown",down);
     window.addEventListener("keydown",key,true);
     return()=>{window.removeEventListener("pointerdown",down);window.removeEventListener("keydown",key,true)};
   },[active]);
-  const focusTrigger=(id:MenuId)=>window.requestAnimationFrame(()=>rootRef.current?.querySelector<HTMLButtonElement>(`[data-menu-id="${id}"]`)?.focus());
   const close=()=>{const id=active;setActive(null);if(id)focusTrigger(id)};
   const menuIds:MenuId[]=["file","edit","analyze","tools","options","help"];
   function traverseMenus(event:ReactKeyboardEvent<HTMLElement>){
+    if(!isPlainMenuNavigationEvent(event.nativeEvent))return;
     if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;
-    const target=(event.target as HTMLElement).closest<HTMLButtonElement>("[data-menu-id]"),current=(active??target?.dataset.menuId) as MenuId|undefined;
-    if(!current)return;
+    const target=(event.target as HTMLElement).closest<HTMLButtonElement>("[data-menu-id]");
+    const next=nextMenuId(menuIds,active,(target?.dataset.menuId as MenuId|undefined)??null,event.key);
+    if(!next)return;
     event.preventDefault();
-    const index=menuIds.indexOf(current),next=menuIds[(index+(event.key==="ArrowRight"?1:-1)+menuIds.length)%menuIds.length];
+    const fromPopup=Boolean((event.target as HTMLElement).closest('[role="menu"]'));
+    const focusedBeforeMove=document.activeElement;
     if(active)setActive(next);
-    focusTrigger(next);
+    window.requestAnimationFrame(()=>{
+      if(canTransferDeferredMenuFocus(focusedBeforeMove,document.activeElement,document.body,document.documentElement))
+        focusAdjacentMenu(rootRef.current,next,Boolean(active && fromPopup),Boolean(active));
+    });
   }
   return <nav className="app-menus" aria-label="アプリケーションメニュー" ref={rootRef} onKeyDown={traverseMenus} onBlur={event=>{if(active&&!event.currentTarget.contains(event.relatedTarget as Node|null))setActive(null)}}>
     <Menu id="file" label="ファイル" active={active} setActive={setActive}>

@@ -9,6 +9,7 @@ core track derivation code to the Web backend.
 from __future__ import annotations
 
 from typing import Any
+import math
 
 import numpy as np
 
@@ -17,6 +18,13 @@ from web.editing import MIN_NOTE_DURATION
 
 
 _MAX_TRACK_SELECTION = 10_000
+
+
+def _finite_number(value: Any, name: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{name} must be finite")
+    return number
 
 
 def _track_slice(store, track_id: int) -> tuple[int, int] | None:
@@ -122,8 +130,10 @@ def _segment_arrays(
 
     if all_times.size == 1 or clip_end <= clip_start + 1e-12:
         t = clip_start
-        midi = float(all_midis[0])
-        magnitude = float(all_magnitudes[0])
+        # A zero-width clip can fall anywhere along a multi-point track.
+        # Use its local pitch and strength, not the track's first sample.
+        midi = float(np.interp(t, all_times, all_midis))
+        magnitude = float(np.interp(t, all_times, all_magnitudes))
         return (
             np.array([t], dtype=np.float64),
             np.array([midi], dtype=np.float64),
@@ -272,13 +282,26 @@ def find_frequency_tracks(
     """Return full-resolution track ids intersecting a transcription rectangle."""
     with self._lock:
         store = getattr(self, "frequency_track_store", None)
+        duration = float(self.duration)
     if store is None:
         return {"trackIds": [], "status": "Frequency Tracks を先に解析してください"}
 
-    start = max(0.0, float(start_time))
-    end = max(start, float(end_time))
-    midi_min = max(0.0, min(127.0, float(minimum_midi)))
-    midi_max = max(midi_min, min(127.0, float(maximum_midi)))
+    raw_start, raw_end = sorted((
+        _finite_number(start_time, "start_time"),
+        _finite_number(end_time, "end_time"),
+    ))
+    raw_min, raw_max = sorted((
+        _finite_number(minimum_midi, "minimum_midi"),
+        _finite_number(maximum_midi, "maximum_midi"),
+    ))
+    # A rectangle wholly outside the timeline or MIDI range must not snap to
+    # the nearest boundary and accidentally select a track at 0s / MIDI 0/127.
+    if raw_end < 0.0 or raw_start > duration or raw_max < 0.0 or raw_min > 127.0:
+        return {"trackIds": [], "status": "Frequency Track を0本選択しました"}
+    start = max(0.0, raw_start)
+    end = min(duration, raw_end)
+    midi_min = max(0.0, raw_min)
+    midi_max = min(127.0, raw_max)
     candidates = np.flatnonzero(
         (store.track_start_times <= end) & (store.track_end_times >= start)
     )
@@ -312,6 +335,10 @@ def create_notes_from_tracks(
     if conversion_mode not in {"fixed", "curve"}:
         raise ValueError("mode must be 'fixed' or 'curve'")
 
+    # Reject malformed clip values before the first possible undo or note edit.
+    validated_start = None if start_time is None else _finite_number(start_time, "start_time")
+    validated_end = None if end_time is None else _finite_number(end_time, "end_time")
+
     with self._lock:
         store = getattr(self, "frequency_track_store", None)
         if store is None:
@@ -327,6 +354,7 @@ def create_notes_from_tracks(
                 int(value)
                 for value in track_ids
                 if isinstance(value, (int, np.integer))
+                and not isinstance(value, bool)
                 and 0 <= int(value) < int(store.track_count)
             }
         )
@@ -338,10 +366,22 @@ def create_notes_from_tracks(
                 "status": "Track が選択されていません",
             }
 
-        clip_start = None if start_time is None else max(0.0, float(start_time))
-        clip_end = None if end_time is None else min(float(self.duration), float(end_time))
-        if clip_start is not None and clip_end is not None and clip_end < clip_start:
-            clip_start, clip_end = clip_end, clip_start
+        # Normalize the requested interval before clipping it to the audio.
+        # Clipping first then swapping can turn a wholly out-of-range request
+        # into a zero-width conversion at the first/last track sample.
+        raw_start, raw_end = validated_start, validated_end
+        if raw_start is not None and raw_end is not None and raw_start > raw_end:
+            raw_start, raw_end = raw_end, raw_start
+        duration = float(self.duration)
+        if (raw_start is not None and raw_start > duration) or (raw_end is not None and raw_end < 0.0):
+            return {
+                "notes": self._note_dicts(),
+                "indices": [],
+                "changed": False,
+                "status": "指定範囲にNote化できるTrackがありません",
+            }
+        clip_start = None if raw_start is None else max(0.0, raw_start)
+        clip_end = None if raw_end is None else min(duration, raw_end)
 
         created: list[Note] = []
         used_track_ids: list[int] = []

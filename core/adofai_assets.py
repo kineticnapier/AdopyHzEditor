@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import time
+from contextlib import contextmanager
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import wave
 from pathlib import Path
 from typing import Iterable
 
@@ -171,10 +175,46 @@ def _source_signature(game_root: Path) -> dict[str, object]:
     return result
 
 
+def _valid_kick_wav(path: Path) -> bool:
+    """Reject missing, truncated or non-PCM WAVs before caching them."""
+    try:
+        file_size = path.stat().st_size
+        if file_size <= 44:
+            return False
+        with path.open("rb") as source:
+            header = source.read(12)
+            # wave.open() accepts a RIFF header claiming more bytes than the
+            # file contains when the PCM data chunk itself is complete.
+            if (len(header) != 12 or header[:4] != b"RIFF" or
+                    header[8:12] != b"WAVE" or
+                    int.from_bytes(header[4:8], "little") > file_size - 8):
+                return False
+            source.seek(0)
+            with wave.open(source, "rb") as reader:
+                frames = reader.getnframes()
+                expected_bytes = frames * reader.getnchannels() * reader.getsampwidth()
+                if (frames <= 0 or reader.getframerate() <= 0 or
+                        reader.getnchannels() <= 0 or reader.getsampwidth() <= 0 or
+                        expected_bytes > file_size):
+                    return False
+                # Read in bounded blocks: a valid large WAV must not be loaded
+                # into memory in full on every cache lookup.
+                frame_bytes = reader.getnchannels() * reader.getsampwidth()
+                remaining = frames
+                while remaining:
+                    chunk_frames = min(remaining, 16_384)
+                    if len(reader.readframes(chunk_frames)) != chunk_frames * frame_bytes:
+                        return False
+                    remaining -= chunk_frames
+                return True
+    except (OSError, EOFError, ValueError, RuntimeError, wave.Error):
+        return False
+
+
 def _cached_signature_matches(game_root: Path) -> bool:
     kick = adofai_kick_cache_path()
     manifest = _cache_manifest_path()
-    if not kick.is_file() or kick.stat().st_size <= 44 or not manifest.is_file():
+    if not manifest.is_file() or not _valid_kick_wav(kick):
         return False
     try:
         saved = json.loads(manifest.read_text(encoding="utf-8"))
@@ -247,28 +287,109 @@ def _run_extractor(game_root: Path, output_path: Path) -> None:
         )
 
 
-def ensure_adofai_kick(*, force: bool = False) -> Path:
+@contextmanager
+def _kick_cache_lock(cache_dir: Path, timeout: float = 660.0):
+    """Serialize cache readers/writers across processes on Windows and POSIX."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = cache_dir / "sndKick.lock"
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\x00")
+            handle.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except (OSError, BlockingIOError) as exc:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Timed out waiting for ADOFAI Kick cache lock") from exc
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def ensure_adofai_kick(*, force: bool = False, _read_locked=None):
+    """Prepare the cache; optionally consume its WAV while holding the cache lock.
+
+    _read_locked is an internal callback. Ordinary callers still receive a Path.
+    """
     game_root = find_adofai_installation()
     if game_root is None:
         raise FileNotFoundError(
             "ADOFAI installation was not found. Set ADOPYHZ_ADOFAI_PATH to the game directory."
         )
 
-    if not force and _cached_signature_matches(game_root):
-        return adofai_kick_cache_path()
-
     kick = adofai_kick_cache_path()
-    kick.parent.mkdir(parents=True, exist_ok=True)
-    _run_extractor(game_root, kick)
-
-    if not kick.is_file() or kick.stat().st_size <= 44:
-        raise RuntimeError("ADOFAI Kick extractor finished without a valid sndKick.wav.")
-
-    manifest = _cache_manifest_path()
-    temp = manifest.with_suffix(manifest.suffix + ".tmp")
-    temp.write_text(
-        json.dumps(_source_signature(game_root), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temp.replace(manifest)
-    return kick
+    with _kick_cache_lock(kick.parent):
+        if not force and _cached_signature_matches(game_root):
+            return _read_locked(kick) if _read_locked is not None else kick
+        manifest = _cache_manifest_path()
+        # Prepare both files before replacing either published cache file.
+        with tempfile.TemporaryDirectory(prefix="sndKick-refresh-", dir=kick.parent) as tmp:
+            staging = Path(tmp)
+            staged = staging / "sndKick.wav"
+            staged_manifest = staging / "sndKick.source.json"
+            _run_extractor(game_root, staged)
+            if not _valid_kick_wav(staged):
+                raise RuntimeError("ADOFAI Kick extractor finished without a valid sndKick.wav.")
+            staged_manifest.write_text(
+                json.dumps(_source_signature(game_root), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+    
+            # Backups are on the same volume. Roll back both files if either
+            # publication step raises; never leave a new WAV with an old signature.
+            old_kick = staging / "old-sndKick.wav"
+            old_manifest = staging / "old-sndKick.source.json"
+            had_kick = kick.exists()
+            had_manifest = manifest.exists()
+            if had_kick:
+                shutil.copy2(kick, old_kick)
+            if had_manifest:
+                shutil.copy2(manifest, old_manifest)
+            try:
+                staged.replace(kick)
+                staged_manifest.replace(manifest)
+            except Exception as publication_error:
+                # Attempt both restores even when one fails. Otherwise a failed
+                # WAV restore prevents the manifest restore from running at all.
+                rollback_errors: list[Exception] = []
+                for existed, backup, destination in (
+                    (had_kick, old_kick, kick),
+                    (had_manifest, old_manifest, manifest),
+                ):
+                    try:
+                        if existed:
+                            backup.replace(destination)
+                        else:
+                            destination.unlink(missing_ok=True)
+                    except Exception as rollback_error:
+                        rollback_errors.append(rollback_error)
+                if rollback_errors:
+                    if sys.version_info >= (3, 11):
+                        raise ExceptionGroup(
+                            "ADOFAI Kick cache publication and rollback failed",
+                            [publication_error, *rollback_errors],
+                        )
+                    # ExceptionGroup is unavailable before Python 3.11. Preserve
+                    # the original error as the cause and report every rollback error.
+                    details = "; ".join(repr(error) for error in rollback_errors)
+                    raise RuntimeError(
+                        f"ADOFAI Kick cache publication and rollback failed: {details}"
+                    ) from publication_error
+                raise
+        return _read_locked(kick) if _read_locked is not None else kick

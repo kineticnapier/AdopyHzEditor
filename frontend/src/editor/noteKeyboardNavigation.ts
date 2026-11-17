@@ -25,3 +25,13 @@ export function reconcileKeyboardNote(
   return lastSelected !== undefined && lastSelected >= 0 && lastSelected < noteCount
     ? lastSelected : null;
 }
+
+/** Select the contiguous time-ordered range from a fixed keyboard anchor.
+ * Returning sorted indices keeps the editor's selection representation stable. */
+export function keyboardRangeSelection(order: readonly number[], anchor: number, active: number): number[] {
+  const anchorPosition = order.indexOf(anchor), activePosition = order.indexOf(active);
+  if (activePosition < 0) return [];
+  if (anchorPosition < 0) return [active];
+  return order.slice(Math.min(anchorPosition, activePosition), Math.max(anchorPosition, activePosition) + 1)
+    .sort((a, b) => a - b);
+}

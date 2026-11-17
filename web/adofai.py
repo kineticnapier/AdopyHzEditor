@@ -4,6 +4,7 @@ import csv
 import filecmp
 import io
 import json
+import math
 import os
 import shutil
 import tempfile
@@ -93,7 +94,9 @@ def _copy_song_atomic(source: Path, target: Path) -> None:
 def _as_float(value: Any, default: float, lo: float | None = None, hi: float | None = None) -> float:
     try:
         result = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        result = float(default)
+    if not math.isfinite(result):
         result = float(default)
     if lo is not None:
         result = max(float(lo), result)
@@ -105,7 +108,7 @@ def _as_float(value: Any, default: float, lo: float | None = None, hi: float | N
 def _as_int(value: Any, default: int, lo: int | None = None, hi: int | None = None) -> int:
     try:
         result = int(round(float(value)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         result = int(default)
     if lo is not None:
         result = max(int(lo), result)
@@ -153,11 +156,19 @@ def _stabilize_rabbit_zip_cycle_boundaries(notes: list[Any]) -> list[Any]:
 class AdoFAIMixin:
     """Advanced ADOFAI export and help APIs used by the web UI."""
 
-    def get_adofai_export_defaults(self, selected_indices: list[int] | None = None) -> dict[str, Any]:
+    def get_adofai_export_defaults(
+        self, selected_indices: list[int] | None = None, selected_only: bool = False
+    ) -> dict[str, Any]:
         with self._lock:
+            # The manual offset displayed by the dialog must match the mode
+            # used to open it. A regular full export ignores the selection;
+            # an explicit selected-only export starts at its first note.
             selected = self._valid_export_indices(selected_indices)
-            first_source = [self.notes[i].normalized() for i in selected] if selected else [n.normalized() for n in self.notes]
-            auto_offset = min((n.start for n in first_source), default=0.0) * 1000.0
+            all_notes = [n.normalized() for n in self.notes]
+            selected_notes = [all_notes[i] for i in selected] if selected else all_notes
+            full_offset = min((n.start for n in all_notes), default=0.0) * 1000.0
+            selected_offset = min((n.start for n in selected_notes), default=0.0) * 1000.0
+            auto_offset = selected_offset if selected_only and selected else full_offset
             bpm = float(self.settings.get("bpm", 175.0))
             has_song = bool(self.audio_path)
         return {
@@ -194,23 +205,18 @@ class AdoFAIMixin:
             "songConflictAction": "cancel",
             "songOffsetAuto": True,
             "songOffsetMs": round(auto_offset, 3),
-            "selectedOnly": False,
+            # Keep both automatic offsets available when the dialog changes scope.
+            "fullSongOffsetMs": round(full_offset, 3),
+            "selectedSongOffsetMs": round(selected_offset, 3),
+            "selectedOnly": bool(selected_only and selected),
         }
 
     def _valid_export_indices(self, indices: list[int] | None) -> list[int]:
         if not indices:
             return []
-        out: list[int] = []
-        seen: set[int] = set()
-        for raw in indices:
-            try:
-                index = int(raw)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= index < len(self.notes) and index not in seen:
-                out.append(index)
-                seen.add(index)
-        return sorted(out)
+        # Export selection must obey the same exact-index rules as editing.
+        # int(0.5), int(True), and int("1") would target a different note.
+        return self._valid_indices(indices)
 
     def _prepare_adofai_export(
         self,
@@ -220,7 +226,10 @@ class AdoFAIMixin:
         raw = dict(raw_options or {})
         with self._lock:
             selected = self._valid_export_indices(selected_indices)
-            selected_only = bool(raw.get("selectedOnly", False)) and bool(selected)
+            selected_only = bool(raw.get("selectedOnly", False))
+            if selected_only and not selected:
+                # Never turn an explicitly selected-only export into a full export.
+                raise ValueError("選択ノートがありません")
             source = [self.notes[i] for i in selected] if selected_only else list(self.notes)
             semitones = int(self.settings.get("exportOctave", 0)) * 12 + int(self.settings.get("exportSemitone", 0))
             notes = [n.with_pitch_offset(semitones) for n in source]

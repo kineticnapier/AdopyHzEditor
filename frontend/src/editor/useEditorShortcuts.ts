@@ -1,21 +1,17 @@
-import { useEffect } from "react";
-import type { BackendApi } from "./bridge";
-import { dispatchEditorShortcut, type ShortcutActions } from "./shortcutDispatch";
-import { shouldDispatchEditorShortcut } from "./shortcutTarget";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { createEditorShortcutHandler, type ShortcutListenerState } from "./shortcutListener";
 
-type Args = ShortcutActions & {
-  disabled: boolean;
-  api: BackendApi | null;
-};
+export default function useEditorShortcuts(a: ShortcutListenerState) {
+  const latestArgs = useRef(a);
+  // A new action object is passed on every App render. Update the handler's
+  // state before browser input can be dispatched for the committed UI.
+  useLayoutEffect(() => {
+    latestArgs.current = a;
+  }, [a]);
 
-export default function useEditorShortcuts(a: Args) {
   useEffect(() => {
-    if (!a.api) return;
-    const handler = (event: KeyboardEvent) => {
-      if (!shouldDispatchEditorShortcut(event, a.disabled)) return;
-      dispatchEditorShortcut(event, a);
-    };
+    const handler = createEditorShortcutHandler(() => latestArgs.current);
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [a]);
+  }, []);
 }
