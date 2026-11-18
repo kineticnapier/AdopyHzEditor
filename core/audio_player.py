@@ -522,25 +522,36 @@ class AudioPlayer:
                     self._pos_float = 0.0
                 stream = self.stream
                 sample_rate = self.sr
-            if stream is None:
-                stream = self.sd.OutputStream(
-                    samplerate=sample_rate,
-                    channels=1,
-                    dtype="float32",
-                    callback=self._callback,
-                    blocksize=1024,
-                )
-                with self.lock:
-                    self.stream = stream
-            with self.lock:
-                self.playing = True
             try:
+                # Creating the stream can fail before start() (for example,
+                # when the system has no default output device).
+                if stream is None:
+                    stream = self.sd.OutputStream(
+                        samplerate=sample_rate,
+                        channels=1,
+                        dtype="float32",
+                        callback=self._callback,
+                        blocksize=1024,
+                    )
+                    with self.lock:
+                        self.stream = stream
+                with self.lock:
+                    self.playing = True
                 stream.start()
             except Exception as exc:
                 with self.lock:
                     self.playing = False
                     self.available = False
                     self.error = repr(exc)
+                    if self.stream is stream:
+                        self.stream = None
+                # A failed start must not retain a broken stream. PortAudio
+                # calls stay outside the callback lock, as in stop().
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
 
     def pause(self) -> None:
         with self._stream_control_lock:

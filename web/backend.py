@@ -26,6 +26,7 @@ from core.vorbis_spectrum_store import (
 )
 from web.editing import EditingMixin
 from web.io import DEFAULT_EDITOR_SETTINGS, IOMixin
+from web.kick_pitch import KickPitchMixin
 from web.notes import EditorSnapshot, NoteMixin
 from web.track_display import readable_frequency_track_region
 from web.track_transcription import TrackTranscriptionMixin
@@ -46,7 +47,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, float(value)))
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("numeric value must be finite")
+    return max(lo, min(hi, parsed))
 
 
 def _int_clamp(value: Any, lo: int, hi: int) -> int:
@@ -110,7 +114,7 @@ def _pool_absolute_time_columns(
     return pooled, aligned_left, aligned_right
 
 
-class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
+class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
     """Stateful Python backend for the React/TypeScript editor shell.
 
     pywebview executes exposed API calls in worker threads, so mutable editor
@@ -127,6 +131,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self._spectrogram_render_cache_u8: np.ndarray | None = None
         self.vorbis_spectrum_store: VorbisSpectrumStore | None = None
         self.frequency_track_store: FrequencyTrackStore | None = None
+        self.kick_pitch_result = None
         self.analysis_stats: dict[str, Any] = {}
         self.audio_path: str | None = None
         # The project may intentionally keep a reference to an unavailable
@@ -346,6 +351,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         elif direct_pending:
             self.midi_min, self.midi_max = 0, 127
             self.pitch_step = 1.0
+        self._rebase_history_to_current_source(self.duration)
         # Project loading and audio replacement must preserve notes beyond the
         # decoded/analysed audio duration, without retaining an old document's
         # unrelated duration.
@@ -504,10 +510,18 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         if not isinstance(changes, dict):
             raise TypeError("changes must be an object")
         with self._lock:
-            for key, value in changes.items():
-                if key not in self.settings:
-                    continue
-                self.settings[key] = self._normalize_setting(key, value)
+            # Validate the entire batch before mutating live settings. A bad
+            # later value must not leave earlier settings half-applied.
+            normalized = {
+                key: self._normalize_setting(key, value)
+                for key, value in changes.items()
+                if key in self.settings
+            }
+            # Repeating an existing value (or sending only unknown keys)
+            # must not mark an otherwise clean project as modified.
+            if not any(self.settings[key] != value for key, value in normalized.items()):
+                return dict(self.settings)
+            self.settings.update(normalized)
             self._apply_player_settings()
             self._dirty = True
             return dict(self.settings)
@@ -523,8 +537,12 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
 
             def worker() -> None:
                 try:
-                    path = ensure_adofai_kick()
-                    decoded = decode_audio_file(path, sr=max(1, int(self.player.sr)))
+                    # Keep the cache generation stable until decoding completes.
+                    decoded = ensure_adofai_kick(
+                        _read_locked=lambda path: decode_audio_file(
+                            path, sr=max(1, int(self.player.sr))
+                        )
+                    )
                     self.player.set_note_sample(decoded.samples)
                     with self._lock:
                         if self.settings.get("previewSound") == "adofai_kick":
@@ -572,24 +590,28 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         if not isinstance(changes, dict):
             raise TypeError("changes must be an object")
         with self._lock:
+            # Validate the entire viewport update before publishing any field.
+            # A later invalid value must not leave mode/time/pitch half-updated.
+            next_view = dict(self.view)
             if "mode" in changes and str(changes["mode"]) in {"spec", "notes", "both"}:
-                self.view["mode"] = str(changes["mode"])
+                next_view["mode"] = str(changes["mode"])
             if "windowSeconds" in changes:
-                self.view["windowSeconds"] = _clamp(changes["windowSeconds"], 0.2, max(0.2, self.duration))
+                next_view["windowSeconds"] = _clamp(changes["windowSeconds"], 0.2, max(0.2, self.duration))
             if "start" in changes:
-                max_start = max(0.0, self.duration - float(self.view["windowSeconds"]))
-                self.view["start"] = _clamp(changes["start"], 0.0, max_start)
+                max_start = max(0.0, self.duration - float(next_view["windowSeconds"]))
+                next_view["start"] = _clamp(changes["start"], 0.0, max_start)
             elif "windowSeconds" in changes:
-                max_start = max(0.0, self.duration - float(self.view["windowSeconds"]))
-                self.view["start"] = _clamp(self.view["start"], 0.0, max_start)
+                max_start = max(0.0, self.duration - float(next_view["windowSeconds"]))
+                next_view["start"] = _clamp(next_view["start"], 0.0, max_start)
             if "pitchBottom" in changes:
-                self.view["pitchBottom"] = _int_clamp(changes["pitchBottom"], 0, 127)
+                next_view["pitchBottom"] = _int_clamp(changes["pitchBottom"], 0, 127)
             if "visibleNotes" in changes:
-                self.view["visibleNotes"] = _int_clamp(changes["visibleNotes"], 6, 128)
-            self.view["pitchBottom"] = min(
-                int(self.view["pitchBottom"]),
-                max(0, 128 - int(self.view["visibleNotes"])),
+                next_view["visibleNotes"] = _int_clamp(changes["visibleNotes"], 6, 128)
+            next_view["pitchBottom"] = min(
+                int(next_view["pitchBottom"]),
+                max(0, 128 - int(next_view["visibleNotes"])),
             )
+            self.view.update(next_view)
             return dict(self.view)
 
     def fit_view(self) -> dict[str, Any]:
@@ -626,6 +648,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self.spectrogram = None
         self.vorbis_spectrum_store = None
         self.frequency_track_store = None
+        self.kick_pitch_result = None
         self.analysis_stats = {}
 
     def _detach_active_audio(self) -> None:
@@ -644,7 +667,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
         self.duration = max(0.001, float(decoded.duration))
         self.player.set_virtual_duration(self.duration)
         self.view["start"] = 0.0
-        self.view["windowSeconds"] = min(max(0.2, self.view["windowSeconds"]), self.duration)
+        self.view["windowSeconds"] = min(max(0.2, self.view["windowSeconds"]), max(0.2, self.duration))
 
     def open_audio(self) -> dict[str, Any]:
         paths = self._file_dialog(webview.OPEN_DIALOG, file_types=AUDIO_FILE_TYPES, allow_multiple=False)
@@ -820,6 +843,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                         self.player.set_virtual_duration(self.duration)
                         self.midi_min, self.midi_max = 0, 127
                         self.pitch_step = 1.0
+                        self._rebase_history_to_current_source(float(store.duration))
                         self.view["mode"] = "both" if self.notes else "spec"
                         self._status = (
                             f"Vorbis Direct: {stats['storedBins']} bins "
@@ -862,6 +886,7 @@ class Bridge(TrackTranscriptionMixin, EditingMixin, NoteMixin, IOMixin):
                 self.midi_min = int(spec.midi_min)
                 self.midi_max = int(spec.midi_max)
                 self.pitch_step = float(spec.pitch_step)
+                self._rebase_history_to_current_source(float(spec.duration))
                 self.player.set_virtual_duration(self.duration)
                 self._status = (
                     "Vorbis Direct はこの音源で使えないため、CQTで解析しました"

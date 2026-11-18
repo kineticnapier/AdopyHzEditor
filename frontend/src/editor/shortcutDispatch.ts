@@ -28,7 +28,7 @@ function commitFocusedEditBeforeSave(event: ShortcutEvent): void {
   // A window-level keydown may target Document or another non-Element object.
   // Optional chaining does not protect against a present, non-callable closest.
   if (typeof target?.closest !== "function") return;
-  const field = target.closest("input,textarea,[contenteditable='true']") as HTMLElement | null;
+  const field = target.closest("input,textarea,[contenteditable='true'],[contenteditable=''],[contenteditable='plaintext-only']") as HTMLElement | null;
   field?.blur();
 }
 
@@ -37,6 +37,8 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   const key = event.key.toLowerCase();
   const ctrl = event.ctrlKey || event.metaKey;
   const plain = !ctrl && !event.altKey;
+  const unmodified = plain && !event.shiftKey;
+  const helpKey = unmodified && key === "f1";
   const handled = (action: () => void) => { event.preventDefault(); action(); };
 
   // AltGr can be reported as Ctrl+Alt, but is text input rather than a shortcut.
@@ -51,15 +53,29 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   // Held file shortcuts must not queue duplicate saves or native dialogs.
   // Consume repeats to avoid falling through to the browser shortcut.
   if (event.repeat && (
-    key === "f1" ||
+    helpKey ||
     (ctrl && !event.altKey &&
       (key === "s" || (!event.shiftKey && ["o", "l", "i", "m", "e"].includes(key))))
   )) {
     event.preventDefault();
     return;
   }
+  // A held editing shortcut must not enqueue repeated mutations against stale
+  // selection indices. Repeated Escape must also not clear the selection after
+  // the first Escape cancels a focused numeric input and blurs it.
+  // Navigation and Undo intentionally remain repeatable.
+  if (event.repeat && (
+    (ctrl && !event.altKey && !event.shiftKey && ["x", "v", "d"].includes(key)) ||
+    (ctrl && event.altKey && !event.shiftKey && key === "a") ||
+    // Holding Space must not queue repeated Play/Pause or Stop requests.
+    (key === " " && !event.altKey && !event.shiftKey) ||
+    (unmodified && ["q", "delete", "backspace", "escape"].includes(key))
+  )) {
+    event.preventDefault();
+    return;
+  }
 
-  if (key === "f1") return handled(a.openHelp);
+  if (helpKey) return handled(a.openHelp);
   if (ctrl && key === "o") return handled(a.openAudio);
   if (ctrl && event.shiftKey && key === "s")
     return handled(() => { commitFocusedEditBeforeSave(event); a.saveProjectAs(); });
@@ -77,20 +93,22 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (ctrl && key === "x") return handled(a.cut);
   if (ctrl && key === "v") return handled(a.paste);
   if (ctrl && key === "d") return handled(a.duplicate);
-  if (plain && key === "q") return handled(a.quantize);
+  // Shift+Q is not an assigned quantize shortcut; avoid accidental note edits.
+  if (unmodified && key === "q") return handled(a.quantize);
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowleft") return handled(() => a.move(a.selected, -a.nudgeSeconds, 0));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowright") return handled(() => a.move(a.selected, a.nudgeSeconds, 0));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowup") return handled(() => a.move(a.selected, 0, 1));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowdown") return handled(() => a.move(a.selected, 0, -1));
   if (ctrl && !event.altKey && key === " ") return handled(a.stop);
-  if (plain && key === " ") return handled(a.play);
-  if (plain && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
-  if (plain && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
+  if (unmodified && key === " ") return handled(a.play);
+  // Shift+Delete/Backspace are native modified chords, not editor deletion.
+  if (unmodified && (key === "delete" || key === "backspace")) return handled(a.deleteSelected);
+  if (unmodified && key === "escape") return handled(() => { a.clearTracks(); a.select([]); });
   // Tab and Shift+Tab intentionally retain native focus navigation.
-  if (plain && key === "home") return handled(() => a.seekTo(0));
-  if (plain && key === "1") return handled(() => a.mode("spec"));
-  if (plain && key === "2") return handled(() => a.mode("notes"));
-  if (plain && key === "3") return handled(() => a.mode("both"));
+  if (unmodified && key === "home") return handled(() => a.seekTo(0));
+  if (unmodified && key === "1") return handled(() => a.mode("spec"));
+  if (unmodified && key === "2") return handled(() => a.mode("notes"));
+  if (unmodified && key === "3") return handled(() => a.mode("both"));
   if (plain && key === "arrowleft") return handled(() => a.seek(event.shiftKey ? -5 : -1));
   if (plain && key === "arrowright") return handled(() => a.seek(event.shiftKey ? 5 : 1));
   // The shortcut must not request a viewport outside MIDI 0..127.
@@ -99,8 +117,8 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
     // Do not disable playback follow or enqueue set_view when already at the MIDI boundary.
     if (pitchBottom !== a.view.pitchBottom) a.updateView({ pitchBottom });
   };
-  if ((plain && key === "w") || (ctrl && !event.altKey && key === "arrowup")) return handled(() => scrollPitch(12));
-  if ((plain && key === "s") || (ctrl && !event.altKey && key === "arrowdown")) return handled(() => scrollPitch(-12));
-  if (plain && key === "arrowup") return handled(() => scrollPitch(1));
-  if (plain && key === "arrowdown") return handled(() => scrollPitch(-1));
+  if ((unmodified && key === "w") || (ctrl && !event.altKey && key === "arrowup")) return handled(() => scrollPitch(12));
+  if ((unmodified && key === "s") || (ctrl && !event.altKey && key === "arrowdown")) return handled(() => scrollPitch(-12));
+  if (unmodified && key === "arrowup") return handled(() => scrollPitch(1));
+  if (unmodified && key === "arrowdown") return handled(() => scrollPitch(-1));
 }

@@ -1,0 +1,185 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import { exportDefaultsContextIsCurrent } from "../src/dialogs/previewFreshness.ts";
+import { exportScopeOffset } from "../src/dialogs/exportScopeOffset.ts";
+
+const source = readFileSync(
+  new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url),
+  "utf8",
+);
+
+test("selection refresh disables export until new defaults arrive", () => {
+  const effectStart = source.indexOf("previewRequests.current.invalidate();");
+  const loadStart = source.indexOf(".get_adofai_export_defaults(selected, defaultSelectedOnly)", effectStart);
+  assert.ok(effectStart >= 0 && loadStart > effectStart);
+  const effect = source.slice(effectStart, loadStart);
+  assert.match(effect, /setOptions\(null\)/);
+  assert.ok(effect.indexOf("setOptions(null)") < loadStart - effectStart);
+  assert.match(source, /if \(!options \|\| !defaultsCurrent\)\s*return\s*\(/);
+  assert.match(source, /if \(alive\) \{\s*setLoadedContext\(/);
+});
+
+test("ADOFAI default offset request includes initial full or selected-only scope", () => {
+  // The dialog must not use a selected-only offset when opened for all notes.
+  assert.match(source, /\.get_adofai_export_defaults\(selected, defaultSelectedOnly\)/);
+  assert.match(source, /selectedOnly:defaultSelectedOnly&&selected\.length>0/);
+});
+
+test("export and preview failures are announced to assistive technology", () => {
+  assert.match(source, /\{currentError && <div className="dialog-error" role="alert">\{currentError\}<\/div>\}/);
+  assert.match(source, /setError\(\{ message: String\(e\), context/);
+});
+
+test("selection refresh cannot unlock a still-running export", () => {
+  const loadingStart = source.indexOf("if (!options || !defaultsCurrent)");
+  const loadedStart = source.indexOf("const isHarmony", loadingStart);
+  assert.ok(loadingStart >= 0 && loadedStart > loadingStart);
+  const loading = source.slice(loadingStart, loadedStart);
+  // The loading branch must preserve the same lock as the normal export form.
+  assert.match(loading, /<Modal title="ADOFAI出力" onClose=\{onClose\} locked=\{working\}>/);
+  assert.match(loading, /<button onClick=\{onClose\} disabled=\{working\}>閉じる<\/button>/);
+  assert.match(loading, /className="primary"\s+disabled=\{working\}\s+onClick=\{\(\) => setLoadAttempt/);
+  assert.match(loading, /className="dialog-loading" role="status"/);
+  assert.match(loading, /working \? "出力処理中…"/);
+});
+
+test("defaults are invalid during render after selection, API, or retry changes", () => {
+  const api = {};
+  const selected = [1, 2];
+  const context = { api, selected, defaultSelectedOnly: false, loadAttempt: 0, documentGeneration: 7 };
+  assert.equal(exportDefaultsContextIsCurrent(context, context), true);
+  assert.equal(exportDefaultsContextIsCurrent(context, { ...context, selected: [1, 2] }), false);
+  assert.equal(exportDefaultsContextIsCurrent(context, { ...context, api: {} }), false);
+  assert.equal(exportDefaultsContextIsCurrent(context, { ...context, defaultSelectedOnly: true }), false);
+  assert.equal(exportDefaultsContextIsCurrent(context, { ...context, loadAttempt: 1 }), false);
+  assert.equal(exportDefaultsContextIsCurrent(context, { ...context, documentGeneration: 8 }), false);
+  assert.equal(exportDefaultsContextIsCurrent(null, context), false);
+});
+
+test("ADOFAI export guards rendering and action snapshots before effects", () => {
+  assert.match(source, /const defaultsCurrent = exportDefaultsContextIsCurrent\(/);
+  assert.match(source, /if \(!options \|\| !defaultsCurrent\)/);
+  assert.match(source, /const fixed = options && defaultsCurrent/);
+  assert.match(source, /setLoadedContext\(\{ api, selected, defaultSelectedOnly, loadAttempt, documentGeneration \}\)/);
+  assert.match(source, /workingRef\.current \|\| !defaultsCurrent/);
+});
+
+test("ADOFAI export reloads after document replacement with the same selection", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /<AdoFAIExportDialog[\s\S]*?documentGeneration=\{documentGeneration\.current\}/);
+  assert.match(source, /\[api, selected, defaultSelectedOnly, loadAttempt, documentGeneration\]/);
+});
+
+test("late song-source chooser results cannot belong to a replacement document", async () => {
+  const api = {};
+  const selected = [1];
+  const original = { api, selected, defaultSelectedOnly: true, loadAttempt: 0, documentGeneration: 5 };
+  let latest = original;
+  let complete!: (path: string) => void;
+  const chooser = new Promise<string>((resolve) => { complete = resolve; });
+  const accepted = chooser.then((path) =>
+    exportDefaultsContextIsCurrent(original, latest) ? path : null,
+  );
+  // retainValidSelection can keep the same array even after document replacement.
+  latest = { ...original, documentGeneration: 6 };
+  complete("old-document.ogg");
+  assert.equal(await accepted, null);
+
+  // The same completion is valid if the request context has not changed.
+  assert.equal(exportDefaultsContextIsCurrent(original, original), true);
+  assert.equal(exportDefaultsContextIsCurrent(original, { ...original, selected: [1] }), false);
+});
+
+test("ADOFAI export actions recheck their original context after awaiting", () => {
+  assert.match(source, /const latestRequestContext = useRef\(requestContext\)/);
+  assert.match(source, /latestRequestContext\.current = requestContext/);
+  assert.match(source, /function isCurrentAction\(context: typeof loadedContext\)/);
+  const actions = [
+    ["exportLevel", "tilePreview"],
+    ["tilePreview", "debugPreview"],
+    ["debugPreview", "chooseSongSource"],
+    ["chooseSongSource", "if (!options || !defaultsCurrent)"],
+  ];
+  for (const [start, end] of actions) {
+    const section = source.slice(
+      source.indexOf(`async function ${start}()`),
+      source.indexOf(end.startsWith("if (") ? end : `async function ${end}()`),
+    );
+    assert.match(section, /const context = loadedContext/);
+    assert.match(section, /if \(!fixed \|\| !context\) return/);
+    assert.match(section, /isCurrentAction\(context\)/);
+  }
+  const chooser = source.slice(source.indexOf("async function chooseSongSource()"));
+  assert.match(chooser, /setOptions\(\(o\) =>\s*isCurrentAction\(context\) && o/);
+  const run = source.slice(source.indexOf("async function run<"), source.indexOf("const fixed ="));
+  assert.match(run, /if \(context && isCurrentAction\(context\)\) setError\(\{ message: String\(e\), context \}\)/);
+});
+
+
+test("ADOFAI export errors are scoped to the originating request before effects", () => {
+  const api = {};
+  const selected = [3];
+  const original = { api, selected, defaultSelectedOnly: false, loadAttempt: 0, documentGeneration: 1 };
+  const visibleError = (current: typeof original) =>
+    exportDefaultsContextIsCurrent(original, current) ? "old request failed" : "";
+  assert.equal(visibleError(original), "old request failed");
+  assert.equal(visibleError({ ...original, selected: [3] }), "");
+  assert.equal(visibleError({ ...original, documentGeneration: 2 }), "");
+  assert.equal(visibleError({ ...original, api: {} }), "");
+  assert.equal(visibleError({ ...original, loadAttempt: 1 }), "");
+  assert.match(source, /const currentError = exportDefaultsContextIsCurrent\(error\?\.context \?\? null, requestContext\)/);
+  assert.match(source, /\{currentError \? \(/);
+  assert.match(source, /\{currentError && <div className="dialog-error" role="alert">\{currentError\}<\/div>\}/);
+  assert.match(source, /if \(alive\) setError\(\{ message: String\(e\), context: \{ api, selected, defaultSelectedOnly, loadAttempt, documentGeneration \} \}\)/);
+});
+
+test("fixed-angle compression allows the default 165° and fractional angles", () => {
+  // HTML number inputs with min=0.001 and step=1 reject 165 and most
+  // fractional values as stepMismatch, even though the backend accepts them.
+  const field = source.match(/<Num\s+value=\{options\.angleCompressionFixedAngle\}([\s\S]*?)\/>/)?.[1];
+  assert.ok(field, "fixed compression angle input must exist");
+  assert.match(field, /min=\{0\.001\}/);
+  assert.match(field, /max=\{359\.999\}/);
+  assert.match(field, /step="any"/);
+});
+
+
+test("changing export scope updates automatic manual-offset seed without rewriting a manual override", () => {
+  assert.equal(exportScopeOffset(0, 1000, false), 0);
+  assert.equal(exportScopeOffset(0, 1000, true), 1000);
+  assert.match(source, /onChange=\{\(e\) => changeSelectedOnly\(e\.target\.checked\)\}/);
+  assert.match(source, /onChange=\{\(e\) => changeSongOffsetAuto\(e\.target\.checked\)\}/);
+  const scopeHandler = source.slice(source.indexOf("function changeSelectedOnly("), source.indexOf("function changeSongOffsetAuto("));
+  assert.match(scopeHandler, /o\.songOffsetAuto\s*\? exportScopeOffset\(/);
+  assert.match(scopeHandler, /: o\.songOffsetMs/);
+});
+
+
+test("ADOFAI debug preview clearly marks rows omitted by the UI and backend", () => {
+  const preview = source.slice(source.indexOf("function DebugPreview("));
+  assert.match(preview, /rows = preview\.rows\.slice\(0, 300\)/);
+  assert.match(preview, /表示 \{rows\.length\} \/ 全 \{preview\.summary\.rows\} 行/);
+  assert.match(preview, /preview\.summary\.rows > rows\.length \|\| preview\.limited/);
+  assert.match(preview, /一部のみ/);
+  const backend = readFileSync(new URL("../../web/adofai.py", import.meta.url), "utf8");
+  assert.match(backend, /max_rows = 5000/);
+  assert.match(backend, /"limited": len\(rows\) > max_rows/);
+});
+
+
+test("ADOFAI export footer buttons remain reachable in narrow windows", () => {
+  // Five footer buttons exceed the width of a small desktop window when
+  // the flex row is forced onto one line. Allow the controls to wrap.
+  const css = readFileSync(new URL("../src/dialogs.css", import.meta.url), "utf8");
+  assert.match(source, /<div className="dialog-footer">/);
+  assert.match(css, /\.dialog-footer\{[^}]*flex-wrap:wrap/);
+});
+
+test("narrow export fields stack labels above controls to preserve input width", () => {
+  // At 320px viewport the modal is 280px wide; after 28px body padding,
+  // a 130px label plus 12px gap leaves only 110px for the numeric control.
+  // Stack fields at narrow widths instead of shrinking values with suffixes.
+  const css = readFileSync(new URL("../src/dialogs.css", import.meta.url), "utf8");
+  assert.match(css, /@media\s*\(max-width:\s*420px\)\s*\{\s*\.dialog-field\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\);\s*gap:\s*3px\s*\}\s*\.dialog-field>span\s*\{\s*padding-top:\s*0\s*\}\s*\}/);
+});

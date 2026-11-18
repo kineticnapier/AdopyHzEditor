@@ -1,0 +1,158 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import { decodeBase64Bytes, decodePackedDirectSpectrumBytes, decodePackedFrequencyTrackBytes, decodeSizedBase64Bytes, isValidDirectSpectrumSize, isValidSpectrogramSize } from "../src/editor/base64Payload.ts";
+
+test("valid binary payloads preserve every byte", () => {
+  assert.deepEqual(Array.from(decodeBase64Bytes("AAECA/8=") ?? []), [0, 1, 2, 3, 255]);
+  assert.deepEqual(Array.from(decodeSizedBase64Bytes("AAECA/8=", 5) ?? []), [0, 1, 2, 3, 255]);
+});
+
+test("malformed base64 returns null instead of crashing canvas render", () => {
+  for (const data of ["%%%", "☃", "a", "A==="]) {
+    assert.equal(decodeBase64Bytes(data), null, data);
+    assert.equal(decodeSizedBase64Bytes(data, 5), null, data);
+  }
+});
+
+test("non-string API payloads are rejected without calling atob", () => {
+  const previousAtob = globalThis.atob;
+  let decodeCalls = 0;
+  globalThis.atob = (value: string) => {
+    decodeCalls += 1;
+    return previousAtob(value);
+  };
+  try {
+    for (const invalid of [undefined, null, 0, 123, {}, []]) {
+      const payload = invalid as unknown as string;
+      assert.equal(decodeBase64Bytes(payload), null, String(invalid));
+      assert.equal(decodeSizedBase64Bytes(payload, 3), null, String(invalid));
+    }
+    assert.equal(decodeCalls, 0);
+  } finally {
+    globalThis.atob = previousAtob;
+  }
+});
+
+test("oversized encoded payload is rejected before base64 decoding", () => {
+  const previousAtob = globalThis.atob;
+  let decoded = false;
+  globalThis.atob = (value: string) => {
+    decoded = true;
+    return previousAtob(value);
+  };
+  try {
+    // A corrupt response must not allocate a decoded buffer far larger than metadata.
+    assert.equal(decodeSizedBase64Bytes("AQID".repeat(1024), 3), null);
+    assert.equal(decoded, false);
+  } finally {
+    globalThis.atob = previousAtob;
+  }
+  // Canonical data at the declared size still decodes normally.
+  assert.deepEqual(Array.from(decodeSizedBase64Bytes("AQID", 3) ?? []), [1, 2, 3]);
+});
+
+test("spectrum buffers must match their declared pixel count", () => {
+  assert.equal(decodeSizedBase64Bytes("AQID", 2), null);
+  assert.equal(decodeSizedBase64Bytes("AQID", 4), null);
+  for (const invalidSize of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])
+    assert.equal(decodeSizedBase64Bytes("AQID", invalidSize), null);
+  assert.deepEqual(Array.from(decodeSizedBase64Bytes("AQID", 3) ?? []), [1, 2, 3]);
+});
+
+test("all three canvas spectrum decoders use safe base64 conversion", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(source, /decodeSizedBase64Bytes\(payload\.data, payload\.rows \* payload\.cols\)/);
+  assert.match(source, /function decodeFrequencyTracks[\s\S]*?decodePackedFrequencyTrackBytes\(payload\.data, payload\.pointCount\)/);
+  assert.match(source, /const directSpectrumCanvas[\s\S]*?decodePackedDirectSpectrumBytes\(payload\.data, payload\.recordCount, payload\.timeBuckets, payload\.pitchBuckets\)/);
+  assert.doesNotMatch(source, /\batob\(/);
+});
+
+
+test("Direct Spectrum canvas dimensions respect the backend viewport limits", () => {
+  for (const [width, height] of [[1, 1], [100, 128], [4096, 15], [1, 2048]])
+    assert.equal(isValidDirectSpectrumSize(width, height), true, `${width}x${height}`);
+  for (const [width, height] of [[0, 10], [-1, 10], [1.5, 10], [NaN, 10],
+    [Infinity, 10], [4097, 1], [1, 2049], [4096, 2048], [65_001, 1]])
+    assert.equal(isValidDirectSpectrumSize(width, height), false, `${width}x${height}`);
+});
+
+test("canvas rejects invalid Direct Spectrum dimensions before allocation", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const section = source.slice(source.indexOf("const directSpectrumCanvas = useMemo"));
+  assert.match(section, /isValidDirectSpectrumSize\(payload\.timeBuckets, payload\.pitchBuckets\)/);
+  assert.match(section, /typeof payload\.timeBuckets !== "number"/);
+  assert.match(section, /typeof payload\.pitchBuckets !== "number"/);
+  assert.ok(section.indexOf("isValidDirectSpectrumSize(") < section.indexOf('document.createElement("canvas")'));
+  assert.ok(section.indexOf("decodePackedDirectSpectrumBytes(payload.data, payload.recordCount, payload.timeBuckets, payload.pitchBuckets)") < section.indexOf('document.createElement("canvas")'));
+});
+
+test("frequency track decoder validates record count before allocating typed arrays", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const section = source.slice(source.indexOf("function decodeFrequencyTracks"), source.indexOf("function snapTime"));
+  assert.match(section, /Number\.isSafeInteger\(payload\.pointCount\)/);
+  assert.match(section, /typeof payload\.pointCount !== "number"/);
+  assert.match(section, /payload\.pointCount <= 0/);
+  assert.ok(section.indexOf("Number.isSafeInteger(payload.pointCount)") < section.indexOf("new Uint32Array(count)"));
+});
+
+test("frequency-track binary length must match the declared point count", () => {
+  const one = Buffer.from(Array.from({ length: 18 }, (_, index) => index)).toString("base64");
+  const two = Buffer.from(Array.from({ length: 36 }, (_, index) => index)).toString("base64");
+  assert.deepEqual(Array.from(decodePackedFrequencyTrackBytes(one, 1) ?? []), Array.from({ length: 18 }, (_, index) => index));
+  assert.deepEqual(Array.from(decodePackedFrequencyTrackBytes(two, 2) ?? []), Array.from({ length: 36 }, (_, index) => index));
+  // Previously a short payload silently rendered only the available points.
+  assert.equal(decodePackedFrequencyTrackBytes(one, 2), null);
+  assert.equal(decodePackedFrequencyTrackBytes(two, 1), null);
+  assert.equal(decodePackedFrequencyTrackBytes(one.slice(0, -1), 1), null);
+});
+
+test("frequency-track count validation rejects invalid and oversized metadata", () => {
+  const one = Buffer.alloc(18).toString("base64");
+  for (const count of [0, -1, 1.5, NaN, Infinity, 30_001, Number.MAX_SAFE_INTEGER]) {
+    assert.equal(decodePackedFrequencyTrackBytes(one, count), null, String(count));
+  }
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const section = source.slice(source.indexOf("function decodeFrequencyTracks"), source.indexOf("function snapTime"));
+  assert.ok(section.indexOf("decodePackedFrequencyTrackBytes(payload.data, payload.pointCount)") <
+    section.indexOf("new Uint32Array(count)"));
+  assert.doesNotMatch(section, /Math\.min\(payload\.pointCount,\s*Math\.floor\(bytes\.byteLength/);
+});
+
+test("Direct Spectrum packed cells must match the declared record count and viewport", () => {
+  const one = Buffer.from([0, 0, 0, 0, 255]).toString("base64");
+  const two = Buffer.from([0, 0, 0, 0, 255, 1, 0, 0, 0, 128]).toString("base64");
+  assert.deepEqual(Array.from(decodePackedDirectSpectrumBytes(one, 1, 1, 1) ?? []), [0, 0, 0, 0, 255]);
+  assert.deepEqual(Array.from(decodePackedDirectSpectrumBytes(two, 2, 2, 1) ?? []), [0, 0, 0, 0, 255, 1, 0, 0, 0, 128]);
+  assert.equal(decodePackedDirectSpectrumBytes(one, 2, 2, 1), null);
+  assert.equal(decodePackedDirectSpectrumBytes(two, 1, 2, 1), null);
+  assert.equal(decodePackedDirectSpectrumBytes(one.slice(0, -2), 1, 1, 1), null);
+  assert.equal(decodePackedDirectSpectrumBytes("%%%", 1, 1, 1), null);
+  for (const count of [0, -1, 1.5, NaN, Infinity, 2, Number.MAX_SAFE_INTEGER])
+    assert.equal(decodePackedDirectSpectrumBytes(one, count, 1, 1), null, String(count));
+  assert.equal(decodePackedDirectSpectrumBytes(one, 1, 0, 1), null);
+  assert.equal(decodePackedDirectSpectrumBytes(one, 1, 4096, 2048), null);
+});
+
+test("Direct Spectrum validates count and bytes before allocating its canvas", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const section = source.slice(source.indexOf("const directSpectrumCanvas = useMemo"));
+  assert.match(section, /typeof payload\.recordCount !== "number"/);
+  assert.match(section, /decodePackedDirectSpectrumBytes\(payload\.data, payload\.recordCount, payload\.timeBuckets, payload\.pitchBuckets\)/);
+  assert.ok(section.indexOf("decodePackedDirectSpectrumBytes(") < section.indexOf('document.createElement("canvas")'));
+});
+
+test("spectrogram dimensions are bounded before canvas allocation", () => {
+  for (const [rows, cols] of [[1, 1], [128, 1600], [2048, 4096], [1, 4096]])
+    assert.equal(isValidSpectrogramSize(rows, cols), true, `${rows}x${cols}`);
+  for (const [rows, cols] of [[0, 10], [-1, 10], [1.5, 10], [NaN, 10],
+    [Infinity, 10], [2049, 1], [1, 4097], [1e9, 1e9], [Number.MAX_SAFE_INTEGER, 1]])
+    assert.equal(isValidSpectrogramSize(rows, cols), false, `${rows}x${cols}`);
+});
+
+test("spectrogram rejects invalid dimensions before decoding base64", () => {
+  const source = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const section = source.slice(source.indexOf("function decodeSpectrum"), source.indexOf("function decodeFrequencyTracks"));
+  assert.match(section, /isValidSpectrogramSize\(payload\.rows, payload\.cols\)/);
+  assert.ok(section.indexOf("isValidSpectrogramSize(") < section.indexOf("decodeSizedBase64Bytes("));
+});

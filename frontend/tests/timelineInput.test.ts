@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { commitNumericEdit } from "../src/settings/numericInputModel.ts";
-import { clampTimeViewChange, timelineSliderStart } from "../src/editor/timelineNavigation.ts";
-import { hasEffectiveViewChange } from "../src/editor/pitchViewport.ts";
+import { isPlainDialogEscape } from "../src/dialogs/dialogFocus.ts";
+import { clampTimeViewChange, timelineSliderBounds, timelineSliderStart, timelineWindowInputMax } from "../src/editor/timelineNavigation.ts";
+import { clampPitchViewChange, hasEffectiveViewChange, pitchBottomToRevealNote } from "../src/editor/pitchViewport.ts";
 import type { ViewState } from "../src/editor/bridge.ts";
 
 test("Timeline Escape cancels a pending edit even when blur sees stale text", () => {
@@ -22,15 +23,63 @@ test("Timeline Enter and ordinary blur commit, but empty input keeps the value",
 test("Timeline connects Escape cancellation to the synchronous blur path", () => {
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
   assert.match(source, /const cancelledRef = useRef\(false\)/);
-  assert.match(source, /commitNumericEdit\(text, value, min, max, cancelledRef\.current\)/);
+  assert.match(source, /commitNumericEdit\(text, value, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
   assert.match(source, /cancelledRef\.current = false;/);
   assert.match(source, /onBlur=\{commit\}/);
-  assert.match(source, /event\.key === "Escape"[\s\S]*?cancelledRef\.current = true;[\s\S]*?event\.currentTarget\.blur\(\)/);
+  assert.match(source, /isPlainDialogEscape\(event\)[\s\S]*?cancelledRef\.current = true;[\s\S]*?event\.currentTarget\.blur\(\)/);
+});
+
+test("Timeline numeric fields ignore modified Escape while preserving plain Escape cancellation", () => {
+  const escape = { key: "Escape", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(isPlainDialogEscape(escape), true);
+  for (const modifier of ["ctrlKey", "metaKey", "altKey", "shiftKey"] as const) {
+    assert.equal(isPlainDialogEscape({ ...escape, [modifier]: true }), false, modifier);
+  }
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
+  assert.match(source, /import \{ isDialogCompositionKey, isPlainDialogEscape \} from "\.\.\/dialogs\/dialogFocus"/);
+  assert.match(source, /if \(isDialogCompositionKey\(event\.nativeEvent\)\) return;[\s\S]*?else if \(isPlainDialogEscape\(event\)\)/);
+  assert.doesNotMatch(source, /else if \(event\.key === "Escape"\)/);
 });
 
 test("Timeline slider cannot change the view when the entire chart fits", () => {
   assert.equal(timelineSliderStart(.001, 0, 0), null);
   assert.equal(timelineSliderStart(0, 0, 0), null);
+});
+
+test("Timeline slider keeps fractional positions and clamps finite bounds", () => {
+  assert.deepEqual(timelineSliderBounds(60, 12, 1.234567), { max: 48, value: 1.234567 });
+  assert.deepEqual(timelineSliderBounds(60, 12, 100), { max: 48, value: 48 });
+  assert.deepEqual(timelineSliderBounds(.1, .2, 1), { max: 0, value: 0 });
+});
+
+test("Timeline slider never renders nonfinite playback metadata or start values", () => {
+  assert.deepEqual(timelineSliderBounds(NaN, 12, 1), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(Infinity, 12, 1), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, NaN, 1), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, 12, NaN), { max: 48, value: 0 });
+  assert.deepEqual(timelineSliderBounds(1e308, -1e308, 1), { max: 0, value: 0 });
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
+  assert.match(source, /timelineSliderBounds\(playback\.duration, view\.windowSeconds, view\.start\)/);
+  assert.match(source, /value=\{sliderValue\}/);
+});
+
+test("Timeline slider disables invalid negative duration and window metadata", () => {
+  assert.deepEqual(timelineSliderBounds(-1, -2, 0.5), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(-1, 0.2, 0.5), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, -1, 0.5), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, 0, 0.5), { max: 0, value: 0 });
+  assert.deepEqual(timelineSliderBounds(60, 0.2, 1.234567), { max: 59.8, value: 1.234567 });
+});
+
+test("Timeline width input keeps a finite HTML max for invalid audio duration", () => {
+  assert.equal(timelineWindowInputMax(60, 12), 60);
+  assert.equal(timelineWindowInputMax(0, 12), 0.2);
+  assert.equal(timelineWindowInputMax(NaN, 12), 12);
+  assert.equal(timelineWindowInputMax(Infinity, 12), 12);
+  assert.equal(timelineWindowInputMax(-1, 12), 12);
+  assert.equal(timelineWindowInputMax(NaN, NaN), 0.2);
+  const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
+  assert.ok(source.includes('max={timelineWindowInputMax(playback.duration, view.windowSeconds)} step="any"'));
 });
 
 test("Timeline slider clamps out-of-range input and ignores unchanged positions", () => {
@@ -51,6 +100,7 @@ test("Timeline slider rejects invalid values and disables an immovable thumb", (
   assert.equal(timelineSliderStart(2, 1, NaN), null);
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
   assert.match(source, /disabled=\{max <= 0\}/);
+  assert.match(source, /value=\{sliderValue\}/);
   assert.match(source, /timelineSliderStart\(Number\(e\.target\.value\), view\.start, max\)/);
   assert.match(source, /if \(start !== null\) onView\(\{ start \}\)/);
 });
@@ -92,7 +142,7 @@ test("Timeline clamps very short durations to the backend minimum window", () =>
 
 test("App normalizes both pitch and time before the follow-playback no-op guard", () => {
   const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(source, /const pitchNormalized = clampPitchViewChange\(view, changes\);[\s\S]*?const normalized = clampTimeViewChange\(view, pitchNormalized, playback\.duration\);[\s\S]*?if \(!hasEffectiveViewChange\(view, normalized\)\) return;/);
+  assert.match(source, /const currentView = latestView\.current;[\s\S]*?const pitchNormalized = clampPitchViewChange\(currentView, changes\);[\s\S]*?const normalized = clampTimeViewChange\(currentView, pitchNormalized, playback\.duration\);[\s\S]*?if \(!hasEffectiveViewChange\(currentView, normalized\)\) return;/);
 });
 
 test("Timeline exposes separate pitch labels in a group rather than a label with two inputs", () => {
@@ -101,4 +151,32 @@ test("Timeline exposes separate pitch labels in a group rather than a label with
   assert.match(source, /<CommitNumber label="下端音高"/);
   assert.match(source, /<CommitNumber label="上端音高"/);
   assert.doesNotMatch(source, /<label className="timeline-field pitch-field"/);
+});
+
+// Bridge.set_view uses Python int(round(float(...))) for both integer pitch fields.
+test("pitch viewport matches Python half-even rounding before optimistic updates", () => {
+  assert.deepEqual(clampPitchViewChange(endView, { visibleNotes: 60.5 }),
+    { visibleNotes: 60, pitchBottom: 40 });
+  assert.deepEqual(clampPitchViewChange(endView, { visibleNotes: 61.5 }),
+    { visibleNotes: 62, pitchBottom: 40 });
+  assert.deepEqual(clampPitchViewChange(endView, { pitchBottom: 40.5 }),
+    { pitchBottom: 40 });
+  assert.deepEqual(clampPitchViewChange(endView, { pitchBottom: 41.5 }),
+    { pitchBottom: 42 });
+});
+
+test("half-even pitch no-ops do not trigger a false viewport change", () => {
+  assert.equal(hasEffectiveViewChange(endView,
+    clampPitchViewChange(endView, { visibleNotes: 60.5 })), false);
+  assert.equal(hasEffectiveViewChange(endView,
+    clampPitchViewChange(endView, { pitchBottom: 40.5 })), false);
+  assert.deepEqual(clampPitchViewChange(endView, { visibleNotes: 127.5, pitchBottom: 100 }),
+    { visibleNotes: 128, pitchBottom: 0 });
+});
+
+test("revealing a fractional MIDI note uses the same half-even pitch as the backend", () => {
+  const view = { pitchBottom: 0, visibleNotes: 60 };
+  assert.equal(pitchBottomToRevealNote(view, 72.5), 42);
+  assert.equal(pitchBottomToRevealNote(view, 73.5), 44);
+  assert.equal(pitchBottomToRevealNote(view, 12.5), null);
 });

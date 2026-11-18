@@ -58,6 +58,32 @@ test("async action guard is single-flight and reusable",async()=>{
   assert.equal(await guard.run(async()=>{calls+=1}),true);assert.equal(calls,2);
 });
 
+test("empty cut does not reserve the destructive guard or enqueue a backend mutation", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const cutStart = app.indexOf("  async function cutSelected()");
+  const cutEnd = app.indexOf("  async function pasteAtPlayback()", cutStart);
+  assert.ok(cutStart >= 0 && cutEnd > cutStart);
+  const cut = app.slice(cutStart, cutEnd);
+  assert.match(cut, /if \(api && selected\.length\)\s+await destructiveSelection\.current\.run\(/);
+  assert.ok(cut.indexOf("if (api && selected.length)") < cut.indexOf("destructiveSelection.current.run("));
+  assert.match(cut, /api\.cut_notes\(selected\)/);
+});
+
+test("cut, delete, and range-cut share the same in-flight destructive guard", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const start = app.indexOf("  async function deleteNotes(");
+  const end = app.indexOf("  async function pasteAtPlayback(", start);
+  assert.ok(start >= 0 && end > start);
+  const handlers = app.slice(start, end);
+  for (const name of ["deleteNotes", "cutRange", "cutSelected"]) {
+    const from = handlers.indexOf(`async function ${name}(`);
+    assert.ok(from >= 0, `missing ${name}`);
+    const next = handlers.indexOf("  async function ", from + 1);
+    const block = handlers.slice(from, next < 0 ? undefined : next);
+    assert.match(block, /destructiveSelection\.current\.run\(/, `${name} must use the shared guard`);
+  }
+});
+
 test("inspector and canvas mutations apply in the same queue order", async () => {
   const queue = new SerialTaskQueue();
   const applied: string[][] = [];
@@ -117,8 +143,40 @@ test("in-flight old-document responses never update the new document", async () 
   await Promise.resolve();
   documentGeneration += 1;
   release(5);
-  assert.equal(await inFlight, 5);
+  assert.equal(await inFlight, undefined);
   assert.deepEqual(applied, []);
+});
+
+test("in-flight obsolete mutation cannot notify or close a dialog", async () => {
+  const queue = new SerialTaskQueue();
+  let resolve!: (value: number) => void;
+  let generation = 0;
+  const events: string[] = [];
+  const pending = enqueueAppliedTask(
+    queue,
+    () => new Promise<number>((done) => { resolve = done; }),
+    () => { events.push("applied"); },
+    () => generation === 0,
+  );
+  await Promise.resolve();
+  generation += 1;
+  resolve(5);
+  const result = await pending;
+  if (result !== undefined) {
+    events.push("status");
+    events.push("dialog-closed");
+  }
+  assert.equal(result, undefined);
+  assert.deepEqual(events, []);
+});
+
+test("old-document mutation errors cannot overwrite the new document status", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const start = app.indexOf("  async function queuedMutation(");
+  const end = app.indexOf("  function queueExternalMutation(", start);
+  assert.ok(start >= 0 && end > start);
+  const block = app.slice(start, end);
+  assert.match(block, /if \(generation === documentGeneration\.current\) setStatus\(`ノート編集に失敗しました: \$\{message\}`\)/);
 });
 
 test("current-document mutations still execute and apply", async () => {
@@ -182,7 +240,8 @@ test("state actions, blank workspace and pending save use the same queue", () =>
   assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*guardedAction/);
   assert.match(app, /performStateAction\(\(\) => toolsApi\.apply_blank_workspace\(options\)\)/);
   assert.match(app, /enqueueStateTaskAfterSettings\(\s*mutationQueue\.current,\s*flushPendingSettings,\s*async \(\) => \{\s*await viewQueue\.current\.enqueue\(async \(\) => undefined\);\s*return api\.save_project_dialog\(\)/);
-  assert.match(dialogs, /await onApply\(value\)/);
+  assert.match(dialogs, /const snapshot = \{ \.\.\.value \}/);
+  assert.match(dialogs, /await onApply\(snapshot\)/);
 });
 
 test("pending settings finish before document state is requested or applied", async () => {
@@ -322,8 +381,8 @@ test("view request applies only the current successful response", async () => {
 test("wheel and fit view share the recoverable request path", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /await enqueueRecoverableViewTask\(\s*viewQueue\.current,/);
-  assert.match(app, /const pitchNormalized = clampPitchViewChange\(view, changes\)/);
-  assert.match(app, /const normalized = clampTimeViewChange\(view, pitchNormalized, playback\.duration\)/);
+  assert.match(app, /const pitchNormalized = clampPitchViewChange\(currentView, changes\)/);
+  assert.match(app, /const normalized = clampTimeViewChange\(currentView, pitchNormalized, playback\.duration\)/);
   assert.match(app, /applyViewAction\(\(\) => api\.set_view\(normalized\), "表示範囲の変更"\)/);
   assert.match(app, /applyViewAction\(\(\) => api\.fit_view\(\), "全体表示"\)/);
   assert.match(app, /viewQueue\.current\.enqueue\(\(\) => api\.get_state\(\)\)/);
@@ -620,4 +679,36 @@ test("App routes both MIDI export modes through the document queue", () => {
   assert.match(exportBlock, /enqueueAppliedTask\(\s*mutationQueue\.current/);
   assert.match(exportBlock, /runMidiExport\(action,/);
   assert.match(exportBlock, /generation === documentGeneration\.current/);
+});
+
+test("obsolete copy and playback failures do not overwrite the next document status", async () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const [startMarker, endMarker, label] of [
+    ["  async function copySelected()", "  async function cutSelected()", "コピーに失敗しました"],
+    ["  async function queuedPlaybackAction(", "  async function seekTo(", "再生操作に失敗しました"],
+  ] as const) {
+    const start = app.indexOf(startMarker);
+    const end = app.indexOf(endMarker, start);
+    assert.ok(start >= 0 && end > start, `missing ${label} handler`);
+    const handler = app.slice(start, end);
+    assert.ok(
+      handler.includes("if (generation === documentGeneration.current) setStatus(") && handler.includes(label),
+      `${label} must be guarded against document switches`,
+    );
+  }
+
+  let documentGeneration = 0;
+  let rejectPending!: (reason?: unknown) => void;
+  const messages: string[] = [];
+  const pending = runWithErrorFeedback(
+    () => new Promise<void>((_resolve, reject) => { rejectPending = reject; }),
+    () => { messages.push("success"); },
+    (message) => {
+      if (documentGeneration === 0) messages.push(message);
+    },
+  );
+  documentGeneration += 1;
+  rejectPending(new Error("old document failure"));
+  assert.equal(await pending, undefined);
+  assert.deepEqual(messages, []);
 });

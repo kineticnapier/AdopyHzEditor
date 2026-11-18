@@ -4,15 +4,22 @@ import { useDialogAccessibility } from "./useDialogAccessibility";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 import { runReleasePageAction } from "./releasePageAction";
+import { blankWorkspaceDefaultsContextIsCurrent } from "./previewFreshness";
 type Props = { api: BackendApi; initialSection?: string; onClose(): void };
 export default function HelpDialog({
   api,
   initialSection = "quick_start",
   onClose,
 }: Props) {
-  const [payload, setPayload] = useState<HelpPayload | null>(null);
-  const [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
-  const [releaseError, setReleaseError] = useState("");
+  const [payload, setPayload] = useState<({ api: BackendApi; attempt: number; value: HelpPayload }) | null>(null);
+  const [error, setError] = useState<({ api: BackendApi; attempt: number; message: string }) | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  // Hide the previous API's content immediately, even before effect cleanup.
+  const context = { api, attempt };
+  const currentPayload = blankWorkspaceDefaultsContextIsCurrent(payload, context) ? payload!.value : null;
+  const currentError = blankWorkspaceDefaultsContextIsCurrent(error, context) ? error!.message : "";
+  const [releaseError, setReleaseError] = useState<({ api: BackendApi; attempt: number; message: string }) | null>(null);
+  const currentReleaseError = blankWorkspaceDefaultsContextIsCurrent(releaseError, context) ? releaseError!.message : "";
   const [opening, setOpening] = useState(false);
   const openingRef = useRef(false);
   const openOnce = useRef(createExclusiveAsyncAction());
@@ -23,10 +30,10 @@ export default function HelpDialog({
     await openOnce.current(async () => {
       openingRef.current = true;
       setOpening(true);
-      setReleaseError("");
+      setReleaseError(null);
       try {
         // Help stays open after success, unlike the update prompt.
-        await runReleasePageAction(() => api.open_releases_page(), () => {}, setReleaseError);
+        await runReleasePageAction(() => api.open_releases_page(), () => {}, (message) => setReleaseError({ api, attempt, message }));
       } finally {
         openingRef.current = false;
         setOpening(false);
@@ -35,15 +42,17 @@ export default function HelpDialog({
   }
   useEffect(() => {
     let alive = true;
-    setError("");
+    setError(null);
     setPayload(null);
-    void api.get_help_sections().then((x) => alive && setPayload(x)).catch(reason=>alive&&setError(String(reason)));
+    void api.get_help_sections()
+      .then((value) => { if (alive) setPayload({ api, attempt, value }); })
+      .catch((reason) => { if (alive) setError({ api, attempt, message: String(reason) }); });
     return () => {
       alive = false;
     };
   }, [api,attempt]);
   const current =
-    payload?.sections.find((x) => x.id === section) ?? payload?.sections[0];
+    currentPayload?.sections.find((x) => x.id === section) ?? currentPayload?.sections[0];
   return (
     <div
       className="modal-backdrop"
@@ -66,14 +75,14 @@ export default function HelpDialog({
             ×
           </button>
         </header>
-        {error ? <><div className="dialog-error">ヘルプの読込に失敗しました: {error}</div><div className="dialog-footer"><button onClick={close} disabled={opening}>閉じる</button><button className="primary" onClick={()=>setAttempt(value=>value+1)}>再試行</button></div></> : !payload ? (
-          <div className="dialog-loading">ヘルプを読み込んでいます…</div>
+        {currentError ? <><div className="dialog-error" role="alert">ヘルプの読込に失敗しました: {currentError}</div><div className="dialog-footer"><button onClick={close} disabled={opening}>閉じる</button><button className="primary" onClick={()=>setAttempt(value=>value+1)}>再試行</button></div></> : !currentPayload ? (
+          <div className="dialog-loading" role="status">ヘルプを読み込んでいます…</div>
         ) : (
           <>
-            <div className="help-header">{payload.header}</div>
+            <div className="help-header">{currentPayload.header}</div>
             <div className="help-layout">
               <nav aria-label="ヘルプ項目">
-                {payload.sections.map((x) => (
+                {currentPayload.sections.map((x) => (
                   <button
                     key={x.id}
                     className={current?.id === x.id ? "active" : ""}
@@ -84,12 +93,12 @@ export default function HelpDialog({
                   </button>
                 ))}
               </nav>
-              <article>
+              <article key={current?.id}>
                 <h2>{current?.title}</h2>
                 <pre>{current?.body}</pre>
               </article>
             </div>
-            {releaseError && <div className="dialog-error inline" role="alert">{releaseError}</div>}
+            {currentReleaseError && <div className="dialog-error inline" role="alert">{currentReleaseError}</div>}
             <div className="dialog-footer">
               <button onClick={() => void openReleases()} disabled={opening}>
                 {opening ? "開いています…" : "リリースページ"}

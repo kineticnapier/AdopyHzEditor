@@ -57,6 +57,66 @@ test("unmodified editor keys keep their existing actions", () => {
   ]);
 });
 
+test("Shift+Delete, Shift+Backspace and Shift+Q never mutate notes", () => {
+  const { calls, press } = setup();
+  for (const key of ["Delete", "Backspace", "q"]) {
+    assert.equal(press(key, { shiftKey: true }), false, `Shift+${key}`);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(press("Delete"), true);
+  assert.equal(press("Backspace"), true);
+  assert.equal(press("q"), true);
+  // Shift+arrow navigation is intentionally assigned and must still work.
+  assert.equal(press("ArrowRight", { shiftKey: true }), true);
+  assert.deepEqual(calls, ["delete", "delete", "quantize", "seek:5"]);
+});
+
+test("unassigned Shift+Home and Shift+W/S do not seek or scroll pitch", () => {
+  const { calls, press } = setup();
+  for (const key of ["Home", "w", "s", "W", "S"]) {
+    assert.equal(press(key, { shiftKey: true }), false, `Shift+${key}`);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(press("Home"), true);
+  assert.equal(press("w"), true);
+  assert.equal(press("s"), true);
+  assert.deepEqual(calls, ["seekTo:0", 'view:{"pitchBottom":36}', 'view:{"pitchBottom":12}']);
+});
+
+test("unassigned Shift+Space, vertical arrows and mode keys preserve native behavior", () => {
+  const { calls, press } = setup();
+  for (const key of [" ", "ArrowUp", "ArrowDown", "1", "2", "3"]) {
+    assert.equal(press(key, { shiftKey: true }), false, `Shift+${key}`);
+  }
+  assert.deepEqual(calls, []);
+  for (const key of [" ", "ArrowUp", "ArrowDown", "1", "2", "3"]) {
+    assert.equal(press(key), true, key);
+  }
+  assert.equal(press("ArrowUp", { ctrlKey: true }), true);
+  assert.equal(press("ArrowDown", { ctrlKey: true }), true);
+  assert.equal(press("ArrowRight", { shiftKey: true }), true);
+  assert.equal(press("ArrowLeft", { shiftKey: true }), true);
+  assert.deepEqual(calls, [
+    "play", 'view:{"pitchBottom":25}', 'view:{"pitchBottom":23}',
+    "mode:spec", "mode:notes", "mode:both",
+    'view:{"pitchBottom":36}', 'view:{"pitchBottom":12}', "seek:5", "seek:-5",
+  ]);
+});
+
+test("F1 opens help only without modifiers and does not consume native chords", () => {
+  const { calls, press } = setup();
+  assert.equal(press("F1"), true);
+  for (const mods of [
+    { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true },
+    { ctrlKey: true, shiftKey: true }, { altKey: true, shiftKey: true },
+  ]) {
+    assert.equal(press("F1", mods), false);
+    assert.equal(press("F1", { ...mods, repeat: true }), false);
+  }
+  assert.equal(press("F1", { repeat: true }), true);
+  assert.deepEqual(calls, ["help"]);
+});
+
 test("Home seeks to exactly zero and modified Home remains native", () => {
   const { calls, press } = setup();
   assert.equal(press("Home"), true);
@@ -250,6 +310,7 @@ test("modified Escape does not clear either selection", () => {
   assert.equal(press("Escape", { ctrlKey: true }), false);
   assert.equal(press("Escape", { altKey: true }), false);
   assert.equal(press("Escape", { metaKey: true }), false);
+  assert.equal(press("Escape", { shiftKey: true }), false);
   assert.deepEqual(calls, []);
 });
 
@@ -257,4 +318,78 @@ test("global Track clearing is wired through the request-invalidating App handle
   const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(source, /clearTracks:\s*\(\)\s*=>\s*changeTrackSelection\(\{\s*ids:\s*\[\],\s*range:\s*null,\s*useRange:\s*false\s*\}\)/);
   assert.match(source, /function changeTrackSelection\([\s\S]*?trackSelectionRequests\.current\.invalidate\(\)/);
+});
+
+// Audit #1: holding Ctrl+X sent one cut per auto-repeat with the stale
+// selection indices, deleting unrelated notes that shifted into those slots.
+test("held selection-editing shortcuts run once and consume their repeats", () => {
+  const { calls, press } = setup();
+  assert.equal(press("x", { ctrlKey: true }), true);
+  for (const [key, mods] of [
+    ["x", { ctrlKey: true, repeat: true }],
+    ["X", { ctrlKey: true, repeat: true }],
+    ["x", { metaKey: true, repeat: true }],
+    ["v", { ctrlKey: true, repeat: true }],
+    ["d", { ctrlKey: true, repeat: true }],
+    ["a", { ctrlKey: true, altKey: true, repeat: true }],
+    ["q", { repeat: true }],
+    ["Delete", { repeat: true }],
+    ["Backspace", { repeat: true }],
+  ] as const) assert.equal(press(key, mods), true, `${key} repeat must not reach the browser`);
+  assert.deepEqual(calls, ["cut"]);
+});
+
+test("selection-editing shortcuts still run on every distinct key press", () => {
+  const { calls, press } = setup();
+  press("x", { ctrlKey: true });
+  press("x", { ctrlKey: true });
+  press("d", { ctrlKey: true });
+  press("v", { ctrlKey: true });
+  press("q");
+  press("Delete");
+  assert.deepEqual(calls, ["cut", "cut", "duplicate", "paste", "quantize", "delete"]);
+});
+
+test("save commits all supported contenteditable variants before invoking save", () => {
+  for (const [value, modifiers, expected] of [
+    ["", { ctrlKey: true }, "save"],
+    ["plaintext-only", { metaKey: true }, "save"],
+    ["true", { ctrlKey: true, shiftKey: true }, "saveAs"],
+  ] as const) {
+    const { calls, press } = setup();
+    const editable = { blur() { calls.push("commit-editable"); } };
+    const target = {
+      closest(selector: string) {
+        return selector.split(",").includes(`[contenteditable='${value}']`) ? editable : null;
+      },
+    } as unknown as EventTarget;
+    assert.equal(press("s", modifiers, target), true, value);
+    assert.deepEqual(calls, ["commit-editable", expected], value);
+  }
+});
+
+test("held Space and Ctrl/Meta+Space never repeat transport requests", () => {
+  const { calls, press } = setup();
+  for (const mods of [{}, { ctrlKey: true }, { metaKey: true }]) {
+    assert.equal(press(" ", { ...mods, repeat: true }), true);
+    assert.equal(press(" ", mods), true);
+    assert.equal(press(" ", { ...mods, repeat: true }), true);
+  }
+  assert.deepEqual(calls, ["play", "stop", "stop"]);
+  // Unassigned modified Space chords retain native behavior.
+  for (const mods of [{ shiftKey: true }, { altKey: true }, { ctrlKey: true, shiftKey: true }]) {
+    assert.equal(press(" ", { ...mods, repeat: true }), false);
+  }
+});
+
+test("held Escape after an input blur does not clear editor selections", () => {
+  const { calls, press } = setup();
+  // The first Escape is handled by a numeric field, which then loses focus.
+  // Later key-repeat events can target the page rather than that field.
+  assert.equal(press("Escape", { repeat: true }), true);
+  assert.equal(press("Escape", { repeat: true }), true);
+  assert.deepEqual(calls, []);
+  // A fresh key press on the editor must still clear both selection layers.
+  assert.equal(press("Escape"), true);
+  assert.deepEqual(calls, ["clearTracks", "select:"]);
 });

@@ -136,3 +136,66 @@ test("Inspector clear during a pending Track lookup cannot be overwritten", asyn
   assert.deepEqual(selected, []);
   assert.deepEqual(messages, []);
 });
+
+test("keyboard Note navigation supersedes an in-flight Track lookup", async () => {
+  const canvas = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  const handler = canvas.slice(canvas.indexOf("function onCanvasKeyDown("));
+  const selection = handler.match(/setKeyboardNote\(next\);([\s\S]*?)props\.onSelect\(nextSelection\);/);
+  assert.ok(selection, "keyboard navigation must select the next Note");
+  assert.match(selection[1], /clearTrackSelection\(\);/,
+    "invalidate a pending Track range before applying the Note selection");
+
+  const gate = new LatestRequestGate();
+  const ticket = gate.issue();
+  let finish!: (value: { trackIds: number[]; status: string }) => void;
+  const response = new Promise<{ trackIds: number[]; status: string }>(resolve => { finish = resolve; });
+  const pending = resolveTrackLookup(() => response, () => gate.isCurrent(ticket), () => {});
+  let trackIds = [7];
+  let selectedNotes: number[] = [];
+  // The keyboard path clears Tracks through the same invalidating handler as a click.
+  gate.invalidate();
+  trackIds = [];
+  selectedNotes = [1];
+  finish({ trackIds: [99], status: "old Track range" });
+  const stale = await pending;
+  if (stale !== null) {
+    trackIds = stale;
+    selectedNotes = [];
+  }
+  assert.equal(stale, null);
+  assert.deepEqual(trackIds, []);
+  assert.deepEqual(selectedNotes, [1]);
+});
+
+test("Note selection from Ctrl+A or Canvas invalidates a pending Track lookup", async () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const handler = app.match(/function changeNoteSelection\(indices: number\[\]\) \{([\s\S]*?)\n  \}/);
+  assert.ok(handler, "a shared Note selection handler must exist");
+  const invalidate = handler[1].indexOf("trackSelectionRequests.current.invalidate()");
+  const select = handler[1].indexOf("setSelected(indices)");
+  assert.ok(invalidate >= 0 && select > invalidate,
+    "pending Track lookup must be invalidated before selecting Notes");
+  assert.match(app, /select: changeNoteSelection,/,
+    "Ctrl+A must use the same invalidating selection handler");
+  assert.match(app, /onSelect=\{changeNoteSelection\}/,
+    "Canvas Note selection must use the same handler");
+
+  const gate = new LatestRequestGate();
+  const request = gate.issue();
+  let finish!: (value: { trackIds: number[]; status: string }) => void;
+  const response = new Promise<{ trackIds: number[]; status: string }>(resolve => { finish = resolve; });
+  const messages: string[] = [];
+  const pending = resolveTrackLookup(() => response, () => gate.isCurrent(request), message => messages.push(message));
+  let selectedNotes: number[] = [];
+  let selectedTracks = [7];
+  // The shared handler executes synchronously before React commits selection.
+  gate.invalidate();
+  selectedNotes = [0, 1, 2];
+  finish({ trackIds: [99], status: "old range" });
+  const stale = await pending;
+  if (stale !== null) { selectedTracks = stale; selectedNotes = []; }
+  assert.equal(stale, null);
+  assert.deepEqual(selectedNotes, [0, 1, 2]);
+  assert.deepEqual(selectedTracks, [7]);
+  assert.deepEqual(messages, []);
+});

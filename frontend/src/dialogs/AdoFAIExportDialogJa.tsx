@@ -7,12 +7,29 @@ import type {
 } from "./bridge";
 import { LatestRequestGate } from "../api/requestCoordinator";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { isDialogCompositionKey, isPlainDialogEscape } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
+import { exportDefaultsContextIsCurrent } from "./previewFreshness";
+import { exportFailureMessage, exportStatusMessage } from "./exportResult";
+import { exportScopeOffset } from "./exportScopeOffset";
+import { isXModeAvailable, xModeForCompression } from "./angleCompressionXMode";
+
+type ExportContext = { api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number };
+
+const xModeOptions: Array<[AdoFAIExportOptions["xMode"], string]> = [
+  ["floor", "切り捨て"],
+  ["lowest_floor", "最小切り捨て"],
+  ["round", "四捨五入"],
+  ["ceil", "切り上げ"],
+  ["fixed", "固定"],
+  ["target_bpm", "目標BPM"],
+];
 
 type Props = {
   api: BackendApi;
   selected: number[];
+  documentGeneration: number;
   defaultSelectedOnly?: boolean;
   onClose(): void;
   onStatus(text: string): void;
@@ -21,14 +38,16 @@ type Props = {
 export default function AdoFAIExportDialogJa({
   api,
   selected,
+  documentGeneration,
   defaultSelectedOnly = false,
   onClose,
   onStatus,
   onHelp,
 }: Props) {
   const [options, setOptions] = useState<AdoFAIExportOptions | null>(null),
+    [loadedContext, setLoadedContext] = useState<{ api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number } | null>(null),
     [working, setWorking] = useState(false),
-    [error, setError] = useState(""),
+    [error, setError] = useState<{ message: string; context: ExportContext } | null>(null),
     [tile, setTile] = useState<AdoFAITilePreview | null>(null),
     [debug, setDebug] = useState<AdoFAIDebugPreview | null>(null),
     [previewMode, setPreviewMode] = useState<"none" | "tile" | "debug">("none");
@@ -36,30 +55,44 @@ export default function AdoFAIExportDialogJa({
   const previewRequests = useRef(new LatestRequestGate());
   const actionOnce = useRef(createExclusiveAsyncAction());
   const workingRef = useRef(false);
+  // Async actions must check the latest document/selection, not their old render.
+  const requestContext = { api, selected, defaultSelectedOnly, loadAttempt, documentGeneration };
+  const latestRequestContext = useRef(requestContext);
+  latestRequestContext.current = requestContext;
+  // Compare during render: effects run after a new selection has already rendered.
+  const defaultsCurrent = exportDefaultsContextIsCurrent(loadedContext, requestContext);
+  // A failure from a previous selection/document must not appear in the new form.
+  const currentError = exportDefaultsContextIsCurrent(error?.context ?? null, requestContext)
+    ? error!.message : "";
+  function isCurrentAction(context: typeof loadedContext) {
+    return exportDefaultsContextIsCurrent(context, latestRequestContext.current);
+  }
   useEffect(() => {
     previewRequests.current.invalidate();
     setTile(null);
     setDebug(null);
     setPreviewMode("none");
-    setError("");
+    setError(null);
+    // A changed selection invalidates the previous export options. Do not let
+    // the user export with stale defaults while the new request is pending.
+    setOptions(null);
+    setLoadedContext(null);
     let alive = true;
     void api
-      .get_adofai_export_defaults(selected)
+      .get_adofai_export_defaults(selected, defaultSelectedOnly)
       .then((v) => {
         if (alive) {
-          setOptions({
-            ...v,
-            trackVisual: "normal",
-            selectedOnly: defaultSelectedOnly && selected.length > 0,
-            harmonyTuning: "equal temperament",
-          });
+          setLoadedContext({ api, selected, defaultSelectedOnly, loadAttempt, documentGeneration });
+          setOptions({ ...v, trackVisual: "normal", selectedOnly:defaultSelectedOnly&&selected.length>0, harmonyTuning: "equal temperament" });
         }
       })
-      .catch((e) => alive && setError(String(e)));
+      .catch((e) => {
+        if (alive) setError({ message: String(e), context: { api, selected, defaultSelectedOnly, loadAttempt, documentGeneration } });
+      });
     return () => {
       alive = false;
     };
-  }, [api, selected, defaultSelectedOnly, loadAttempt]);
+  }, [api, selected, defaultSelectedOnly, loadAttempt, documentGeneration]);
   function invalidatePreview() {
     previewRequests.current.invalidate();
     setTile(null);
@@ -71,21 +104,58 @@ export default function AdoFAIExportDialogJa({
     v: AdoFAIExportOptions[K],
   ) {
     // A focused numeric input may blur as the form becomes disabled.
-    if (workingRef.current) return;
+    if (workingRef.current || !defaultsCurrent) return;
     invalidatePreview();
+    // An error from the previous options must not remain after editing.
+    setError(null);
     setOptions((o) =>
       o ? { ...o, [k]: v, harmonyTuning: "equal temperament" } : o,
     );
   }
+  function changeAngleCompressionMode(angleCompressionMode: AdoFAIExportOptions["angleCompressionMode"]) {
+    if (workingRef.current || !defaultsCurrent) return;
+    invalidatePreview();
+    setError(null);
+    // Python uses "floor" when fixed angles and target BPM are combined.
+    // Keep the displayed X mode consistent with the actual export.
+    setOptions((o) => o ? {
+      ...o,
+      angleCompressionMode,
+      xMode: xModeForCompression(angleCompressionMode, o.xMode),
+    } : o);
+  }
+  function changeSelectedOnly(selectedOnly: boolean) {
+    if (workingRef.current || !defaultsCurrent) return;
+    invalidatePreview();
+    setError(null);
+    setOptions((o) => o ? {
+      ...o, selectedOnly,
+      songOffsetMs: o.songOffsetAuto
+        ? exportScopeOffset(o.fullSongOffsetMs, o.selectedSongOffsetMs, selectedOnly)
+        : o.songOffsetMs,
+    } : o);
+  }
+  function changeSongOffsetAuto(songOffsetAuto: boolean) {
+    if (workingRef.current || !defaultsCurrent) return;
+    invalidatePreview();
+    setError(null);
+    setOptions((o) => o ? {
+      ...o, songOffsetAuto,
+      songOffsetMs: songOffsetAuto
+        ? exportScopeOffset(o.fullSongOffsetMs, o.selectedSongOffsetMs, o.selectedOnly)
+        : o.songOffsetMs,
+    } : o);
+  }
   async function run<T>(fn: () => Promise<T>) {
+    const context = loadedContext;
     return actionOnce.current(async () => {
       workingRef.current = true;
       setWorking(true);
-      setError("");
+      setError(null);
       try {
         return await fn();
       } catch (e) {
-        setError(String(e));
+        if (context && isCurrentAction(context)) setError({ message: String(e), context });
         return null;
       } finally {
         workingRef.current = false;
@@ -93,50 +163,58 @@ export default function AdoFAIExportDialogJa({
       }
     });
   }
-  const fixed = options
+  const fixed = options && defaultsCurrent
     ? { ...options, harmonyTuning: "equal temperament" as const }
     : null;
   async function exportLevel() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const r = await run(() => api.export_adofai_advanced(fixed, selected));
-    if (!r) return;
-    onStatus(r.status);
+    if (!r || !isCurrentAction(context)) return;
+    const status = exportStatusMessage(r);
+    if (status !== null) onStatus(status);
+    const failure = exportFailureMessage(r);
+    if (failure) setError({ message: failure, context });
     if (r.ok) onClose();
   }
   async function tilePreview() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const snapshot = { ...fixed }, selection = [...selected];
     const r = await run(async () => {
       const request = previewRequests.current.issue();
       const result = await api.preview_adofai_tiles(snapshot, selection);
       return { request, result };
     });
-    if (r && previewRequests.current.isCurrent(r.request)) {
+    if (r && isCurrentAction(context) && previewRequests.current.isCurrent(r.request)) {
       setTile(r.result);
       setDebug(null);
       setPreviewMode("tile");
     }
   }
   async function debugPreview() {
-    if (!fixed) return;
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const snapshot = { ...fixed }, selection = [...selected];
     const r = await run(async () => {
       const request = previewRequests.current.issue();
       const result = await api.preview_adofai_debug(snapshot, selection);
       return { request, result };
     });
-    if (r && previewRequests.current.isCurrent(r.request)) {
+    if (r && isCurrentAction(context) && previewRequests.current.isCurrent(r.request)) {
       setDebug(r.result);
       setTile(null);
       setPreviewMode("debug");
     }
   }
   async function chooseSongSource() {
+    const context = loadedContext;
+    if (!fixed || !context) return;
     const r = await run(() => api.choose_adofai_song_source());
-    if (r?.ok && r.path) {
+    if (r?.ok && r.path && isCurrentAction(context)) {
       invalidatePreview();
       setOptions((o) =>
-        o
+        isCurrentAction(context) && o
           ? {
               ...o,
               useProjectSong: true,
@@ -148,18 +226,19 @@ export default function AdoFAIExportDialogJa({
       onStatus(r.status);
     }
   }
-  if (!options)
+  if (!options || !defaultsCurrent)
     return (
-      <Modal title="ADOFAI出力" onClose={onClose}>
-        {error ? (
+      <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
+        {currentError ? (
           <>
-            <div className="dialog-error">
-              設定の読込に失敗しました: {error}
+            <div className="dialog-error" role="alert">
+              設定の読込に失敗しました: {currentError}
             </div>
             <div className="dialog-footer">
-              <button onClick={onClose}>閉じる</button>
+              <button onClick={onClose} disabled={working}>閉じる</button>
               <button
                 className="primary"
+                disabled={working}
                 onClick={() => setLoadAttempt((v) => v + 1)}
               >
                 再試行
@@ -167,7 +246,7 @@ export default function AdoFAIExportDialogJa({
             </div>
           </>
         ) : (
-          <div className="dialog-loading">設定を読み込んでいます…</div>
+          <div className="dialog-loading" role="status">{working ? "出力処理中…" : "設定を読み込んでいます…"}</div>
         )}
       </Modal>
     );
@@ -206,7 +285,7 @@ export default function AdoFAIExportDialogJa({
               value={options.baseBpm}
               min={1}
               max={999999}
-              step={0.001}
+              step="any"
               onChange={(v) => patch("baseBpm", v)}
             />
           </Field>
@@ -217,7 +296,7 @@ export default function AdoFAIExportDialogJa({
               value={options.angleOnlyBpm}
               min={1}
               max={999999}
-              step={1}
+              step="any"
               onChange={(v) => patch("angleOnlyBpm", v)}
             />
           </Field>
@@ -249,7 +328,7 @@ export default function AdoFAIExportDialogJa({
                   value={options.harmonyCustomSemitone}
                   min={-48}
                   max={48}
-                  step={0.1}
+                  step="any"
                   onChange={(v) => patch("harmonyCustomSemitone", v)}
                 />
               </Field>
@@ -313,7 +392,7 @@ export default function AdoFAIExportDialogJa({
               <input
                 type="checkbox"
                 checked={options.selectedOnly}
-                onChange={(e) => patch("selectedOnly", e.target.checked)}
+                onChange={(e) => changeSelectedOnly(e.target.checked)}
               />
               選択ノートのみ（{selected.length}個）
             </label>
@@ -332,10 +411,7 @@ export default function AdoFAIExportDialogJa({
                       ["fixed", "固定角度"],
                     ]}
                     onChange={(v) =>
-                      patch(
-                        "angleCompressionMode",
-                        v as AdoFAIExportOptions["angleCompressionMode"],
-                      )
+                      changeAngleCompressionMode(v as AdoFAIExportOptions["angleCompressionMode"])
                     }
                   />
                 </Field>
@@ -345,23 +421,21 @@ export default function AdoFAIExportDialogJa({
                       value={options.angleCompressionFixedAngle}
                       min={0.001}
                       max={359.999}
-                      step={1}
+                      step="any"
                       suffix="°"
                       onChange={(v) => patch("angleCompressionFixedAngle", v)}
                     />
                   </Field>
                 )}
+                {options.angleCompressionMode === "fixed" && (
+                  <div className="info-card">固定圧縮角度では「目標BPM」のX計算は使えません。</div>
+                )}
                 <Field label="Xの決め方">
                   <Select
                     value={options.xMode}
-                    options={[
-                      ["floor", "切り捨て"],
-                      ["lowest_floor", "最小切り捨て"],
-                      ["round", "四捨五入"],
-                      ["ceil", "切り上げ"],
-                      ["fixed", "固定"],
-                      ["target_bpm", "目標BPM"],
-                    ]}
+                    options={xModeOptions.filter(([mode]) =>
+                      isXModeAvailable(options.angleCompressionMode, mode)
+                    )}
                     onChange={(v) =>
                       patch("xMode", v as AdoFAIExportOptions["xMode"])
                     }
@@ -373,7 +447,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.fixedX}
                       min={0.000001}
                       max={100000}
-                      step={0.1}
+                      step="any"
                       onChange={(v) => patch("fixedX", v)}
                     />
                   </Field>
@@ -384,7 +458,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.targetBpm}
                       min={1}
                       max={999999}
-                      step={1}
+                      step="any"
                       onChange={(v) => patch("targetBpm", v)}
                     />
                   </Field>
@@ -414,7 +488,7 @@ export default function AdoFAIExportDialogJa({
                   value={options.visualPathAngle}
                   min={0}
                   max={359.999}
-                  step={1}
+                  step="any"
                   suffix="°"
                   onChange={(v) => patch("visualPathAngle", v)}
                 />
@@ -442,7 +516,7 @@ export default function AdoFAIExportDialogJa({
                     value={options.visualPositionX}
                     min={-100000}
                     max={100000}
-                    step={1}
+                    step="any"
                     onChange={(v) => patch("visualPositionX", v)}
                   />
                 </Field>
@@ -451,7 +525,7 @@ export default function AdoFAIExportDialogJa({
                     value={options.visualPositionY}
                     min={-100000}
                     max={100000}
-                    step={1}
+                    step="any"
                     onChange={(v) => patch("visualPositionY", v)}
                   />
                 </Field>
@@ -480,7 +554,7 @@ export default function AdoFAIExportDialogJa({
                   value={options.finalCustomAngle}
                   min={0.001}
                   max={359.999}
-                  step={1}
+                  step="any"
                   suffix="°"
                   onChange={(v) => patch("finalCustomAngle", v)}
                 />
@@ -492,7 +566,7 @@ export default function AdoFAIExportDialogJa({
                   value={options.finalCardinalStep}
                   min={1}
                   max={180}
-                  step={1}
+                  step="any"
                   suffix="°"
                   onChange={(v) => patch("finalCardinalStep", v)}
                 />
@@ -530,7 +604,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.harmonyVisualStep}
                       min={1}
                       max={180}
-                      step={1}
+                      step="any"
                       suffix="°"
                       onChange={(v) => patch("harmonyVisualStep", v)}
                     />
@@ -564,7 +638,7 @@ export default function AdoFAIExportDialogJa({
                         value={options.harmonyPolyCycleAngle}
                         min={1}
                         max={100000}
-                        step={1}
+                        step="any"
                         suffix="°"
                         onChange={(v) => patch("harmonyPolyCycleAngle", v)}
                       />
@@ -641,9 +715,7 @@ export default function AdoFAIExportDialogJa({
                     <input
                       type="checkbox"
                       checked={options.songOffsetAuto}
-                      onChange={(e) =>
-                        patch("songOffsetAuto", e.target.checked)
-                      }
+                      onChange={(e) => changeSongOffsetAuto(e.target.checked)}
                     />
                     最初のノートから自動計算
                   </label>
@@ -654,7 +726,7 @@ export default function AdoFAIExportDialogJa({
                       value={options.songOffsetMs}
                       min={-3600000}
                       max={3600000}
-                      step={1}
+                      step="any"
                       suffix=" ms"
                       onChange={(v) => patch("songOffsetMs", v)}
                     />
@@ -667,7 +739,7 @@ export default function AdoFAIExportDialogJa({
                 value={options.maxTiles}
                 min={0}
                 max={10000000}
-                step={10000}
+                step={1}
                 onChange={(v) => patch("maxTiles", Math.round(v))}
               />
             </Field>
@@ -676,14 +748,14 @@ export default function AdoFAIExportDialogJa({
                 value={options.maxTilesPerNote}
                 min={0}
                 max={1000000}
-                step={500}
+                step={1}
                 onChange={(v) => patch("maxTilesPerNote", Math.round(v))}
               />
             </Field>
           </div>
         </details>
         </fieldset>
-        {error && <div className="dialog-error">{error}</div>}
+        {currentError && <div className="dialog-error" role="alert">{currentError}</div>}
         {previewMode === "tile" && tile && <TilePreview preview={tile} />}{" "}
         {previewMode === "debug" && debug && <DebugPreview preview={debug} />}
       </div>
@@ -743,6 +815,7 @@ function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-busy={locked}
       >
         <header className="modal-title">
           <strong id={titleId}>{title}</strong>
@@ -810,7 +883,7 @@ function Num({
   value: number;
   min: number;
   max: number;
-  step: number;
+  step: number | "any";
   suffix?: string;
   onChange(v: number): void;
 }) {
@@ -818,12 +891,14 @@ function Num({
   const [text, setText] = useState(String(fallback));
   const [editing, setEditing] = useState(false);
   const cancelledRef = useRef(false);
+  const editedRef = useRef(false);
   useEffect(() => {
     if (!editing) setText(String(fallback));
   }, [editing, fallback]);
   function commit() {
-    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current);
+    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current, step === 1, editedRef.current);
     cancelledRef.current = false;
+    editedRef.current = false;
     setEditing(false);
     setText(String(next));
     if (next !== fallback) onChange(next);
@@ -836,12 +911,14 @@ function Num({
         min={min}
         max={max}
         step={step}
-        onFocus={() => { cancelledRef.current = false; setEditing(true); }}
-        onChange={(event) => setText(event.target.value)}
+        onFocus={() => { cancelledRef.current = false; editedRef.current = false; setEditing(true); }}
+        onChange={(event) => { editedRef.current = true; setText(event.target.value); }}
         onBlur={commit}
         onKeyDown={(event) => {
+          // IME owns Enter/Escape while a composition is active.
+          if (isDialogCompositionKey(event.nativeEvent)) return;
           if (event.key === "Enter") event.currentTarget.blur();
-          else if (event.key === "Escape") {
+          else if (isPlainDialogEscape(event)) {
             event.preventDefault();
             // Cancel this edit without closing the surrounding modal.
             event.stopPropagation();
@@ -902,7 +979,8 @@ function DebugPreview({ preview }: { preview: AdoFAIDebugPreview }) {
   return (
     <div className="debug-preview">
       <div className="preview-summary">
-        行数 {preview.summary.rows} / 推定タイル{" "}
+        表示 {rows.length} / 全 {preview.summary.rows} 行{" "}
+        {preview.summary.rows > rows.length || preview.limited ? "（一部のみ）" : ""} / 推定タイル{" "}
         {preview.summary.estimatedTiles} / 警告 {preview.summary.warnings}
       </div>
       <div className="debug-table-wrap">

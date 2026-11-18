@@ -7,6 +7,8 @@ import EditorCanvas, {
 } from "./editor/EditorCanvas";
 import HelpDialog from "./dialogs/HelpDialog";
 import SettingsPanel from "./settings/SettingsPanel";
+import { acceptSettingsPatch } from "./settings/settingsChange";
+import { settingsResponseIsCurrent } from "./settings/settingsResponseFreshness";
 import {
   BlankWorkspaceDialog,
   HarmonicDiagramDialog,
@@ -17,6 +19,8 @@ import Timeline from "./editor/Timeline";
 import { clampTimeViewChange } from "./editor/timelineNavigation";
 import { clampPitchViewChange, hasEffectiveViewChange } from "./editor/pitchViewport";
 import TopToolbar from "./components/TopToolbar";
+import { playbackToggleEnabled } from "./components/playbackStatusMessage";
+import { shouldFetchCqtSpectrum } from "./editor/cqtFetchPolicy";
 import useEditorShortcuts from "./editor/useEditorShortcuts";
 import {
   DirectSpectrumRegionCache,
@@ -29,7 +33,9 @@ import {
 import type { TrackSelectionRange } from "./editor/trackSelection";
 import { resolveTrackLookup } from "./editor/trackLookup";
 import { midiLabel, midiToHz } from "./editor/musicMath";
+import { retainValidSelection, selectionAfterMutation } from "./editor/selectionValidity";
 import { formatCursorPeakLabel } from "./editor/cursorStatus";
+import { formatTrackHoverReadout } from "./editor/trackHoverReadout";
 import { shouldShowCanvasEmptyHint } from "./editor/emptyState";
 import { runMidiExport } from "./editor/midiExport";
 import "./dialogs.css";
@@ -40,6 +46,7 @@ import {
   type DirectSpectrumPayload,
   type EditorSettings,
   type FrequencyTrackPayload,
+  type KickPitchPayload,
   type NoteDto,
   type NoteMutationResult,
   type PlaybackState,
@@ -48,6 +55,7 @@ import {
 } from "./api/bridge";
 import {
   AsyncActionGuard,
+  createSingleFlightPoll,
   enqueueAppliedTask,
   enqueueRecoverableViewTask,
   enqueueStateTaskAfterSettings,
@@ -190,6 +198,9 @@ export default function App() {
       useRange: false,
     }),
     [hoveredTrack, setHoveredTrack] = useState<TrackHoverInfo | null>(null);
+  const [kickPitch, setKickPitch] = useState<KickPitchPayload | null>(null),
+    [kickPitchSelected, setKickPitchSelected] = useState<number[]>([]);
+  const kickPitchAudioPath = useRef<string | null>(null);
   const [cursorReadout, setCursorReadout] = useState<{
     time: number;
     midi: number;
@@ -200,6 +211,8 @@ export default function App() {
   const peakRequest = useRef(new LatestRequestGate());
   const spectrumRequests = useRef(new LatestRequestGate());
   const settingsRequests = useRef(new LatestRequestGate());
+  // Keep the requested values in sync even when multiple edits precede a React render.
+  const settingsSnapshotRef = useRef(settings);
   const pendingSettings = useRef<Partial<EditorSettings>>({});
   const settingsFlush = useRef<Promise<void> | null>(null);
   const stateTransitionPending = useRef(0);
@@ -208,7 +221,10 @@ export default function App() {
   const viewRequests = useRef(new LatestRequestGate());
   const playbackRequests = useRef(new LatestRequestGate());
   const trackSelectionRequests = useRef(new LatestRequestGate());
-  const deletingSelection = useRef("");
+  const destructiveSelection = useRef(new AsyncActionGuard());
+  // Updated synchronously when backend notes are applied, before React renders.
+  const latestNotes = useRef(notes);
+  const latestView = useRef(view);
   const documentGeneration = useRef(0);
   const analysisIdentity = useRef("");
   const pendingSaveGuard = useRef(new AsyncActionGuard());
@@ -267,6 +283,15 @@ export default function App() {
       : null;
   const toolsApi = api as ToolBackendApi | null;
 
+  // Keep the view current between input events, before React commits a render.
+  function applyViewState(next: ViewState) {
+    latestView.current = next;
+    setView(next);
+  }
+  function applyViewChanges(changes: Partial<ViewState>) {
+    applyViewState({ ...latestView.current, ...changes });
+  }
+
   function applyState(state: AppState) {
     documentGeneration.current += 1;
     peakRequest.current.invalidate();
@@ -279,16 +304,24 @@ export default function App() {
       analysisIdentity.current = identity;
       setAnalysisRevision((v) => v + 1);
     }
+    settingsSnapshotRef.current = state.settings;
     setSettings(state.settings);
-    setView(state.view);
+    applyViewState(state.view);
     setPlayback(state.playback);
+    latestNotes.current = state.notes;
     setNotes(state.notes);
-    setSelected((old) => old.filter((i) => i >= 0 && i < state.notes.length));
+    setSelected((old) => retainValidSelection(old, state.notes.length));
     setTrackSelection({ ids: [], range: null, useRange: false });
     setHoveredTrack(null);
     setAnalysisAvailable(state.analysis.available);
     setAnalysisSource(state.analysis.source ?? "cqt");
     setAudioName(state.audio.name);
+    if (state.audio.path !== kickPitchAudioPath.current) {
+      // Analysis results belong to one source; the backend drops them too.
+      kickPitchAudioPath.current = state.audio.path;
+      setKickPitch(null);
+      setKickPitchSelected([]);
+    }
     setProjectPath(state.projectPath);
     setDirty(state.dirty);
     setBusy(state.busy);
@@ -342,15 +375,15 @@ export default function App() {
         try {
           const ping = await backend.ping();
           if (!active) return;
-          setApi(backend);
-          setConnected(ping.ok);
+          if (!ping.ok) throw new Error("バックエンドの準備が完了していません");
+          // Do not expose an API to controls or polling before the initial
+          // state is loaded. A failed get_state must leave the UI disconnected.
           const state = await backend.get_state();
           if (!active) return;
           applyState(state);
-          if (
-            state.analysis.available &&
-            state.analysis.source !== "vorbis_direct"
-          )
+          setApi(backend);
+          setConnected(ping.ok);
+          if (shouldFetchCqtSpectrum(state.analysis.available, state.analysis.source, state.view.mode))
             await refreshSpectrum(backend, state.view);
           return;
         } catch (e) {
@@ -368,19 +401,18 @@ export default function App() {
   useEffect(() => {
     if (!api) return;
     let active = true;
+    // A slow bridge call must not be superseded by the next timer tick:
+    // otherwise every response can be discarded when latency exceeds 50 ms.
+    const pollPlayback = createSingleFlightPoll(async () => {
+      const generation = documentGeneration.current;
+      const request = playbackRequests.current.issue();
+      const next = await api.get_playback_state();
+      if (active && generation === documentGeneration.current &&
+          playbackRequests.current.isCurrent(request))
+        setPlayback(next);
+    });
     const id = window.setInterval(
-      () => {
-        const generation = documentGeneration.current;
-        const request = playbackRequests.current.issue();
-        void api
-          .get_playback_state()
-          .then((x) => {
-            if (active && generation === documentGeneration.current &&
-                playbackRequests.current.isCurrent(request))
-              setPlayback(x);
-          })
-          .catch(() => {});
-      },
+      () => { void pollPlayback(); },
       playback.playing ? 50 : 500,
     );
     return () => {
@@ -388,13 +420,29 @@ export default function App() {
       window.clearInterval(id);
     };
   }, [api, playback.playing]);
+  // CQT requests are debounced by 140 ms below. Invalidate old responses
+  // immediately when their view or analysis inputs change; otherwise a slow
+  // response can repaint stale spectrum data (or report an obsolete error)
+  // before the replacement request is even issued.
+  useLayoutEffect(() => {
+    spectrumRequests.current.invalidate();
+  }, [
+    api,
+    analysisAvailable,
+    analysisSource,
+    settings.contrast,
+    settings.gamma,
+    settings.enhance,
+    settings.displayMode,
+    settings.harmonics,
+    view.mode,
+    view.start,
+    view.windowSeconds,
+    view.pitchBottom,
+    view.visibleNotes,
+  ]);
   useEffect(() => {
-    if (
-      !api ||
-      !analysisAvailable ||
-      analysisSource === "vorbis_direct" ||
-      view.mode === "notes"
-    ) {
+    if (!api || !shouldFetchCqtSpectrum(analysisAvailable, analysisSource, view.mode)) {
       setSpectrum(null);
       return;
     }
@@ -590,7 +638,7 @@ export default function App() {
       playback.duration,
     );
     if (next !== null) {
-      setView((v) => ({ ...v, start: next }));
+      applyViewChanges({ start: next });
       // Follow updates must share the manual viewport queue and failure recovery.
       // Otherwise an in-flight follow write can overtake a user's pan/zoom.
       if (api && stateTransitionPending.current === 0)
@@ -607,13 +655,23 @@ export default function App() {
   ]);
 
   async function patch(changes: Partial<EditorSettings>) {
+    // Settings remain visible while the initial backend connection is loading.
+    // Never mark an unsent edit dirty or queue it without a usable API.
+    if (!api || !connected) {
+      setStatus("バックエンド接続完了まで設定を変更できません");
+      return;
+    }
     if (stateTransitionPending.current > 0) {
       setStatus("プロジェクト処理中は設定を変更できません");
       return;
     }
+    // The backend also treats unchanged batches as no-ops. Do not create a
+    // false local dirty flag or send an unnecessary request for those batches.
+    const previousSettings = settingsSnapshotRef.current;
+    if (!acceptSettingsPatch(settingsSnapshotRef, changes)) return;
     const sourceChanged =
       changes.analysisSource !== undefined &&
-      changes.analysisSource !== settings.analysisSource;
+      changes.analysisSource !== previousSettings.analysisSource;
     if (sourceChanged) {
       peakRequest.current.invalidate();
       setCursorReadout(null);
@@ -638,21 +696,31 @@ export default function App() {
         const batch = pendingSettings.current;
         pendingSettings.current = {};
         const request = settingsRequests.current.issue();
+        const requestGeneration = documentGeneration.current;
+        const isCurrent = () =>
+          settingsResponseIsCurrent(
+            settingsRequests.current.isCurrent(request),
+            Object.keys(pendingSettings.current).length > 0,
+            requestGeneration,
+            documentGeneration.current,
+          );
         try {
           const normalized = await api.update_settings(batch);
-          if (
-            settingsRequests.current.isCurrent(request) &&
-            Object.keys(pendingSettings.current).length === 0
-          )
+          if (isCurrent()) {
+            settingsSnapshotRef.current = normalized;
             setSettings(normalized);
+          }
         } catch (e) {
-          setStatus(`設定の更新に失敗しました: ${String(e)}`);
-          if (
-            settingsRequests.current.isCurrent(request) &&
-            Object.keys(pendingSettings.current).length === 0
-          ) {
+          // A newer edit or document may have arrived while the request failed.
+          if (isCurrent()) {
+            setStatus(`設定の更新に失敗しました: ${String(e)}`);
             try {
-              setSettings((await api.get_state()).settings);
+              const recovered = (await api.get_state()).settings;
+              // Recheck after awaiting recovery: do not overwrite edits made meanwhile.
+              if (isCurrent()) {
+                settingsSnapshotRef.current = recovered;
+                setSettings(recovered);
+              }
             } catch {
               /* Keep the visible value and the dirty warning. */
             }
@@ -678,13 +746,13 @@ export default function App() {
       viewQueue.current,
       action,
       isCurrent,
-      setView,
+      applyViewState,
       async (error) => {
         setStatus(`${label}に失敗しました: ${String(error)}`);
         try {
           // Read the backend's actual view, not the optimistic local value.
           const state = await viewQueue.current.enqueue(() => api.get_state());
-          if (isCurrent()) setView(state.view);
+          if (isCurrent()) applyViewState(state.view);
         } catch (recoveryError) {
           if (isCurrent())
             setStatus(`表示範囲の再取得に失敗しました: ${String(recoveryError)}`);
@@ -698,10 +766,11 @@ export default function App() {
       return;
     }
     // Match Bridge.set_view time and MIDI bounds before optimistic rendering.
-    const pitchNormalized = clampPitchViewChange(view, changes);
-    const normalized = clampTimeViewChange(view, pitchNormalized, playback.duration);
+    const currentView = latestView.current;
+    const pitchNormalized = clampPitchViewChange(currentView, changes);
+    const normalized = clampTimeViewChange(currentView, pitchNormalized, playback.duration);
     // A clamped or repeated input must not cancel follow or enqueue set_view.
-    if (!hasEffectiveViewChange(view, normalized)) return;
+    if (!hasEffectiveViewChange(currentView, normalized)) return;
     if (Object.keys(normalized).some((key) => key !== "mode"))
       setFollowPlayback(false);
     if (normalized.mode === "notes") {
@@ -709,7 +778,7 @@ export default function App() {
       setTrackSelection({ ids: [], range: null, useRange: false });
       setHoveredTrack(null);
     }
-    setView((v) => ({ ...v, ...normalized }));
+    applyViewChanges(normalized);
     if (api) await applyViewAction(() => api.set_view(normalized), "表示範囲の変更");
   }
   async function fitView() {
@@ -752,7 +821,7 @@ export default function App() {
           if (clearSelection) setSelected([]);
         },
       );
-      if (state.analysis.available && state.analysis.source !== "vorbis_direct")
+      if (shouldFetchCqtSpectrum(state.analysis.available, state.analysis.source, state.view.mode))
         await refreshSpectrum(api, state.view);
       else setSpectrum(null);
       if (!state.analysis.available) {
@@ -856,39 +925,53 @@ export default function App() {
     selection?: number[],
     markDirty = true,
   ) {
+    latestNotes.current = result.notes;
     setNotes(result.notes);
     setStatus(result.status);
     if (result.dirty !== undefined) setDirty(result.dirty);
     else if (markDirty && result.changed !== false) setDirty(true);
-    if (selection)
-      setSelected(selection.filter((i) => i >= 0 && i < result.notes.length));
-    else
-      setSelected((old) =>
-        old.filter((i) => i >= 0 && i < result.notes.length),
-      );
+    setSelected((old) =>
+      selectionAfterMutation(old, selection, result.notes.length, result.changed),
+    );
   }
   async function queuedMutation(
     call: () => Promise<NoteMutationResult>,
     selection: (result: NoteMutationResult) => number[] | undefined,
     markDirty: (result: NoteMutationResult) => boolean = () => true,
+    requireFreshNotes = false,
   ) {
     const generation = documentGeneration.current;
+    const snapshot = notes;
+    // A queued edit may refer to indices from a render preceding another edit.
+    // Check both before the backend call and after its response.
+    const isCurrent = () =>
+      generation === documentGeneration.current &&
+      (!requireFreshNotes || latestNotes.current === snapshot);
     return runWithErrorFeedback(
       () => enqueueAppliedTask(
         mutationQueue.current,
         call,
         (result) => applyMutation(result, selection(result), markDirty(result)),
-        () => generation === documentGeneration.current,
+        isCurrent,
       ),
       () => undefined,
-      (message) => setStatus(`ノート編集に失敗しました: ${message}`),
+      (message) => {
+        if (generation === documentGeneration.current) setStatus(`ノート編集に失敗しました: ${message}`);
+      },
     );
+  }
+  async function queuedSelectionMutation(
+    call: () => Promise<NoteMutationResult>,
+    selection: (result: NoteMutationResult) => number[] | undefined,
+    markDirty: (result: NoteMutationResult) => boolean = () => true,
+  ) {
+    return queuedMutation(call, selection, markDirty, true);
   }
   function queueExternalMutation(
     call: () => Promise<NoteMutationResult>,
     selection: (result: NoteMutationResult) => number[] | undefined = () => undefined,
   ) {
-    return queuedMutation(call, selection);
+    return queuedSelectionMutation(call, selection);
   }
   async function addNote(
     start: number,
@@ -905,14 +988,14 @@ export default function App() {
   }
   async function moveNotes(indices: number[], dx: number, dy: number) {
     if (api && indices.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.move_notes(indices, dx, dy),
         () => indices,
       );
   }
   async function duplicateMove(indices: number[], dx: number, dy: number) {
     if (api && indices.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.duplicate_notes_shifted(indices, dx, dy),
         (r) => r.indices ?? [],
       );
@@ -923,76 +1006,81 @@ export default function App() {
     delta: number,
   ) {
     if (api && indices.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.resize_notes(indices, edge, delta),
         () => indices,
       );
   }
   async function deleteNotes(indices = selected) {
     if (!api || !indices.length) return;
-    const key = [...indices].sort((a, b) => a - b).join(",");
-    if (deletingSelection.current === key) return;
-    deletingSelection.current = key;
-    try {
-      await queuedMutation(
+    // Even disjoint index sets become stale after an earlier deletion shifts notes.
+    // Do not queue another delete until the first request has settled.
+    await destructiveSelection.current.run(async () => {
+      await queuedSelectionMutation(
         () => api.delete_notes(indices),
         () => [],
       );
-    } finally {
-      if (deletingSelection.current === key) deletingSelection.current = "";
-    }
+    });
   }
   async function cutRange(indices: number[], start: number, end: number) {
     if (api && indices.length)
-      await queuedMutation(
-        () => api.cut_notes_range(indices, start, end),
-        (r) => r.indices ?? [],
-        (r) => r.changed !== false,
-      );
+      await destructiveSelection.current.run(async () => {
+        await queuedSelectionMutation(
+          () => api.cut_notes_range(indices, start, end),
+          (r) => r.indices ?? [],
+          (r) => r.changed !== false,
+        );
+      });
   }
   async function duplicate() {
     if (api && selected.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.duplicate_notes(selected),
         (r) => r.indices ?? [],
       );
   }
   async function quantize() {
     if (api && selected.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.quantize_notes(selected),
         () => selected,
       );
   }
   async function splitSelected() {
     if (api && selected.length)
-      await queuedMutation(
+      await queuedSelectionMutation(
         () => api.split_notes(selected, playback.time),
         (r) => (r.indices?.length ? r.indices : selected),
       );
   }
   async function copySelected() {
-    if (api) {
+    // Empty selection must not occupy the edit queue or report a stale no-op.
+    if (api && selected.length) {
       const generation = documentGeneration.current;
+      const snapshot = notes;
       await runWithErrorFeedback(
         () => enqueueAppliedTask(
           mutationQueue.current,
           () => api.copy_notes(selected),
           (result) => setStatus(result.status),
-          () => generation === documentGeneration.current,
+          () => generation === documentGeneration.current && latestNotes.current === snapshot,
         ),
         () => undefined,
-        (message) => setStatus(`コピーに失敗しました: ${message}`),
+        (message) => { if (generation === documentGeneration.current) setStatus(`コピーに失敗しました: ${message}`); },
       );
     }
   }
   async function cutSelected() {
-    if (api)
-      await queuedMutation(
-        () => api.cut_notes(selected),
-        () => [],
-        (r) => r.changed !== false,
-      );
+    // An empty cut must not reserve the destructive-action guard: a later
+    // valid Delete/Cut could otherwise be dropped while this no-op is queued.
+    if (api && selected.length)
+      await destructiveSelection.current.run(async () => {
+        await queuedSelectionMutation(
+          () => api.cut_notes(selected),
+          () => [],
+          (r) => r.changed !== false,
+        );
+      });
   }
   async function pasteAtPlayback() {
     if (api)
@@ -1003,8 +1091,9 @@ export default function App() {
       );
   }
   async function applyTargetAngle() {
-    if (api)
-      await queuedMutation(
+    // No selected notes: avoid a needless backend call and status overwrite.
+    if (api && selected.length)
+      await queuedSelectionMutation(
         () => api.apply_target_angle(selected, settings.targetAngle),
         () => selected,
         (r) => r.changed !== false,
@@ -1026,7 +1115,7 @@ export default function App() {
         () => generation === documentGeneration.current,
       ),
       () => undefined,
-      (message) => setStatus(`再生操作に失敗しました: ${message}`),
+      (message) => { if (generation === documentGeneration.current) setStatus(`再生操作に失敗しました: ${message}`); },
     );
   }
   async function seekTo(t: number) {
@@ -1034,7 +1123,9 @@ export default function App() {
     else setPlayback((p) => ({ ...p, time: t }));
   }
   async function togglePlayback() {
-    if (api) await queuedPlaybackAction(() => api.toggle_playback());
+    // The Space shortcut must honor the same availability as the Play button.
+    if (api && playbackToggleEnabled(connected, playback))
+      await queuedPlaybackAction(() => api.toggle_playback());
   }
   async function stopPlayback() {
     if (api) await queuedPlaybackAction(() => api.stop_playback());
@@ -1081,6 +1172,12 @@ export default function App() {
     } catch {
       /* Cursor diagnostics must not interrupt editing. */
     }
+  }
+  // A newer Note selection must supersede any pending asynchronous Track range.
+  // Otherwise a slow range lookup can erase a later Ctrl+A or canvas selection.
+  function changeNoteSelection(indices: number[]) {
+    trackSelectionRequests.current.invalidate();
+    setSelected(indices);
   }
   function changeTrackSelection(selection: TrackSelectionState) {
     // Inspector edits must supersede an in-flight canvas range lookup too.
@@ -1141,6 +1238,7 @@ export default function App() {
   function exportMidi(selectedOnly = false) {
     if (!api) return;
     const generation = documentGeneration.current;
+    const snapshot = notes;
     // Capture the selection at invocation time, not when earlier edits finish.
     const selectedAtRequest = [...selected];
     const action =
@@ -1155,7 +1253,8 @@ export default function App() {
         if (generation === documentGeneration.current) setStatus(message);
       }),
       () => undefined,
-      () => generation === documentGeneration.current,
+      () => generation === documentGeneration.current &&
+        (!selectedOnly || latestNotes.current === snapshot),
     );
   }
 
@@ -1213,7 +1312,7 @@ export default function App() {
     redo: () => void redo(),
     duplicate: () => void duplicate(),
     quantize: () => void quantize(),
-    select: setSelected,
+    select: changeNoteSelection,
     clearTracks: () => changeTrackSelection({ ids: [], range: null, useRange: false }),
     copy: () => void copySelected(),
     cut: () => void cutSelected(),
@@ -1282,6 +1381,7 @@ export default function App() {
       <TopToolbar
         connected={connected}
         audioName={audioName}
+        hasPlayableContent={audioName !== null || notes.length > 0}
         dirty={dirty}
         playback={playback}
         view={view}
@@ -1297,6 +1397,7 @@ export default function App() {
         <section className="editor">
           <div className="editor-stage">
             <EditorCanvas
+              documentGeneration={documentGeneration.current}
               notes={notes}
               selected={selected}
               settings={settings}
@@ -1305,9 +1406,11 @@ export default function App() {
               spectrum={visibleSpectrum}
               directSpectrum={visibleDirectSpectrum}
               frequencyTracks={visibleFrequencyTracks}
+              kickPitch={kickPitch}
+              kickPitchSelected={kickPitchSelected}
               trackSelection={trackSelection}
               onViewportSize={setViewportSize}
-              onSelect={setSelected}
+              onSelect={changeNoteSelection}
               onAdd={addNote}
               onMove={moveNotes}
               onDuplicateMove={duplicateMove}
@@ -1347,11 +1450,7 @@ export default function App() {
                 : "Pitch —"}
             </span>
             {hoveredTrack && (
-              <strong>
-                Track #{hoveredTrack.id} · {hoveredTrack.noteName} ·{" "}
-                {hoveredTrack.duration.toFixed(3)} s · $
-                {(hoveredTrack.magnitude * 100).toFixed(1)}%
-              </strong>
+              <strong>{formatTrackHoverReadout(hoveredTrack)}</strong>
             )}
             {!hoveredTrack && cursorReadout?.peak && (
               <strong>{cursorReadout.peak}</strong>
@@ -1384,6 +1483,14 @@ export default function App() {
             onStatus={setStatus}
             onTrackSelectionChange={changeTrackSelection}
             onConvertTracks={convertSelectedTracks}
+            viewStart={view.start}
+            kickPitch={kickPitch}
+            kickPitchSelected={kickPitchSelected}
+            onKickPitch={(payload, ids) => {
+              setKickPitch(payload);
+              setKickPitchSelected(ids);
+            }}
+            onKickPitchSelect={setKickPitchSelected}
           />
         )}
       </main>
@@ -1398,6 +1505,7 @@ export default function App() {
         <AdoFAIExportDialog
           api={api}
           selected={selected}
+          documentGeneration={documentGeneration.current}
           defaultSelectedOnly={adoExportSelectedOnly}
           onClose={() => setAdoExportOpen(false)}
           onStatus={setStatus}
@@ -1428,6 +1536,7 @@ export default function App() {
         <HarmonicDiagramDialog
           api={toolsApi}
           selected={selected}
+          documentGeneration={documentGeneration.current}
           onClose={() => setToolDialog(null)}
           onStatus={setStatus}
           onQueuedMutation={queueExternalMutation}

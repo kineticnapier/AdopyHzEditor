@@ -7,10 +7,11 @@ import type {
   ToolBackendApi,
 } from "./toolsBridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
+import { isDialogCompositionKey, isPlainDialogEscape } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
-import { previewIsCurrent } from "./previewFreshness";
+import { blankWorkspaceDefaultsContextIsCurrent, blankWorkspaceMidiRangeIsValid, documentActionIsCurrent, harmonicDefaultsContextIsCurrent, harmonicErrorIsCurrent, previewIsCurrent, selectionScopedPreviewIsCurrent } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
 type Common = {
   api: ToolBackendApi;
@@ -89,7 +90,7 @@ function Num({
   value: number;
   min: number;
   max: number;
-  step?: number;
+  step?: number | "any";
   disabled?: boolean;
   onChange(v: number): void;
 }) {
@@ -97,6 +98,7 @@ function Num({
   const [text, setText] = useState(String(fallback));
   const [editing, setEditing] = useState(false);
   const cancelledRef = useRef(false);
+  const editedRef = useRef(false);
   useEffect(() => {
     if (!editing) setText(String(fallback));
   }, [editing, fallback]);
@@ -104,12 +106,14 @@ function Num({
     if (disabled) {
       // Disabling a focused input can fire blur after an action has started.
       cancelledRef.current = false;
+      editedRef.current = false;
       setEditing(false);
       setText(String(fallback));
       return;
     }
-    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current);
+    const next = commitNumericEdit(text, fallback, min, max, cancelledRef.current, step === 1, editedRef.current);
     cancelledRef.current = false;
+    editedRef.current = false;
     setEditing(false);
     setText(String(next));
     if (next !== fallback) onChange(next);
@@ -123,12 +127,14 @@ function Num({
         max={max}
         step={step}
         disabled={disabled}
-        onFocus={() => { cancelledRef.current = false; setEditing(true); }}
-        onChange={(event) => setText(event.target.value)}
+        onFocus={() => { cancelledRef.current = false; editedRef.current = false; setEditing(true); }}
+        onChange={(event) => { editedRef.current = true; setText(event.target.value); }}
         onBlur={commit}
         onKeyDown={(event) => {
+          // IME owns Enter/Escape while a composition is active.
+          if (isDialogCompositionKey(event.nativeEvent)) return;
           if (event.key === "Enter") event.currentTarget.blur();
-          else if (event.key === "Escape") {
+          else if (isPlainDialogEscape(event)) {
             event.preventDefault();
             // Cancel this edit without closing the surrounding modal.
             event.stopPropagation();
@@ -140,13 +146,13 @@ function Num({
       />
   );
 }
-function LoadFailure({ error, onRetry }: { error: string; onRetry(): void }) {
+function LoadFailure({ error, onRetry, disabled = false }: { error: string; onRetry(): void; disabled?: boolean }) {
   return (
     <>
-      <div className="dialog-error">読込に失敗しました: {error}</div>
+      <div className="dialog-error" role="alert">読込に失敗しました: {error}</div>
       <div className="dialog-footer">
         <span />
-        <button className="primary" onClick={onRetry}>
+        <button className="primary" onClick={onRetry} disabled={disabled}>
           再試行
         </button>
       </div>
@@ -162,30 +168,58 @@ export function BlankWorkspaceDialog({
 }: Common & { onApply(options: BlankWorkspaceOptions): Promise<void> }) {
   const applyOnce = useRef(createExclusiveAsyncAction());
   const [value, setValue] = useState<BlankWorkspaceOptions | null>(null),
-    [loadError, setLoadError] = useState(""),
+    [loadedContext, setLoadedContext] = useState<{ api: ToolBackendApi; attempt: number } | null>(null),
+    [loadError, setLoadError] = useState<{ message: string; api: ToolBackendApi; attempt: number } | null>(null),
     [attempt, setAttempt] = useState(0),
     [applying, setApplying] = useState(false);
+  // An API replacement or retry must hide the previous defaults during render,
+  // before React runs the cleanup/reset effect.
+  const requestContext = { api, attempt };
+  // Async completion must check the latest API, not the render that started it.
+  const latestRequestContext = useRef(requestContext);
+  latestRequestContext.current = requestContext;
+  const defaultsCurrent = blankWorkspaceDefaultsContextIsCurrent(loadedContext, requestContext);
+  const midiRangeValid = blankWorkspaceMidiRangeIsValid(value);
+  const currentLoadError = blankWorkspaceDefaultsContextIsCurrent(loadError, requestContext)
+    ? loadError!.message : "";
   useEffect(() => {
     let alive = true;
-    setLoadError("");
+    setValue(null);
+    setLoadedContext(null);
+    setLoadError(null);
     void api
       .get_blank_workspace_defaults()
-      .then((x) => alive && setValue(x))
-      .catch((e) => alive && setLoadError(String(e)));
+      .then((x) => {
+        if (!alive) return;
+        setValue(x);
+        setLoadedContext({ api, attempt });
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setValue(null);
+        setLoadedContext(null);
+        setLoadError({ message: String(e), api, attempt });
+      });
     return () => {
       alive = false;
     };
   }, [api, attempt]);
+  function patchValue(changes: Partial<BlankWorkspaceOptions>) {
+    if (!defaultsCurrent || applying) return;
+    setValue((current) => current ? { ...current, ...changes } : current);
+  }
   async function apply() {
-    if (!value) return;
+    if (!value || !defaultsCurrent || applying || !midiRangeValid) return;
+    const snapshot = { ...value };
     await applyOnce.current(async () => {
       setApplying(true);
       try {
-        await onApply(value);
+        await onApply(snapshot);
+        if (!blankWorkspaceDefaultsContextIsCurrent(loadedContext, latestRequestContext.current)) return;
         onStatus("空のワークスペースに切り替えました");
         onClose();
       } catch (e) {
-        onStatus(String(e));
+        if (blankWorkspaceDefaultsContextIsCurrent(loadedContext, latestRequestContext.current)) onStatus(String(e));
       } finally {
         setApplying(false);
       }
@@ -193,15 +227,16 @@ export function BlankWorkspaceDialog({
   }
   return (
     <Modal title="空のワークスペース" onClose={onClose} locked={applying}>
-      {loadError ? (
+      {currentLoadError ? (
         <LoadFailure
-          error={loadError}
+          error={currentLoadError}
           onRetry={() => setAttempt((v) => v + 1)}
+          disabled={applying}
         />
       ) : (
         <>
           <div className="dialog-body export-dialog-body">
-            {value ? (
+            {value && defaultsCurrent ? (
               <>
                 <div className="info-card">
                   音声を外して黒い編集領域に切り替えます。既存ノートは保持されます。
@@ -212,8 +247,8 @@ export function BlankWorkspaceDialog({
                     disabled={applying}
                     min={1}
                     max={36000}
-                    step={1}
-                    onChange={(v) => setValue({ ...value, duration: v })}
+                    step="any"
+                    onChange={(v) => patchValue({ duration: v })}
                   />
                   <span>秒</span>
                 </Field>
@@ -223,9 +258,7 @@ export function BlankWorkspaceDialog({
                     disabled={applying}
                     min={0}
                     max={127}
-                    onChange={(v) =>
-                      setValue({ ...value, midiMin: Math.round(v) })
-                    }
+                    onChange={(v) => patchValue({ midiMin: Math.round(v) })}
                   />
                 </Field>
                 <Field label="最高MIDI">
@@ -234,14 +267,17 @@ export function BlankWorkspaceDialog({
                     disabled={applying}
                     min={0}
                     max={127}
-                    onChange={(v) =>
-                      setValue({ ...value, midiMax: Math.round(v) })
-                    }
+                    onChange={(v) => patchValue({ midiMax: Math.round(v) })}
                   />
                 </Field>
+                {!midiRangeValid && (
+                  <div className="dialog-error inline" role="alert">
+                    最低MIDIは最高MIDIより小さくしてください。
+                  </div>
+                )}
               </>
             ) : (
-              <div className="dialog-loading">読み込み中…</div>
+              <div className="dialog-loading" role="status">読み込み中…</div>
             )}
           </div>
           <div className="dialog-footer">
@@ -250,7 +286,7 @@ export function BlankWorkspaceDialog({
             <button
               className="primary"
               onClick={() => void apply()}
-              disabled={!value || applying}
+              disabled={!value || !defaultsCurrent || applying || !midiRangeValid}
             >
               適用
             </button>
@@ -264,37 +300,66 @@ export function BlankWorkspaceDialog({
 export function HarmonicDiagramDialog({
   api,
   selected,
+  documentGeneration,
   onClose,
   onStatus,
   onQueuedMutation,
 }: Common & {
   selected: number[];
+  documentGeneration: number;
   onQueuedMutation(
     call: () => Promise<NoteMutationResult>,
     selection?: (result: NoteMutationResult) => number[] | undefined,
   ): Promise<NoteMutationResult | undefined>;
 }) {
   const insertOnce = useRef(createExclusiveAsyncAction());
+  // A completed insertion may legitimately change selection; only API/document changes invalidate its completion.
+  const latestDocumentContext = useRef({ api, documentGeneration });
+  latestDocumentContext.current = { api, documentGeneration };
   const insertingRef = useRef(false);
   const [inserting, setInserting] = useState(false);
   const [opts, setOpts] = useState<HarmonicDiagramOptions | null>(null),
     [preview, setPreview] = useState<HarmonicPreview | null>(null),
     [previewKey,setPreviewKey]=useState(""),
-    [error, setError] = useState(""),
+    [defaultsSelectionKey, setDefaultsSelectionKey] = useState<string | null>(null),
+    [defaultsContext, setDefaultsContext] = useState<{ api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number } | null>(null),
+    [error, setError] = useState<{ message: string; api: ToolBackendApi; selected: number[]; attempt: number; documentGeneration: number; optionsKey?: string } | null>(null),
     [attempt, setAttempt] = useState(0);
-  const previewCurrent = previewIsCurrent(preview, previewKey, JSON.stringify(opts));
+  const currentError = harmonicDefaultsContextIsCurrent(error, { api, selected, attempt, documentGeneration }) &&
+    harmonicErrorIsCurrent(error, opts ? JSON.stringify(opts) : null)
+    ? error!.message : "";
+  const selectionKey = JSON.stringify(selected);
+  const selectionCurrent = defaultsSelectionKey === selectionKey &&
+    harmonicDefaultsContextIsCurrent(defaultsContext, { api, selected, attempt, documentGeneration });
+  const previewCurrent = selectionCurrent && selectionScopedPreviewIsCurrent(preview, previewKey, JSON.stringify(opts), defaultsSelectionKey, selectionKey);
   function updateOpts(next: HarmonicDiagramOptions) {
     // A numeric field can commit on blur while disabling the form.
-    if (!insertingRef.current) setOpts(next);
+    if (!insertingRef.current && selectionCurrent) {
+      setError(null);
+      setOpts(next);
+    }
   }
   useEffect(() => {
     let alive = true;
-    setError("");
-    void api.get_harmonic_diagram_defaults(selected).then(value => alive && setOpts(value)).catch(reason => alive && setError(String(reason)));
+    // Selection-dependent defaults are invalid as soon as the selection changes.
+    // Do not allow inserting the previous selection's diagram while loading.
+    setOpts(null);
+    setDefaultsSelectionKey(null);
+    setDefaultsContext(null);
+    setPreview(null);
+    setPreviewKey("");
+    setError(null);
+    void api.get_harmonic_diagram_defaults(selected).then(value => {
+      if (alive) {
+        setOpts(value);
+        setDefaultsSelectionKey(selectionKey);
+        setDefaultsContext({ api, selected, attempt, documentGeneration });
+      }
+    }).catch(reason => alive && setError({ message: String(reason), api, selected, attempt, documentGeneration }));
     return () => { alive = false; };
-  }, [api, selected, attempt]);
+  }, [api, selected, attempt, documentGeneration]);
   useEffect(() => {
-    if (!opts) return;
+    if (!opts || !selectionCurrent) return;
     let alive = true;
     const requestedKey=JSON.stringify(opts);
     const id = window.setTimeout(
@@ -305,14 +370,14 @@ export function HarmonicDiagramDialog({
             if (alive) {
               setPreview(x);
               setPreviewKey(requestedKey);
-              setError("");
+              setError(null);
             }
           })
           .catch((e) => {
             if (alive) {
               setPreview(null);
               setPreviewKey("");
-              setError(String(e));
+              setError({ message: String(e), api, selected, attempt, documentGeneration, optionsKey: requestedKey });
             }
           }),
       100,
@@ -321,10 +386,11 @@ export function HarmonicDiagramDialog({
       alive = false;
       window.clearTimeout(id);
     };
-  }, [api, opts]);
+  }, [api, opts, selected, attempt, documentGeneration, selectionCurrent]);
   async function insert() {
-    if (!opts) return;
-    if(!previewCurrent){setError("最新設定のプレビューを待っています");return}
+    if (!opts || !selectionCurrent) return;
+    if(!previewCurrent){setError({ message: "最新設定のプレビューを待っています", api, selected, attempt, documentGeneration, optionsKey: JSON.stringify(opts) });return}
+    const startedDocument = { api, documentGeneration };
     await insertOnce.current(async () => {
       insertingRef.current = true;
       setInserting(true);
@@ -334,22 +400,25 @@ export function HarmonicDiagramDialog({
           result => result.indices ?? [],
         );
         if (!r) return;
+        if (!documentActionIsCurrent(startedDocument, latestDocumentContext.current)) return;
         onStatus(r.status);
         onClose();
       } catch (e) {
-        setError(String(e));
+        if (documentActionIsCurrent(startedDocument, latestDocumentContext.current)) {
+          setError({ message: String(e), api, selected, attempt, documentGeneration, optionsKey: JSON.stringify(opts) });
+        }
       } finally {
         insertingRef.current = false;
         setInserting(false);
       }
     });
   }
-  if (!opts && error)
-    return <Modal title="倍音ダイアグラム" onClose={onClose}><LoadFailure error={error} onRetry={() => setAttempt(value => value + 1)} /></Modal>;
-  if (!opts)
+  if (!opts && currentError)
+    return <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}><LoadFailure error={currentError} onRetry={() => setAttempt(value => value + 1)} disabled={inserting} /></Modal>;
+  if (!opts || !selectionCurrent)
     return (
-      <Modal title="倍音ダイアグラム" onClose={onClose}>
-        <div className="dialog-loading">読み込み中…</div>
+      <Modal title="倍音ダイアグラム" onClose={onClose} locked={inserting}>
+        <div className="dialog-loading" role="status">{inserting ? "挿入処理中…" : "読み込み中…"}</div>
       </Modal>
     );
   return (
@@ -361,6 +430,7 @@ export function HarmonicDiagramDialog({
               value={opts.rootHz}
               min={0.001}
               max={100000}
+              step="any"
               onChange={(v) => updateOpts({ ...opts, rootHz: v })}
             />
             <span>Hz</span>
@@ -406,6 +476,7 @@ export function HarmonicDiagramDialog({
               value={opts.bpm}
               min={1}
               max={2000}
+              step="any"
               disabled={opts.timeUnit !== "beats"}
               onChange={(v) => updateOpts({ ...opts, bpm: v })}
             />
@@ -415,7 +486,7 @@ export function HarmonicDiagramDialog({
               value={opts.start}
               min={0}
               max={36000}
-              step={0.25}
+              step="any"
               onChange={(v) => updateOpts({ ...opts, start: v })}
             />
           </Field>
@@ -424,7 +495,7 @@ export function HarmonicDiagramDialog({
               value={opts.duration}
               min={0.001}
               max={36000}
-              step={0.25}
+              step="any"
               onChange={(v) => updateOpts({ ...opts, duration: v })}
             />
           </Field>
@@ -444,7 +515,7 @@ export function HarmonicDiagramDialog({
               onChange={(v) => updateOpts({ ...opts, offset: Math.round(v) })}
             />
           </Field>
-          {error && <div className="dialog-error inline">{error}</div>}
+          {currentError && <div className="dialog-error inline" role="alert">{currentError}</div>}
         </fieldset>
         <section className="harmonic-preview">
           {previewCurrent && preview ? (
@@ -465,7 +536,7 @@ export function HarmonicDiagramDialog({
             </>
           ) : (
             <div className="dialog-loading" role="status">
-              {error ? "プレビューを表示できません" : "プレビューを計算中…"}
+              {currentError ? "プレビューを表示できません" : "プレビューを計算中…"}
             </div>
           )}
         </section>
@@ -501,27 +572,53 @@ export function LanguageDialog({ onClose }: Common) {
   );
 }
 export function UpdateDialog({ api, onClose, onStatus }: Common) {
-  const [info, setInfo] = useState<{
-    version: string;
-    text: string;
-    info: string;
-  } | null>(null), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
-  const [openError, setOpenError] = useState(""), [opening, setOpening] = useState(false);
+  type UpdateInfo = { version: string; text: string; info: string };
+  type RequestContext = { api: ToolBackendApi; attempt: number };
+  const [info, setInfo] = useState<(RequestContext & { value: UpdateInfo }) | null>(null);
+  const [error, setError] = useState<(RequestContext & { message: string }) | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [openError, setOpenError] = useState<(RequestContext & { message: string }) | null>(null);
+  const [opening, setOpening] = useState(false);
   const openOnce = useRef(createExclusiveAsyncAction());
+  const context: RequestContext = { api, attempt };
+  const latestContext = useRef(context);
+  latestContext.current = context;
+  // Hide results from a previous API or retry during render, before effect cleanup.
+  const currentInfo = blankWorkspaceDefaultsContextIsCurrent(info, context) ? info!.value : null;
+  const currentError = blankWorkspaceDefaultsContextIsCurrent(error, context) ? error!.message : "";
+  const currentOpenError = blankWorkspaceDefaultsContextIsCurrent(openError, context) ? openError!.message : "";
+
   useEffect(() => {
-    let alive=true;setError("");
-    void api.get_update_info().then(value=>alive&&setInfo(value)).catch(reason=>alive&&setError(String(reason)));
-    return()=>{alive=false};
-  }, [api,attempt]);
+    let alive = true;
+    setInfo(null);
+    setError(null);
+    setOpenError(null);
+    void api.get_update_info()
+      .then(value => {
+        if (alive) setInfo({ api, attempt, value });
+      })
+      .catch(reason => {
+        if (alive) setError({ api, attempt, message: String(reason) });
+      });
+    return () => { alive = false; };
+  }, [api, attempt]);
+
   async function open() {
     await openOnce.current(async () => {
       setOpening(true);
-      setOpenError("");
+      setOpenError(null);
       try {
         await runReleasePageAction(
           () => api.open_releases_page(),
-          () => { onStatus("リリースページを開きました"); onClose(); },
-          setOpenError,
+          () => {
+            if (!blankWorkspaceDefaultsContextIsCurrent(context, latestContext.current)) return;
+            onStatus("リリースページを開きました");
+            onClose();
+          },
+          message => {
+            if (blankWorkspaceDefaultsContextIsCurrent(context, latestContext.current))
+              setOpenError({ ...context, message });
+          },
         );
       } finally {
         setOpening(false);
@@ -531,16 +628,18 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
   return (
     <Modal title="更新を確認" onClose={onClose} locked={opening}>
       <div className="dialog-body export-dialog-body">
-        {error ? <LoadFailure error={error} onRetry={()=>setAttempt(value=>value+1)}/> : info ? (
+        {currentError ? (
+          <LoadFailure error={currentError} onRetry={() => setAttempt(value => value + 1)} disabled={opening} />
+        ) : currentInfo ? (
           <>
-            <div className="info-card">現在のバージョン: {info.version}</div>
-            <div className="info-card">{info.text}</div>
-            <div className="info-card">{info.info}</div>
+            <div className="info-card">現在のバージョン: {currentInfo.version}</div>
+            <div className="info-card">{currentInfo.text}</div>
+            <div className="info-card">{currentInfo.info}</div>
           </>
         ) : (
-          <div className="dialog-loading">確認中…</div>
+          <div className="dialog-loading" role="status">確認中…</div>
         )}
-        {openError && <div className="dialog-error" role="alert">{openError}</div>}
+        {currentOpenError && <div className="dialog-error" role="alert">{currentOpenError}</div>}
       </div>
       <div className="dialog-footer">
         <span />

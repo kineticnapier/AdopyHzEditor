@@ -3,15 +3,19 @@ import type {
   AppState,
   BackendApi,
   EditorSettings,
+  KickPitchPayload,
   NoteDto,
   NoteMutationResult,
 } from "./bridge";
+import KickPitchSection from "./KickPitchSection";
 import type {
   TrackHoverInfo,
   TrackSelectionState,
 } from "../editor/EditorCanvas";
 import { midiLabel, midiToHz } from "../editor/musicMath";
 import { commitNumericEdit } from "./numericInputModel";
+import { isDialogCompositionKey, isPlainDialogEscape } from "../dialogs/dialogFocus";
+import { selectionIdentityKey } from "./selectionIdentity";
 
 type Page = "inspector" | "settings";
 type Props = {
@@ -34,6 +38,11 @@ type Props = {
   onStatus(text: string): void;
   onTrackSelectionChange(selection: TrackSelectionState): void;
   onConvertTracks(mode: "fixed" | "curve"): Promise<void>;
+  viewStart: number;
+  kickPitch: KickPitchPayload | null;
+  kickPitchSelected: number[];
+  onKickPitch(payload: KickPitchPayload | null, selectedIds: number[]): void;
+  onKickPitchSelect(ids: number[]): void;
 };
 
 type CurveShapeState = { mode: string; p1: number; p2: number };
@@ -70,6 +79,11 @@ export default function SettingsPanel({
   onStatus,
   onTrackSelectionChange,
   onConvertTracks,
+  viewStart,
+  kickPitch,
+  kickPitchSelected,
+  onKickPitch,
+  onKickPitchSelect,
 }: Props) {
   const [page, setPage] = useState<Page>("inspector");
   const one = selected.length === 1 ? notes[selected[0]] : null;
@@ -96,9 +110,10 @@ export default function SettingsPanel({
     analysisAvailable &&
     settings.analysisSource === "vorbis_direct" &&
     actualAnalysisSource !== "vorbis_direct";
+  const selectionKey = selectionIdentityKey(selected, trackSelection.ids);
   useEffect(() => {
     if (selected.length || trackSelection.ids.length) setPage("inspector");
-  }, [selected.length, trackSelection.ids.length]);
+  }, [selectionKey]);
 
   return (
     <aside className="settings inspector-panel">
@@ -119,7 +134,8 @@ export default function SettingsPanel({
           設定
         </button>
       </nav>
-      <div className="settings-body">
+      {!api && <p className="inspector-help" role="status">バックエンド接続待ち…</p>}
+      <div className="settings-body" inert={!api} aria-busy={!api}>
         {page === "inspector" && (
           <>
             {selected.length === 0 && trackSelection.ids.length === 0 && (
@@ -243,7 +259,7 @@ export default function SettingsPanel({
                     value={one.start}
                     min={0}
                     max={36000}
-                    step={0.001}
+                    step="any"
                     suffix="s"
                     onChange={(v) =>
                       mutate(
@@ -258,7 +274,7 @@ export default function SettingsPanel({
                     value={one.end}
                     min={0}
                     max={36000}
-                    step={0.001}
+                    step="any"
                     suffix="s"
                     onChange={(v) =>
                       mutate(
@@ -273,7 +289,7 @@ export default function SettingsPanel({
                     value={Math.max(0, one.end - one.start)}
                     min={0.001}
                     max={36000}
-                    step={0.001}
+                    step="any"
                     suffix="s"
                     onChange={(v) =>
                       mutate(
@@ -288,7 +304,7 @@ export default function SettingsPanel({
                     value={one.midi}
                     min={0}
                     max={127}
-                    step={0.01}
+                    step="any"
                     onChange={(v) =>
                       mutate(
                         () => api.set_note_properties(selected[0], { midi: v }),
@@ -387,7 +403,7 @@ export default function SettingsPanel({
                         value={settings.targetAngle}
                         min={0.001}
                         max={359.999}
-                        step={0.001}
+                        step="any"
                         suffix="°"
                         onChange={(v) => void onPatch({ targetAngle: v })}
                       />
@@ -426,6 +442,19 @@ export default function SettingsPanel({
                 onStatus={onStatus}
               />
             )}
+            <KickPitchSection
+              api={api}
+              busy={busy}
+              audioLoaded={Boolean(audioName)}
+              trackRange={trackSelection.range}
+              viewStart={viewStart}
+              kickPitch={kickPitch}
+              selectedIds={kickPitchSelected}
+              onKickPitch={onKickPitch}
+              onSelectIds={onKickPitchSelect}
+              onQueuedMutation={onQueuedMutation}
+              onStatus={onStatus}
+            />
           </>
         )}
 
@@ -443,7 +472,7 @@ export default function SettingsPanel({
                   value={settings.speed}
                   min={0.1}
                   max={4}
-                  step={0.05}
+                  step="any"
                   suffix="x"
                   onChange={(v) => void onPatch({ speed: v })}
                 />
@@ -505,7 +534,7 @@ export default function SettingsPanel({
                   value={settings.bpm}
                   min={1}
                   max={10000}
-                  step={0.1}
+                  step="any"
                   onChange={(v) => void onPatch({ bpm: v })}
                 />
               </Row>
@@ -524,7 +553,7 @@ export default function SettingsPanel({
                   value={settings.offsetMs}
                   min={-600000}
                   max={600000}
-                  step={1}
+                  step="any"
                   suffix="ms"
                   onChange={(v) => void onPatch({ offsetMs: v })}
                 />
@@ -784,7 +813,7 @@ function BulkEditor({
           value={timeDelta}
           min={-36000}
           max={36000}
-          step={0.001}
+          step="any"
           suffix="s"
           onChange={setTimeDelta}
         />
@@ -794,7 +823,7 @@ function BulkEditor({
           value={pitchDelta}
           min={-127}
           max={127}
-          step={0.01}
+          step="any"
           suffix="半音"
           onChange={setPitchDelta}
         />
@@ -810,7 +839,7 @@ function BulkEditor({
           value={duration}
           min={0.001}
           max={36000}
-          step={0.001}
+          step="any"
           suffix="s"
           onChange={setDuration}
         />
@@ -893,7 +922,7 @@ function NumberInput({
   value: number;
   min: number;
   max: number;
-  step: number;
+  step: number | "any";
   suffix?: string;
   disabled?: boolean;
   onChange(v: number): void;
@@ -902,18 +931,30 @@ function NumberInput({
     [text, setText] = useState(String(fallback)),
     [editing, setEditing] = useState(false);
   const cancelledRef = useRef(false);
+  const editedRef = useRef(false);
   useEffect(() => {
     if (!editing) setText(String(fallback));
   }, [editing, fallback]);
   function commit() {
+    // A disabled field may blur after its controlling setting changes.
+    if (disabled) {
+      cancelledRef.current = false;
+      editedRef.current = false;
+      setEditing(false);
+      setText(String(fallback));
+      return;
+    }
     const next = commitNumericEdit(
       text,
       fallback,
       min,
       max,
       cancelledRef.current,
+      step === 1,
+      editedRef.current,
     );
     cancelledRef.current = false;
+    editedRef.current = false;
     setEditing(false);
     setText(String(next));
     if (next !== fallback) onChange(next);
@@ -929,14 +970,18 @@ function NumberInput({
         disabled={disabled}
         onFocus={() => {
           cancelledRef.current = false;
+          editedRef.current = false;
           setEditing(true);
         }}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => { editedRef.current = true; setText(e.target.value); }}
         onBlur={commit}
         onKeyDown={(e) => {
+          // Enter/Escape are owned by the IME until composition ends.
+          if (isDialogCompositionKey(e.nativeEvent)) return;
           if (e.key === "Enter") e.currentTarget.blur();
-          else if (e.key === "Escape") {
+          else if (isPlainDialogEscape(e)) {
             e.preventDefault();
+            e.stopPropagation();
             cancelledRef.current = true;
             setText(String(fallback));
             e.currentTarget.blur();

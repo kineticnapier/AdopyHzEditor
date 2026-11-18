@@ -1,0 +1,113 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import type { ViewState } from "../src/editor/bridge.ts";
+import { createCanvasWheelHandler, syncCanvasWheelDocument, syncCanvasWheelView } from "../src/editor/canvasWheelHandler.ts";
+import type { WheelPitchAccumulator } from "../src/editor/wheelNavigation.ts";
+
+const initial: ViewState = {
+  mode: "spec", start: 20, windowSeconds: 12, pitchBottom: 40, visibleNotes: 48,
+};
+
+function setup() {
+  const view = { current: { ...initial } };
+  const pitchAccumulator = { current: { modifier: null, remainder: 0 } as WheelPitchAccumulator };
+  const activePointerId = { current: null as number | null };
+  const duration = { current: 60 };
+  const first: Partial<ViewState>[] = [];
+  const second: Partial<ViewState>[] = [];
+  const onView = { current: (changes: Partial<ViewState>) => { first.push(changes); return Promise.resolve(); } };
+  const canvas = { getBoundingClientRect: () => ({
+    left: 0, bottom: 500, width: 800, height: 500,
+  } as DOMRect) };
+  const handler = createCanvasWheelHandler({
+    canvas, view, pitchAccumulator, activePointerId, duration, onView,
+  });
+  let prevented = 0;
+  const event = (deltaY: number, options: Partial<WheelEvent> = {}) => ({
+    deltaX: 0, deltaY, deltaMode: 0,
+    ctrlKey: false, altKey: false, shiftKey: false,
+    clientX: 400, clientY: 250,
+    preventDefault: () => { prevented++; },
+    ...options,
+  } as WheelEvent);
+  return { handler, event, view, pitchAccumulator, activePointerId, duration, onView, first, second,
+    getPrevented: () => prevented };
+}
+
+test("one mounted wheel listener retains fine-wheel movement across callback changes", () => {
+  const s = setup();
+  s.handler(s.event(1));
+  s.onView.current = changes => { s.second.push(changes); return Promise.resolve(); };
+  s.handler(s.event(1));
+  assert.equal(s.first.length, 1);
+  assert.equal(s.second.length, 1);
+  assert.ok(Math.abs(s.view.current.start - 20.016) < 1e-10);
+  assert.ok(Math.abs((s.second[0].start ?? NaN) - 20.016) < 1e-10);
+  assert.equal(s.getPrevented(), 2);
+});
+
+test("wheel listener reads current duration without being rebound", () => {
+  const s = setup();
+  s.view.current = { ...initial, start: 8.99 };
+  s.duration.current = 30;
+  s.handler(s.event(1));
+  s.duration.current = 21;
+  s.handler(s.event(1));
+  assert.ok(Math.abs(s.view.current.start - 9) < 1e-10);
+  assert.ok(Math.abs((s.first[1].start ?? NaN) - 9) < 1e-10);
+});
+
+test("wheel during an owned pointer drag does not change the view or preserve pitch carry", () => {
+  const s = setup();
+  s.activePointerId.current = 7;
+  s.pitchAccumulator.current = { modifier: "shift", remainder: .75 };
+  s.handler(s.event(-1, { shiftKey: true }));
+  assert.equal(s.first.length, 0);
+  assert.deepEqual(s.view.current, initial);
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
+  assert.equal(s.getPrevented(), 1);
+});
+
+test("external pitch changes discard a pending fine-wheel remainder", () => {
+  const s = setup();
+  s.pitchAccumulator.current = { modifier: "shift", remainder: -.5 };
+  syncCanvasWheelView(s.view, s.pitchAccumulator, { ...initial, pitchBottom: 41 });
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
+  s.handler(s.event(20, { shiftKey: true }));
+  assert.equal(s.first.length, 0, "a half-step from the old pitch viewport must not combine");
+  assert.equal(s.pitchAccumulator.current.remainder, -.5);
+});
+
+test("playback-follow time changes and wheel echoes preserve the current pitch gesture", () => {
+  const s = setup();
+  s.pitchAccumulator.current = { modifier: "shift", remainder: -.5 };
+  syncCanvasWheelView(s.view, s.pitchAccumulator, { ...initial, start: 21 });
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: "shift", remainder: -.5 });
+  // The React echo of a wheel-initiated pitch change is not an external edit.
+  s.view.current = { ...s.view.current, pitchBottom: 41 };
+  syncCanvasWheelView(s.view, s.pitchAccumulator, { ...initial, start: 21, pitchBottom: 41 });
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: "shift", remainder: -.5 });
+  syncCanvasWheelView(s.view, s.pitchAccumulator, { ...s.view.current, mode: "notes" });
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
+});
+
+test("changing editor generation clears fractional pitch-wheel carry", () => {
+  const s = setup();
+  const generation = { current: 4 };
+  s.pitchAccumulator.current = { modifier: "shift", remainder: .75 };
+  syncCanvasWheelDocument(generation, s.pitchAccumulator, 4);
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: "shift", remainder: .75 });
+  syncCanvasWheelDocument(generation, s.pitchAccumulator, 5);
+  assert.equal(generation.current, 5);
+  assert.deepEqual(s.pitchAccumulator.current, { modifier: null, remainder: 0 });
+  s.handler(s.event(20, { shiftKey: true }));
+  assert.equal(s.first.length, 0, "old fractional carry must not move the new document");
+});
+
+test("App passes its generation to the canvas wheel reset", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const canvas = readFileSync(new URL("../src/editor/EditorCanvas.tsx", import.meta.url), "utf8");
+  assert.match(app, /<EditorCanvas\s+documentGeneration=\{documentGeneration\.current\}/);
+  assert.match(canvas, /syncCanvasWheelDocument\(wheelGenerationRef, wheelPitchAccumulatorRef, props\.documentGeneration\)/);
+});
