@@ -263,7 +263,8 @@ export default function AdoFAIExportDialogJa({
     isAngle = options.method === "angle_only",
     isZip = options.method === "rabbit_zip",
     isRatioPoly = options.harmonyTimingMode === "ratio-polyrhythm",
-    beatSync = options.harmonyPolyBeatSync ?? true,
+    cycleTiming = options.harmonyPolyCycleTiming ?? "pitch",
+    beatSync = cycleTiming === "beat",
     syncedBpm = beatSyncedOutputBpm(
       options.projectBpm,
       options.harmonyPolyCycleAngle,
@@ -296,15 +297,21 @@ export default function AdoFAIExportDialogJa({
           />
         </Field>
         {isHarmony && isRatioPoly && (
-          <Field label="拍に合わせる" group>
-            <label className="inline-check">
-              <input
-                type="checkbox"
-                checked={beatSync}
-                onChange={(e) => patch("harmonyPolyBeatSync", e.target.checked)}
-              />
-              曲のBPM（{formatBpm(options.projectBpm)}）の拍に周期をそろえる
-            </label>
+          <Field label="周期の長さ">
+            <Select
+              value={cycleTiming}
+              options={[
+                ["pitch", "音の高さ（Hz）"],
+                ["beat", `曲の拍（${formatBpm(options.projectBpm)} BPM）`],
+                ["manual", "出力BPMで指定"],
+              ]}
+              onChange={(v) =>
+                patch(
+                  "harmonyPolyCycleTiming",
+                  v as AdoFAIExportOptions["harmonyPolyCycleTiming"],
+                )
+              }
+            />
           </Field>
         )}
         {isHarmony && isRatioPoly && beatSync && (
@@ -319,7 +326,7 @@ export default function AdoFAIExportDialogJa({
             />
           </Field>
         )}
-        {(isAngle || isHarmony) && !(isRatioPoly && beatSync) && (
+        {(isAngle || isHarmony) && !(isHarmony && isRatioPoly && cycleTiming !== "manual") && (
           <Field label="出力BPM">
             <Num
               value={options.angleOnlyBpm}
@@ -332,9 +339,11 @@ export default function AdoFAIExportDialogJa({
         )}
         {isHarmony && isRatioPoly && (
           <div className="info-card">
-            {beatSync
-              ? `出力BPM = ${formatBpm(syncedBpm)}（自動）、1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, syncedBpm)}。周期は曲の拍の位置から始まり、音符のないところは休みになります。`
-              : `1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, options.angleOnlyBpm)}（周期角 ÷ (3 × 出力BPM)）。`}
+            {cycleTiming === "pitch"
+              ? "1周期 = 根音（一番低い音）の周期 × 比の根音の数。各声部が自分の音の高さで鳴ります（A#5なら毎秒932回）。和音や音程が変わるたびに速さが切り替わります。"
+              : beatSync
+                ? `出力BPM = ${formatBpm(syncedBpm)}（自動）、1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, syncedBpm)}。周期は曲の拍の位置から始まり、音符のないところは休みになります。音の高さは再現しません。`
+                : `1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, options.angleOnlyBpm)}（周期角 ÷ (3 × 出力BPM)）。音の高さは再現しません。`}
           </div>
         )}
         {isHarmony && (

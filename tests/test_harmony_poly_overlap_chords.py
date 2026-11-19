@@ -227,6 +227,86 @@ class BeatGridTests(unittest.TestCase):
         self.assertEqual(stats["tiles_total"], 6)
 
 
+class PitchTimingTests(unittest.TestCase):
+    """harmony_poly_pitch_timing makes every voice hit at its own frequency."""
+
+    def _events(self, notes, harmony_mode="off", **kwargs):
+        return build_harmony_ratio_polyrhythm_events(
+            notes,
+            harmony_mode=harmony_mode,
+            play_bpm=BPM,
+            harmony_poly_chord_source="overlap",
+            harmony_poly_pitch_timing=True,
+            **kwargs,
+        )
+
+    @staticmethod
+    def _voice_rates(events) -> dict[int, float]:
+        """Hits per second of each voice in the first cycle."""
+        first = [e for e in events if e["poly_cycle_index"] == 0]
+        seconds = first[0]["poly_cycle_seconds"]
+        counts: dict[int, int] = {}
+        for e in first:
+            for voice in str(e["poly_merged_voices"]).split(","):
+                counts[int(voice)] = counts.get(int(voice), 0) + 1
+        return {v: c / seconds for v, c in counts.items()}
+
+    def test_single_note_hits_at_its_frequency(self):
+        events, *_ = self._events([Note(0.0, 0.1, 69.0)])  # A4 = 440 Hz
+        gaps = {round(b["time"] - a["time"], 9) for a, b in zip(events, events[1:])}
+        self.assertEqual(gaps, {round(1 / 440.0, 9)})
+
+    def test_chord_voices_hit_at_their_own_pitch_with_octaves_kept(self):
+        # G#3 + A#5 (26 semitones): just ratio 9/2, not folded to 9/8.
+        events, _dup, _specs, stats = self._events([Note(0.0, 0.2, 56.0), Note(0.0, 0.2, 82.0)])
+        self.assertEqual(stats["ratio_text"], "2:9")
+        rates = self._voice_rates(events)
+        g3 = 440.0 * 2 ** ((56 - 69) / 12)
+        self.assertAlmostEqual(rates[0], g3, places=6)
+        self.assertAlmostEqual(rates[1], g3 * 4.5, places=6)  # A#5 within 4 cents of 932.3 Hz
+
+    def test_cycle_bpm_matches_its_length(self):
+        events, *_ = self._events([Note(0.0, 0.2, 60.0), Note(0.0, 0.2, 64.0), Note(0.0, 0.2, 67.0)])
+        for cur, nxt in zip(events, events[1:]):
+            seconds = cur["poly_timing_rel_to_next"] * 60.0 / (180.0 * cur["poly_play_bpm"])
+            self.assertAlmostEqual(seconds, nxt["time"] - cur["time"], places=9)
+
+    def test_silence_after_a_note_is_a_rest(self):
+        events, *_ = self._events([Note(0.0, 0.05, 69.0), Note(0.2, 0.25, 69.0)])
+        self.assertFalse([e for e in events if 0.05 <= e["time"] < 0.2])
+
+    def test_full_turn_gaps_never_wrap_to_a_near_zero_tile(self):
+        # 360 + float noise used to wrap to a 2e-9 degree tile with a ~0 BPM.
+        self.assertEqual(adofai.clean_relative_angle(360.0000000016371), 360.0)
+        self.assertEqual(adofai.clean_relative_angle(720.0 + 5e-7), 360.0)
+        notes = _chord(0.0, 0.5, 45, 57, 64, 69, 76) + _chord(0.5, 1.0, 43, 55, 62, 67, 74)
+        level, _stats = build_adofai_level(
+            notes,
+            method="harmony",
+            harmony_timing_mode="ratio-polyrhythm",
+            harmony_mode="off",
+            harmony_poly_chord_source="overlap",
+            harmony_poly_pitch_timing=True,
+        )
+        speeds = [a["beatsPerMinute"] for a in level["actions"] if a.get("eventType") == "SetSpeed"]
+        self.assertTrue(speeds)
+        self.assertGreater(min(speeds), 1.0)
+
+    def test_level_starts_at_the_first_cycle_speed(self):
+        level, stats = build_adofai_level(
+            [Note(0.0, 0.1, 69.0)],
+            method="harmony",
+            harmony_timing_mode="ratio-polyrhythm",
+            harmony_mode="off",
+            harmony_poly_chord_source="overlap",
+            harmony_poly_cycle_mode="fixed",
+            harmony_poly_pitch_timing=True,
+        )
+        self.assertEqual(stats["harmony_poly_timing"], "pitch")
+        # 720 degrees per 1/440 s cycle.
+        self.assertAlmostEqual(level["settings"]["bpm"], 720.0 * 60.0 * 440.0 / 180.0, places=3)
+
+
 class OverlapChordBridgeOptionTests(unittest.TestCase):
     def test_web_defaults_to_overlap_chords(self):
         bridge = Bridge()
@@ -243,14 +323,19 @@ class OverlapChordBridgeOptionTests(unittest.TestCase):
         bridge.settings["bpm"] = 190.0
         bridge.settings["offsetMs"] = 250.0
         base = {"method": "harmony", "harmonyTimingMode": "ratio-polyrhythm", "harmonyPolyCycleAngle": 720.0}
-        self.assertTrue(bridge.get_adofai_export_defaults()["harmonyPolyBeatSync"])
+        self.assertEqual(bridge.get_adofai_export_defaults()["harmonyPolyCycleTiming"], "pitch")
         _, options, _ = bridge._prepare_adofai_export(base, None)
+        self.assertTrue(options["harmony_poly_pitch_timing"])
+        self.assertIsNone(options["harmony_poly_grid_origin_seconds"])
+        base = {**base, "harmonyPolyCycleTiming": "beat"}
+        _, options, _ = bridge._prepare_adofai_export(base, None)
+        self.assertFalse(options["harmony_poly_pitch_timing"])
         self.assertAlmostEqual(options["angle_only_bpm"], 760.0)  # one cycle = one beat
         self.assertAlmostEqual(options["harmony_poly_grid_origin_seconds"], 0.25)
         _, options, _ = bridge._prepare_adofai_export({**base, "harmonyPolyBeatsPerCycle": 0.5}, None)
         self.assertAlmostEqual(options["angle_only_bpm"], 1520.0)
         _, options, _ = bridge._prepare_adofai_export(
-            {**base, "harmonyPolyBeatSync": False, "angleOnlyBpm": 1234.0}, None,
+            {**base, "harmonyPolyCycleTiming": "manual", "angleOnlyBpm": 1234.0}, None,
         )
         self.assertAlmostEqual(options["angle_only_bpm"], 1234.0)
         self.assertIsNone(options["harmony_poly_grid_origin_seconds"])

@@ -25,12 +25,14 @@ test("Angle Compression no longer asks for a base BPM", () => {
   assert.doesNotMatch(backendSource, /raw\.get\("baseBpm"\)/);
 });
 
-test("ratio-polyrhythm can sync its cycle to the song beat", () => {
-  assert.match(dialogSource, /patch\("harmonyPolyBeatSync", e\.target\.checked\)/);
+test("ratio-polyrhythm picks its cycle length from pitch, beat or output BPM", () => {
+  assert.match(dialogSource, /\["pitch", "音の高さ（Hz）"\]/);
+  assert.match(dialogSource, /cycleTiming = options\.harmonyPolyCycleTiming \?\? "pitch"/);
   assert.match(dialogSource, /patch\("harmonyPolyBeatsPerCycle", v\)/);
-  // The manual output BPM input is hidden while beat sync computes it.
-  assert.match(dialogSource, /\(isAngle \|\| isHarmony\) && !\(isRatioPoly && beatSync\)/);
+  // The manual output BPM input only shows for manual timing in ratio mode.
+  assert.match(dialogSource, /!\(isHarmony && isRatioPoly && cycleTiming !== "manual"\)/);
   assert.match(backendSource, /def beat_synced_output_bpm/);
+  assert.match(backendSource, /"harmonyPolyCycleTiming": "pitch"/);
 });
 
 test("beat-synced output BPM matches the backend formula", async () => {

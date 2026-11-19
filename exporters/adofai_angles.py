@@ -14,7 +14,9 @@ def clean_relative_angle(x: float) -> float:
     Avoid exact 0 because it can create awkward/ambiguous U-turn-like geometry.
     """
     v = float(x) % 360.0
-    if abs(v) < 1e-9:
+    # A full turn plus float noise (360.0000000016) must stay a full turn: a
+    # 2e-9 degree tile would need a near-zero compensating BPM.
+    if abs(v) < 1e-6:
         v = 360.0
     return round(v, 9)
 

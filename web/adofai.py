@@ -192,7 +192,7 @@ class AdoFAIMixin:
             "harmonyPolyChordSource": "overlap",
             "harmonyPolyMaxDenominator": 24,
             "harmonyPolyRatioOctaveMode": "octave-folded",
-            "harmonyPolyBeatSync": True,
+            "harmonyPolyCycleTiming": "pitch",
             "harmonyPolyBeatsPerCycle": 1.0,
             "projectBpm": bpm,
             "xMode": "floor",
@@ -275,6 +275,7 @@ class AdoFAIMixin:
             "harmony_poly_max_denominator": _as_int(raw.get("harmonyPolyMaxDenominator"), 24, 1, 256),
             "harmony_poly_ratio_octave_mode": _choice(raw.get("harmonyPolyRatioOctaveMode"), {"octave-folded", "absolute"}, "octave-folded"),
             "harmony_poly_grid_origin_seconds": None,
+            "harmony_poly_pitch_timing": False,
             "rabbit_x_mode": _choice(raw.get("xMode"), {"floor", "lowest_floor", "round", "ceil", "fixed", "target_bpm"}, "floor"),
             "rabbit_fixed_x": _as_float(raw.get("fixedX"), 8.0, 0.000001, 100000.0),
             "rabbit_target_bpm": _as_float(raw.get("targetBpm"), max(1000.0, default_bpm * 10.0), 1.0, 999999.0),
@@ -301,19 +302,21 @@ class AdoFAIMixin:
         }
         if opts["method"] == "rabbit_zip":
             notes = _stabilize_rabbit_zip_cycle_boundaries(notes)
-        if (
-            opts["method"] == "harmony"
-            and opts["harmony_timing_mode"] == "ratio-polyrhythm"
-            and bool(raw.get("harmonyPolyBeatSync", True))
-        ):
-            # Beat sync: one cycle lasts a whole number of song beats and every
-            # cycle sits on the project's beat grid (BPM + offset).  The output
-            # BPM follows from that: cycle seconds = cycle angle / (3 x BPM).
-            beats_per_cycle = _as_float(raw.get("harmonyPolyBeatsPerCycle"), 1.0, 1.0 / 64.0, 64.0)
-            opts["angle_only_bpm"] = beat_synced_output_bpm(
-                default_bpm, opts["harmony_poly_cycle_angle"], beats_per_cycle
-            )
-            opts["harmony_poly_grid_origin_seconds"] = grid_offset_seconds
+        cycle_timing = _choice(raw.get("harmonyPolyCycleTiming"), {"pitch", "beat", "manual"}, "pitch")
+        if opts["method"] == "harmony" and opts["harmony_timing_mode"] == "ratio-polyrhythm":
+            if cycle_timing == "pitch":
+                # Cycle length from the notes' pitch: every voice hits at its
+                # own frequency, so the chord sounds at pitch.
+                opts["harmony_poly_pitch_timing"] = True
+            elif cycle_timing == "beat":
+                # Beat sync: one cycle lasts a set number of song beats and
+                # every cycle sits on the project's beat grid (BPM + offset).
+                # The output BPM follows: cycle seconds = cycle angle / (3 x BPM).
+                beats_per_cycle = _as_float(raw.get("harmonyPolyBeatsPerCycle"), 1.0, 1.0 / 64.0, 64.0)
+                opts["angle_only_bpm"] = beat_synced_output_bpm(
+                    default_bpm, opts["harmony_poly_cycle_angle"], beats_per_cycle
+                )
+                opts["harmony_poly_grid_origin_seconds"] = grid_offset_seconds
 
         workflow = {
             "copySong": copy_song,

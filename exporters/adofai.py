@@ -3065,6 +3065,7 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_poly_cycle_twirl: bool = False,
     harmony_poly_chord_source: str = "preset",
     harmony_poly_grid_origin: float | None = None,
+    harmony_poly_pitch_timing: bool = False,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]], dict[str, Any]]:
     """
     Build Harmony events by repeating a Scratch-style ratio-derived grid.
@@ -3103,6 +3104,14 @@ def build_harmony_ratio_polyrhythm_events(
         in seconds puts every cycle on one global grid from that origin, e.g.
         the song's beat grid: hit positions before a note starts or after it
         ends are skipped, so silence stays a rest.
+
+    harmony_poly_pitch_timing:
+        Derive each cycle's length from the pitch instead of play_bpm: a cycle
+        lasts as many periods of the root (lowest) note as the root's count in
+        the ratio grid.  Every voice then hits at its own frequency, so the
+        chord sounds at pitch (A#5 hits 932 times a second).  Ratios keep their
+        octaves (no folding), each cycle runs at its own BPM, and the global
+        grid origin is ignored because cycles follow the notes.
     """
     del harmony_tuning, harmony_root_mode
     voice_specs = build_harmony_voice_specs(
@@ -3137,6 +3146,10 @@ def build_harmony_ratio_polyrhythm_events(
     # mode each shape runs at its own BPM: angle / BPM stays constant.
     shapes: dict[tuple[float, ...], dict[str, Any]] = {}
 
+    shape_octave_mode = "absolute" if harmony_poly_pitch_timing else harmony_poly_ratio_octave_mode
+    if harmony_poly_pitch_timing:
+        harmony_poly_grid_origin = None
+
     def chord_shape(specs: list[dict[str, Any]]) -> dict[str, Any]:
         key = tuple(round(float(s.get("ratio", 1.0)), 9) for s in specs)
         shape = shapes.get(key)
@@ -3144,7 +3157,7 @@ def build_harmony_ratio_polyrhythm_events(
             pat = build_harmony_ratio_polyrhythm_pattern(
                 specs,
                 max_denominator=harmony_poly_max_denominator,
-                ratio_octave_mode=harmony_poly_ratio_octave_mode,
+                ratio_octave_mode=shape_octave_mode,
             )
             angle, _mode = _harmony_poly_emitted_cycle_angle(
                 pat, timing_cycle_angle, harmony_poly_cycle_mode, harmony_poly_cycle_twirl,
@@ -3201,8 +3214,10 @@ def build_harmony_ratio_polyrhythm_events(
             cycle_index = int(math.floor((n0.start - grid_base) / cycle_seconds + 1e-9))
         seg_index = 0
         previous_shape: dict[str, Any] | None = None
+        cycle_start = grid_base
         while True:
-            cycle_start = grid_base + cycle_index * cycle_seconds
+            if not harmony_poly_pitch_timing:
+                cycle_start = grid_base + cycle_index * cycle_seconds
             if cycle_start >= n0.end - EPS:
                 break
             # Where sound begins inside this cycle (later than the cycle start
@@ -3216,6 +3231,9 @@ def build_harmony_ratio_polyrhythm_events(
             active = segments[seg_index][2]
             if use_overlap_chords:
                 midis = [float(n.midi_at(_harmony_poly_u(n, probe))) for n in active]
+            elif harmony_poly_pitch_timing:
+                # Follow glides cycle by cycle so the pitch stays right.
+                midis = [float(n0.midi_at(_harmony_poly_u(n0, probe)))]
             else:
                 # Ratio-polyrhythm is meant for stable harmony shapes. For
                 # glides, use the start frequency so the rhythm stays readable.
@@ -3241,12 +3259,21 @@ def build_harmony_ratio_polyrhythm_events(
             base_midi = min(midis)
             root_freq = max(EPS, midi_to_hz(base_midi) * shape_root_ratio)
             root_midi = base_midi + ratio_to_semitones(shape_root_ratio)
+            if harmony_poly_pitch_timing:
+                # The root voice hits common_root_cycles times per cycle, so
+                # this cycle length makes it hit at root_freq.
+                root_hits = max(1, int(shape_pattern.get("common_root_cycles", 1)))
+                cycle_len = root_hits / root_freq
+                cycle_bpm = shape_cycle_angle * 60.0 / (180.0 * cycle_len)
+            else:
+                cycle_len = cycle_seconds
+                cycle_bpm = shape["bpm"]
 
             for merged in shape["positions"]:
                 if len(note_events) >= per_note_limit:
                     break
                 pos_float = float(merged.get("pos_float", 0.0))
-                raw_time = cycle_start + pos_float * cycle_seconds
+                raw_time = cycle_start + pos_float * cycle_len
                 if raw_time >= n0.end - EPS or raw_time < n0.start - EPS:
                     # No note sounds here: leave it as a rest.
                     continue
@@ -3284,14 +3311,14 @@ def build_harmony_ratio_polyrhythm_events(
                     "poly_merged_voices": ",".join(str(x) for x in merged.get("voices", [])),
                     "poly_merged_labels": ",".join(str(x) for x in merged.get("labels", [])),
                     "poly_cycle_angle": shape_cycle_angle,
-                    "poly_play_bpm": shape["bpm"],
+                    "poly_play_bpm": cycle_bpm,
                     "poly_pseudo_angle": 0.0,
                     "poly_ratio_text": str(shape_pattern.get("ratio_text", "")),
                     "poly_fraction_text": str(shape_pattern.get("fraction_text", "")),
                     "poly_actual_fraction_text": str(shape_pattern.get("actual_fraction_text", "")),
                     "poly_ratio_octave_mode": str(shape_pattern.get("ratio_octave_mode", harmony_poly_ratio_octave_mode)),
                     "poly_root_cycles": max(1, int(shape_pattern.get("common_root_cycles", 1))),
-                    "poly_cycle_seconds": cycle_seconds,
+                    "poly_cycle_seconds": cycle_len,
                     "poly_timing_source": "global_bpm",
                     "poly_scratch_merge": True,
                 }
@@ -3299,6 +3326,8 @@ def build_harmony_ratio_polyrhythm_events(
             if len(note_events) >= per_note_limit:
                 break
             cycle_index += 1
+            if harmony_poly_pitch_timing:
+                cycle_start += cycle_len
 
         note_events.sort(key=lambda e: (
             int(e.get("poly_cycle_index", 0)),
@@ -3342,6 +3371,8 @@ def build_harmony_ratio_polyrhythm_events(
         pattern = first_shape["pattern"]
         cycle_angle = first_shape["cycle_angle"]
         effective_play_bpm = first_shape["bpm"]
+        if harmony_poly_pitch_timing and events:
+            effective_play_bpm = float(events[0]["poly_play_bpm"])
         merged_positions = first_shape["positions"]
         common_root_cycles = max(1, int(pattern.get("common_root_cycles", 1)))
 
@@ -3407,6 +3438,7 @@ def build_harmony_ratio_polyrhythm_events(
         "chord_sequence": " > ".join(chord_sequence),
         "chord_shapes": len(shapes),
         "grid": "global" if harmony_poly_grid_origin is not None else "per_note",
+        "timing": "pitch" if harmony_poly_pitch_timing else "bpm",
     }
     return events, duplicate_hits_merged_total, voice_specs, pattern_stats
 
@@ -3871,6 +3903,7 @@ def build_adofai_level(
     harmony_poly_cycle_mode: str = "fixed",
     harmony_poly_chord_source: str = "preset",
     harmony_poly_grid_origin_seconds: float | None = None,
+    harmony_poly_pitch_timing: bool = False,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
@@ -3956,6 +3989,7 @@ def build_adofai_level(
                     if harmony_poly_grid_origin_seconds is None
                     else float(harmony_poly_grid_origin_seconds) - first_note_offset
                 ),
+                harmony_poly_pitch_timing=bool(harmony_poly_pitch_timing),
                 harmony_poly_cycle_twirl=visual_path_key(visual_path_mode) == "raw",
             )
             # Auto cycle angle scales the global BPM to keep cycle durations.
@@ -4032,6 +4066,7 @@ def build_adofai_level(
             "harmony_poly_chord_source": str(harmony_ratio_pattern_stats.get("chord_source", "")),
             "harmony_poly_chord_changes": int(harmony_ratio_pattern_stats.get("chord_changes", 0) or 0),
             "harmony_poly_grid": str(harmony_ratio_pattern_stats.get("grid", "")),
+            "harmony_poly_timing": str(harmony_ratio_pattern_stats.get("timing", "")),
             "harmony_poly_chord_sequence": str(harmony_ratio_pattern_stats.get("chord_sequence", "")),
             "harmony_poly_emitted_cycle_angle": float(harmony_ratio_pattern_stats.get("cycle_angle", 0.0) or 0.0),
             "harmony_poly_cycle_twirl": str(harmony_ratio_pattern_stats.get("cycle_twirl", "")),
