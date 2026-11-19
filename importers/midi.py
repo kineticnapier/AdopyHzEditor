@@ -1,12 +1,31 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import bisect
 import struct
 
 from core.note_model import Note
+
+
+@dataclass
+class MidiTrackInfo:
+    index: int
+    name: str = ""
+    channels: tuple[int, ...] = ()
+    programs: tuple[int, ...] = ()
+    note_count: int = 0
+    lowest: float | None = None
+    highest: float | None = None
+
+    @property
+    def looks_like_drums(self) -> bool:
+        """Percussion guess: GM drum channel (10, zero-based 9) or a drum-like name."""
+        if 9 in self.channels:
+            return True
+        name = self.name.lower()
+        return any(word in name for word in ("drum", "perc", "kit", "ドラム"))
 
 
 @dataclass
@@ -17,6 +36,9 @@ class MidiImportResult:
     ppq: int
     tempo_events: list[tuple[int, int]]
     duration_seconds: float
+    # Index into ``tracks`` order: note_tracks[i] is the MIDI track of notes[i].
+    note_tracks: list[int] = field(default_factory=list)
+    tracks: list[MidiTrackInfo] = field(default_factory=list)
 
     @property
     def note_count(self) -> int:
@@ -279,7 +301,21 @@ def _tick_to_seconds_converter(tempo_events: list[tuple[int, int]], ppq: int):
     return convert
 
 
-def _parse_track(track_data: bytes, track_index: int) -> tuple[list[dict[str, Any]], list[tuple[int, int]], int]:
+def _decode_midi_text(payload: bytes) -> str:
+    """Decode a MIDI text meta event (UTF-8, then Shift_JIS, then Latin-1)."""
+    for encoding in ("utf-8", "cp932"):
+        try:
+            return payload.decode(encoding).strip("\x00 ").strip()
+        except UnicodeDecodeError:
+            continue
+    return payload.decode("latin-1").strip("\x00 ").strip()
+
+
+def _parse_track(
+    track_data: bytes,
+    track_index: int,
+    info: MidiTrackInfo | None = None,
+) -> tuple[list[dict[str, Any]], list[tuple[int, int]], int]:
     pos = 0
     end = len(track_data)
     abs_tick = 0
@@ -320,6 +356,8 @@ def _parse_track(track_data: bytes, track_index: int) -> tuple[list[dict[str, An
             if meta_type == 0x51 and length == 3:
                 tempo = (payload[0] << 16) | (payload[1] << 8) | payload[2]
                 tempo_events.append((abs_tick, tempo))
+            elif meta_type == 0x03 and info is not None and not info.name:
+                info.name = _decode_midi_text(payload)
             elif meta_type == 0x2F:
                 break
             continue
@@ -341,6 +379,8 @@ def _parse_track(track_data: bytes, track_index: int) -> tuple[list[dict[str, An
         data2 = track_data[pos + 1] if data_len == 2 else 0
         pos += data_len
 
+        if event_type == 0xC0 and info is not None and data1 not in info.programs:
+            info.programs = (*info.programs, int(data1))
         if event_type == 0x90:
             if data2 > 0:
                 events.append({
@@ -373,7 +413,17 @@ def _parse_track(track_data: bytes, track_index: int) -> tuple[list[dict[str, An
     return events, tempo_events, max_tick
 
 
-def import_midi(path: str | Path, *, min_duration_seconds: float = 0.001) -> MidiImportResult:
+def import_midi(
+    path: str | Path,
+    *,
+    min_duration_seconds: float = 0.001,
+    track_indices: list[int] | set[int] | None = None,
+) -> MidiImportResult:
+    """Read a standard MIDI file.
+
+    ``track_indices`` keeps only notes from those MIDI tracks; ``None`` keeps
+    every track.  ``tracks`` always describes every track in the file.
+    """
     data = Path(path).read_bytes()
     pos = 0
 
@@ -401,6 +451,7 @@ def import_midi(path: str | Path, *, min_duration_seconds: float = 0.001) -> Mid
     all_events: list[dict[str, Any]] = []
     tempo_events: list[tuple[int, int]] = [(0, 500000)]
     max_tick = 0
+    track_infos: list[MidiTrackInfo] = []
 
     for track_index in range(track_count):
         if pos + 8 > len(data):
@@ -417,7 +468,9 @@ def import_midi(path: str | Path, *, min_duration_seconds: float = 0.001) -> Mid
             raise MidiImportError(f"Truncated track {track_index}")
         pos += length
 
-        events, tempos, track_max_tick = _parse_track(track_data, track_index)
+        info = MidiTrackInfo(index=track_index)
+        track_infos.append(info)
+        events, tempos, track_max_tick = _parse_track(track_data, track_index, info)
         all_events.extend(events)
         tempo_events.extend(tempos)
         max_tick = max(max_tick, track_max_tick)
@@ -430,8 +483,13 @@ def import_midi(path: str | Path, *, min_duration_seconds: float = 0.001) -> Mid
     type_order = {"note_off": 0, "note_on": 1}
     all_events.sort(key=lambda e: (int(e["tick"]), type_order.get(str(e["type"]), 9), int(e.get("track", 0))))
 
+    # Pair note on/off by channel and pitch, as MIDI does: a note-off on
+    # another track still ends the note.  The note belongs to the track of its
+    # note-on.
     active: dict[tuple[int, int], list[dict[str, Any]]] = {}
-    notes: list[Note] = []
+    paired: list[tuple[Note, int]] = []
+    info_by_index = {info.index: info for info in track_infos}
+    keep = None if track_indices is None else {int(i) for i in track_indices}
 
     for event in all_events:
         key = (int(event["channel"]), int(event["note"]))
@@ -454,14 +512,29 @@ def import_midi(path: str | Path, *, min_duration_seconds: float = 0.001) -> Mid
         if end - start < float(min_duration_seconds):
             end = start + float(min_duration_seconds)
 
-        notes.append(Note(
+        track = int(start_event.get("track", 0))
+        info = info_by_index.get(track)
+        if info is not None:
+            midi = float(event["note"])
+            info.note_count += 1
+            info.lowest = midi if info.lowest is None else min(info.lowest, midi)
+            info.highest = midi if info.highest is None else max(info.highest, midi)
+            channel = int(start_event["channel"])
+            if channel not in info.channels:
+                info.channels = tuple(sorted((*info.channels, channel)))
+        if keep is not None and track not in keep:
+            continue
+
+        paired.append((Note(
             start=start,
             end=end,
             midi=float(event["note"]),
             velocity=int(start_event.get("velocity", 100)),
-        ).normalized())
+        ).normalized(), track))
 
-    notes.sort(key=lambda n: (n.start, n.midi, n.end))
+    paired.sort(key=lambda item: (item[0].start, item[0].midi, item[0].end))
+    notes = [note for note, _track in paired]
+    note_tracks = [track for _note, track in paired]
     duration_seconds = max([tick_to_seconds(max_tick)] + [n.end for n in notes] + [0.0])
 
     return MidiImportResult(
@@ -471,4 +544,6 @@ def import_midi(path: str | Path, *, min_duration_seconds: float = 0.001) -> Mid
         ppq=int(ppq),
         tempo_events=tempo_events,
         duration_seconds=float(duration_seconds),
+        note_tracks=note_tracks,
+        tracks=track_infos,
     )

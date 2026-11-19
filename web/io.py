@@ -284,7 +284,53 @@ class IOMixin:
         path=self._dialog(webview.FileDialog.OPEN,file_types=MIDI_FILE_TYPES)
         if not path:return self.get_state()
         result = import_midi(path)
-        imported = result.notes
+        return self._apply_imported_midi_notes(result.notes)
+
+    def pick_midi_tracks_dialog(self) -> dict[str, Any]:
+        """Choose a MIDI file and describe its tracks without importing yet.
+
+        The chosen path stays in the backend; ``import_midi_tracks`` imports
+        from it, so the UI never passes a file path back.
+        """
+        path = self._dialog(webview.FileDialog.OPEN, file_types=MIDI_FILE_TYPES)
+        if not path:
+            return {"cancelled": True}
+        result = import_midi(path)
+        self._pending_midi_path = str(path)
+        tracks = [
+            {
+                "index": int(info.index),
+                "name": info.name or f"Track {info.index + 1}",
+                "channels": [int(c) + 1 for c in info.channels],
+                "noteCount": int(info.note_count),
+                "lowest": info.lowest,
+                "highest": info.highest,
+                "drums": bool(info.looks_like_drums),
+            }
+            for info in result.tracks
+            if info.note_count > 0
+        ]
+        return {"cancelled": False, "fileName": Path(path).name, "tracks": tracks}
+
+    def import_midi_tracks(self, track_indices: list[int]) -> dict[str, Any]:
+        """Import only the chosen tracks of the file picked by ``pick_midi_tracks_dialog``."""
+        path = getattr(self, "_pending_midi_path", None)
+        if not path:
+            raise ValueError("MIDIファイルが選択されていません")
+        indices: set[int] = set()
+        for value in track_indices or []:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) != int(value):
+                raise ValueError("トラック番号が不正です")
+            indices.add(int(value))
+        if not indices:
+            with self._lock:
+                self._status = "読み込むトラックが選ばれていません"
+                return self._state_dict()
+        result = import_midi(path, track_indices=indices)
+        self._pending_midi_path = None
+        return self._apply_imported_midi_notes(result.notes)
+
+    def _apply_imported_midi_notes(self, imported: list[Any]) -> dict[str, Any]:
         with self._lock:
             # An empty MIDI import must not create an Undo step, erase Redo,
             # or mark an otherwise unchanged project as modified.

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { NoteMutationResult } from "./bridge";
+import type { MidiTrackSummary, NoteMutationResult } from "./bridge";
+import { midiLabel } from "../editor/musicMath";
 import type {
   BlankWorkspaceOptions,
   HarmonicDiagramOptions,
@@ -556,6 +557,86 @@ export function HarmonicDiagramDialog({
   );
 }
 
+export function MidiTrackDialog({
+  fileName,
+  tracks,
+  onImport,
+  onClose,
+}: {
+  fileName: string;
+  tracks: MidiTrackSummary[];
+  onImport(trackIndices: number[]): void;
+  onClose(): void;
+}) {
+  // Drum-like tracks start unchecked: their note numbers are drum sounds,
+  // not pitches, so they would add bogus notes and chords.
+  const [checked, setChecked] = useState<Set<number>>(
+    () => new Set(tracks.filter((t) => !t.drums).map((t) => t.index)),
+  );
+  const toggle = (index: number, on: boolean) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  const chosen = tracks.filter((t) => checked.has(t.index));
+  const noteTotal = chosen.reduce((sum, t) => sum + t.noteCount, 0);
+  const range = (t: MidiTrackSummary) =>
+    t.lowest === null || t.highest === null
+      ? ""
+      : t.lowest === t.highest
+        ? midiLabel(t.lowest)
+        : `${midiLabel(t.lowest)}〜${midiLabel(t.highest)}`;
+  return (
+    <Modal title="MIDIトラックを選択" onClose={onClose}>
+      <div className="dialog-body export-dialog-body">
+        <div className="info-card">
+          {fileName} から読み込むトラックを選んでください。ドラムらしいトラックは最初から外してあります。
+        </div>
+        <div className="midi-track-list" role="group" aria-label="読み込むトラック">
+          {tracks.map((t) => (
+            <label key={t.index} className="inline-check midi-track-row">
+              <input
+                type="checkbox"
+                checked={checked.has(t.index)}
+                onChange={(e) => toggle(t.index, e.target.checked)}
+              />
+              <span className="midi-track-name">{t.name}</span>
+              <span className="midi-track-meta">
+                {t.noteCount}ノート
+                {range(t) && ` / ${range(t)}`}
+                {t.channels.length > 0 && ` / ch ${t.channels.join(",")}`}
+                {t.drums && " / ドラム"}
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="midi-track-actions">
+          <button type="button" onClick={() => setChecked(new Set(tracks.map((t) => t.index)))}>
+            すべて選択
+          </button>
+          <button type="button" onClick={() => setChecked(new Set())}>
+            すべて解除
+          </button>
+        </div>
+      </div>
+      <div className="dialog-footer">
+        <span>
+          {chosen.length}トラック / {noteTotal}ノート
+        </span>
+        <button onClick={onClose}>キャンセル</button>
+        <button
+          className="primary"
+          disabled={chosen.length === 0}
+          onClick={() => onImport(chosen.map((t) => t.index))}
+        >
+          読み込む
+        </button>
+      </div>
+    </Modal>
+  );
+}
 export function LanguageDialog({ onClose }: Common) {
   return (
     <Modal title="言語" onClose={onClose}>

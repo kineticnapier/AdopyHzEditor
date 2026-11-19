@@ -12,6 +12,7 @@ import { settingsResponseIsCurrent } from "./settings/settingsResponseFreshness"
 import {
   BlankWorkspaceDialog,
   HarmonicDiagramDialog,
+  MidiTrackDialog,
   UpdateDialog,
 } from "./dialogs/ToolDialogs";
 import { useDialogAccessibility } from "./dialogs/useDialogAccessibility";
@@ -47,6 +48,8 @@ import {
   type EditorSettings,
   type FrequencyTrackPayload,
   type KickPitchPayload,
+  type MidiTrackPick,
+  type MidiTrackSummary,
   type NoteDto,
   type NoteMutationResult,
   type PlaybackState,
@@ -190,6 +193,7 @@ export default function App() {
     [adoExportSelectedOnly,setAdoExportSelectedOnly]=useState(false),
     [helpSection, setHelpSection] = useState<string | null>(null),
     [toolDialog, setToolDialog] = useState<ToolDialog>(null),
+    [midiTrackPick, setMidiTrackPick] = useState<{ fileName: string; tracks: MidiTrackSummary[] } | null>(null),
     [followPlayback, setFollowPlayback] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true),
     [trackSelection, setTrackSelection] = useState<TrackSelectionState>({
@@ -834,6 +838,26 @@ export default function App() {
       setBusy(stateTransitionPending.current > 0);
     }
   }
+  async function importMidi(): Promise<void> {
+    if (!api) return;
+    let picked: MidiTrackPick;
+    try {
+      picked = await api.pick_midi_tracks_dialog();
+    } catch (e) {
+      setStatus(String(e));
+      return;
+    }
+    if (picked.cancelled) return;
+    if (picked.tracks.length === 0) {
+      setStatus("MIDIに読み込めるノートがありませんでした");
+      return;
+    }
+    if (picked.tracks.length === 1) {
+      await runStateAction(() => api.import_midi_tracks([picked.tracks[0].index]), true);
+      return;
+    }
+    setMidiTrackPick({ fileName: picked.fileName, tracks: picked.tracks });
+  }
   async function runStateAction(
     action: () => Promise<AppState>,
     clearSelection = false,
@@ -1302,8 +1326,7 @@ export default function App() {
     saveProject: () => api && stateAction(() => api.save_project_dialog()),
     saveProjectAs: () => api && stateAction(() => api.save_project_as_dialog()),
     loadProject: loadProjectSafely,
-    importMidi: () =>
-      api && void runStateAction(() => api.import_midi_dialog(), true),
+    importMidi: () => api && void importMidi(),
     exportMidi: () => exportMidi(),
     openAdoExport: () => {setAdoExportSelectedOnly(false);setAdoExportOpen(true)},
     openHelp: () => setHelpSection("quick_start"),
@@ -1338,9 +1361,7 @@ export default function App() {
       onSaveProjectAs={() =>
         api && stateAction(() => api.save_project_as_dialog())
       }
-      onImportMidi={() =>
-        api && void runStateAction(() => api.import_midi_dialog(), true)
-      }
+      onImportMidi={() => api && void importMidi()}
       onExportMidi={() => exportMidi()}
       onExportAdo={() => {setAdoExportSelectedOnly(false);setAdoExportOpen(true)}}
       onBlankWorkspace={() =>
@@ -1540,6 +1561,17 @@ export default function App() {
           onClose={() => setToolDialog(null)}
           onStatus={setStatus}
           onQueuedMutation={queueExternalMutation}
+        />
+      )}{" "}
+      {midiTrackPick && api && (
+        <MidiTrackDialog
+          fileName={midiTrackPick.fileName}
+          tracks={midiTrackPick.tracks}
+          onClose={() => setMidiTrackPick(null)}
+          onImport={(indices) => {
+            setMidiTrackPick(null);
+            void runStateAction(() => api.import_midi_tracks(indices), true);
+          }}
         />
       )}{" "}
       {toolDialog === "update" && toolsApi && (

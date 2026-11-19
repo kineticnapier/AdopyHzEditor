@@ -41,6 +41,8 @@ export type AdoFAIExportOptions = {
 };
 export type AdoFAITilePreview = { points: Array<{ x: number; y: number; angle: number }>; stats: Record<string, unknown>; shownTiles: number; totalTiles: number; limited: boolean };
 export type AdoFAIDebugPreview = { rows: Array<Record<string, unknown>>; summary: { rows: number; estimatedTiles: number; targetAngleUsed: number; targetAngleIgnored: number; finalVisualCorrections: number; warnings: number }; limited: boolean };
+export type MidiTrackSummary = { index: number; name: string; channels: number[]; noteCount: number; lowest: number | null; highest: number | null; drums: boolean };
+export type MidiTrackPick = { cancelled: true } | { cancelled: false; fileName: string; tracks: MidiTrackSummary[] };
 export type HelpPayload = { header: string; sections: Array<{ id: string; title: string; body: string }>; releasesUrl: string };
 
 export type BackendApi = {
@@ -61,6 +63,7 @@ export type BackendApi = {
   undo(): Promise<NoteMutationResult>; redo(): Promise<NoteMutationResult>; copy_notes(indices: number[]): Promise<{ status: string }>;
   cut_notes(indices: number[]): Promise<NoteMutationResult>; paste_notes(atTime: number): Promise<NoteMutationResult>;
   save_project_dialog(): Promise<AppState>; save_project_as_dialog(): Promise<AppState>; load_project_dialog(): Promise<AppState>; relink_project_audio_dialog(): Promise<AppState>; import_midi_dialog(): Promise<AppState>;
+  pick_midi_tracks_dialog(): Promise<MidiTrackPick>; import_midi_tracks(trackIndices: number[]): Promise<AppState>;
   cancel_window_close(): Promise<{ ok: boolean }>; close_window(): Promise<{ ok: boolean }>;
   export_midi_dialog(): Promise<{ ok: boolean; path?: string; status: string }>; export_adofai_dialog(): Promise<{ ok: boolean; path?: string; stats?: Record<string, unknown>; status: string }>;
   get_adofai_export_defaults(selectedIndices?: number[], selectedOnly?: boolean): Promise<AdoFAIExportOptions>;
