@@ -5,6 +5,7 @@ from fractions import Fraction
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
+import bisect
 import json
 import functools
 import math
@@ -921,6 +922,7 @@ def build_adofai_debug_rows(
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
+    chain_contiguous: bool = False,
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
@@ -941,6 +943,8 @@ def build_adofai_debug_rows(
         prepared_notes = flatten_curve_notes(notes, curve_step_sec=curve_step_sec, curve_pitch_step=curve_pitch_step)
 
     sorted_notes, first_note_offset = normalize_notes_to_first(prepared_notes)
+    if chain_contiguous and use_phase_continuous_glide and method_key not in ("harmony", "harmony_polyrhythm"):
+        sorted_notes = chain_contiguous_notes(sorted_notes)
 
     play_bpm = max(1e-6, float(angle_only_bpm if method_key == "angle_only" else base_bpm))
 
@@ -981,6 +985,7 @@ def build_adofai_debug_rows(
             "pause_before_s": round(pause_seconds_before, 6),
             "overlap": bool(overlap),
             "kind": n.kind,
+            "chained_notes": len(n.segments) if isinstance(n, ChainedNote) else 1,
             "interpolation": "" if n.interpolation == "bezier_pitch" and not n.is_curve else n.interpolation,
             "note": note_name(n.midi),
             "midi": round(float(n.midi), 6),
@@ -1402,6 +1407,30 @@ def curve_phase_samples(
     dur = n.duration
     if dur <= 0:
         return [0.0], [0.0], 0.0
+
+    if isinstance(n, ChainedNote):
+        # Integrate each segment on its own so pitch jumps at boundaries are
+        # exact instead of smeared across one sample interval.
+        all_times: list[float] = [0.0]
+        all_phases: list[float] = [0.0]
+        total = 0.0
+        for seg in n.segments:
+            seg_times, seg_phases, seg_total = curve_phase_samples(
+                seg,
+                samples_per_second=samples_per_second,
+                min_samples=min_samples if seg.is_curve else 1,
+                max_samples=max_samples,
+            )
+            base_t = seg.start - n.start
+            for t, p in zip(seg_times[1:], seg_phases[1:]):
+                # Clamp so a tiny overlap inside the tolerance keeps time monotonic.
+                all_times.append(max(all_times[-1], base_t + t))
+                all_phases.append(total + p)
+            total += seg_total
+        if all_times[-1] < dur:
+            all_times.append(dur)
+            all_phases.append(total)
+        return all_times, all_phases, total
 
     # More samples for longer notes and large pitch movement, but keep bounded.
     probe = [n.freq_at(i / 16.0) for i in range(17)]
@@ -2339,6 +2368,105 @@ def normalize_notes_to_first(notes: list[Note]) -> tuple[list[Note], float]:
         for n in sorted_notes
     ]
     return normalized, first_start
+
+
+CHAIN_GAP_TOLERANCE_SEC = 1e-4
+
+
+class ChainedNote(Note):
+    """Export-only note made of back-to-back segments with one continuous phase.
+
+    The exporter treats it as a curve: tiles follow the cumulative phase across
+    every segment, so a segment boundary no longer forces a partial tile.
+    """
+
+    def __init__(self, segments: list[Note]) -> None:
+        segs = [s.normalized() for s in segments if s.duration > 0]
+        if not segs:
+            raise ValueError("ChainedNote needs at least one segment")
+        first, last = segs[0], segs[-1]
+        super().__init__(
+            first.start,
+            last.end,
+            first.midi,
+            first.velocity,
+            "curve",
+            last.midi_at(1.0),
+            None,
+            None,
+            "chain",
+            first.target_angle,
+        )
+        self.segments = segs
+        self._ends = [s.end for s in segs]
+
+    @property
+    def pitch_bounds(self) -> tuple[float, float]:
+        bounds = [s.pitch_bounds for s in self.segments]
+        return min(b[0] for b in bounds), max(b[1] for b in bounds)
+
+    def _segment_at(self, t: float) -> Note:
+        i = bisect.bisect_left(self._ends, t)
+        return self.segments[min(i, len(self.segments) - 1)]
+
+    def midi_at(self, u: float) -> float:
+        u = max(0.0, min(1.0, float(u)))
+        t = self.start + self.duration * u
+        seg = self._segment_at(t)
+        if t <= seg.start or seg.duration <= 0:
+            return seg.midi_at(0.0)
+        return seg.midi_at((t - seg.start) / seg.duration)
+
+    def normalized(self) -> "ChainedNote":
+        return self
+
+    def with_time_offset(self, offset: float) -> "ChainedNote":
+        return ChainedNote([s.with_time_offset(offset) for s in self.segments])
+
+    def with_pitch_offset(self, semitones: float) -> "ChainedNote":
+        return ChainedNote([s.with_pitch_offset(semitones) for s in self.segments])
+
+    def with_target_angle(self, target_angle: float | None) -> "ChainedNote":
+        return ChainedNote([s.with_target_angle(target_angle) for s in self.segments])
+
+    def with_interpolation(self, interpolation: str) -> "ChainedNote":
+        return self
+
+    def sample_fixed_segments(self, **kwargs: Any) -> list[Note]:
+        out: list[Note] = []
+        for s in self.segments:
+            out.extend(s.sample_fixed_segments(**kwargs))
+        return out
+
+
+def chain_contiguous_notes(notes: list[Note], *, gap_tolerance: float = CHAIN_GAP_TOLERANCE_SEC) -> list[Note]:
+    """Merge runs of back-to-back notes into ChainedNote objects.
+
+    ``notes`` must be sorted by start. A note joins the current run when it
+    starts within ``gap_tolerance`` of the run's end and has the same target
+    angle; anything else (gaps, overlaps/chords) starts a new run.
+    """
+    out: list[Note] = []
+    run: list[Note] = []
+
+    def flush() -> None:
+        if len(run) == 1:
+            out.append(run[0])
+        elif run:
+            out.append(ChainedNote(run))
+        run.clear()
+
+    for n in notes:
+        if n.duration <= 0:
+            continue
+        if run:
+            prev = run[-1]
+            joins = abs(n.start - prev.end) <= gap_tolerance and n.target_angle == prev.target_angle
+            if not joins:
+                flush()
+        run.append(n)
+    flush()
+    return out
 
 
 def _harmony_key(value: str) -> str:
@@ -3463,6 +3591,7 @@ def build_adofai_level(
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
+    chain_contiguous: bool = False,
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
@@ -3515,6 +3644,10 @@ def build_adofai_level(
         prepared_notes = flatten_curve_notes(notes, curve_step_sec=curve_step_sec, curve_pitch_step=curve_pitch_step)
 
     sorted_notes, first_note_offset = normalize_notes_to_first(prepared_notes)
+    notes_before_chain = len(sorted_notes)
+    if chain_contiguous and use_phase_continuous_glide and method_key not in ("harmony", "harmony_polyrhythm"):
+        sorted_notes = chain_contiguous_notes(sorted_notes)
+    chained_runs = sum(1 for n in sorted_notes if isinstance(n, ChainedNote))
 
     global_lowest_floor_x = compute_lowest_floor_x(sorted_notes)
     effective_fixed_x = global_lowest_floor_x if (rabbit_x_mode or "").lower().replace(" ", "_").replace("-", "_") in (
@@ -3854,6 +3987,9 @@ def build_adofai_level(
         "curve_pitch_step": round(float(curve_pitch_step), 6),
         "phase_continuous_glide": bool(use_phase_continuous_glide),
         "phase_continuous_curves": phase_continuous_curves,
+        "chain_contiguous": bool(chain_contiguous),
+        "chained_runs": chained_runs,
+        "notes_merged_by_chain": notes_before_chain - len(sorted_notes),
         "input_notes_total": len(notes),
         "base_bpm": round(float(base_bpm), 6),
         "angle_only_bpm": round(float(angle_only_bpm), 6),
@@ -3936,6 +4072,7 @@ def export_adofai(
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
+    chain_contiguous: bool = False,
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
@@ -3974,6 +4111,7 @@ def export_adofai(
         curve_step_sec=curve_step_sec,
         curve_pitch_step=curve_pitch_step,
         phase_continuous_glide=phase_continuous_glide,
+        chain_contiguous=chain_contiguous,
         final_angle_mode=final_angle_mode,
         final_custom_angle=final_custom_angle,
         final_cardinal_step=final_cardinal_step,

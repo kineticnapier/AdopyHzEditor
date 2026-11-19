@@ -398,6 +398,18 @@ export default function AdoFAIExportDialogJa({
             </label>
           </Field>
         )}
+        {!isHarmony && (
+          <Field label="ノート連結" group>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={options.chainContiguous ?? true}
+                onChange={(e) => patch("chainContiguous", e.target.checked)}
+              />
+              隙間なく続くノートを1本につなげる（境目で切らない）
+            </label>
+          </Field>
+        )}
         <details className="advanced-fold">
           <summary>詳細設定</summary>
           <div className="advanced-grid">
