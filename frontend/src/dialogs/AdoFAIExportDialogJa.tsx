@@ -349,9 +349,28 @@ export default function AdoFAIExportDialogJa({
                 }
               />
             </Field>
+            {options.harmonyTimingMode === "ratio-polyrhythm" && (
+              <Field label="和音の決め方">
+                <Select
+                  value={options.harmonyPolyChordSource ?? "overlap"}
+                  options={[
+                    ["overlap", "重なったノーツから"],
+                    ["preset", "和音設定のみ"],
+                  ]}
+                  onChange={(v) =>
+                    patch(
+                      "harmonyPolyChordSource",
+                      v as AdoFAIExportOptions["harmonyPolyChordSource"],
+                    )
+                  }
+                />
+              </Field>
+            )}
             <div className="info-card">
               {options.harmonyTimingMode === "ratio-polyrhythm"
-                ? "比率ポリリズムは純正比（長三和音なら4:5:6）でリズムを作ります。"
+                ? (options.harmonyPolyChordSource ?? "overlap") === "overlap"
+                  ? "同時に鳴っているノーツの音程を純正比（ドミソなら4:5:6）にしてリズムを作ります。単音の区間は「和音」の設定を使い、和音の切り替えは周期の区切りで行います。"
+                  : "比率ポリリズムは純正比（長三和音なら4:5:6）でリズムを作ります。"
                 : "音律は平均律に固定されています。"}
             </div>
           </>
