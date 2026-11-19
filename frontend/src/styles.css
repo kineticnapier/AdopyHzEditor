@@ -146,3 +146,8 @@ input:disabled, select:disabled { opacity: .48; }
   .view-toggle button{font-size:10px;padding-inline:6px}
   .timeline{gap:4px}.timeline-field.pitch-field span{display:none}.timeline-field.pitch-field input{width:42px}
 }
+.layer-list { display: grid; gap: 2px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #3a4148; }
+.layer-row { gap: 8px; min-height: 26px; }
+.layer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-count { margin-left: auto; color: #9aa4ae; font-size: 12px; }
+.layer-actions { display: flex; gap: 6px; margin-top: 4px; }

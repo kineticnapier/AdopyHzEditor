@@ -99,6 +99,7 @@ const defaultSettings: EditorSettings = {
   curveShape: "ease",
   curveInterpolation: "bezier_pitch",
   targetAngle: 165,
+  mutedLayers: [],
 };
 const defaultView: ViewState = {
   mode: "spec",
@@ -1568,9 +1569,9 @@ export default function App() {
           fileName={midiTrackPick.fileName}
           tracks={midiTrackPick.tracks}
           onClose={() => setMidiTrackPick(null)}
-          onImport={(indices, mergeDuplicates) => {
+          onImport={(indices) => {
             setMidiTrackPick(null);
-            void runStateAction(() => api.import_midi_tracks(indices, mergeDuplicates), true);
+            void runStateAction(() => api.import_midi_tracks(indices), true);
           }}
         />
       )}{" "}

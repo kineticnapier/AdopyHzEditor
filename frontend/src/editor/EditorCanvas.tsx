@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { isLayerMuted } from "./layers";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, KickPitchPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, regionSelectedNoteIndices, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, clampDraggedNoteOffset, noteGhostIntersectsViewport, trackPrimitiveIntersectsViewport, contextMenuDeleteIndices, isValidTrackSample, type NoteTimeIndex } from "./editorMath";
 import { mergeTrackSelection, normalizeTrackRange, updateTrackSelection, type TrackSelectionRange } from "./trackSelection";
@@ -422,6 +423,8 @@ export default function EditorCanvas(props: Props) {
       const isGhost=ghost!=="none";
       ctx.save();
       if(isGhost){ctx.globalAlpha=.72;ctx.setLineDash([5,3]);}
+      // Notes on switched-off layers stay visible and editable, but faded.
+      else if(isLayerMuted(note,props.settings.mutedLayers))ctx.globalAlpha=.22;
       if((note.kind??"note")==="curve"){
         const steps=Math.max(8,Math.min(96,Math.round((note.end-note.start)/.02)));ctx.beginPath();
         for(let i=0;i<=steps;i+=1){const u=i/steps,x=coords.x(note.start+(note.end-note.start)*u),y=coords.y(noteMidiAt(note,u));if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
@@ -441,7 +444,7 @@ export default function EditorCanvas(props: Props) {
     for(const index of notesInTimeRange(noteTimeIndex,props.view.start,props.view.start+props.view.windowSeconds)){const note=props.notes[index];if(note)drawNote(note,selectedSet.has(index))}
     if(keyboardNote!==null){const note=props.notes[keyboardNote];if(note){const x=coords.x(note.start),y=coords.y(note.midi);ctx.save();ctx.strokeStyle="#ffffff";ctx.lineWidth=2;ctx.setLineDash([2,2]);ctx.strokeRect(x-6,y-7,12,14);ctx.restore();}}
 
-  },[coords,decoded,decodedTracks,directSpectrumCanvas,keyboardNote,kickPitchLines,props.kickPitchSelected,noteTimeIndex,props.directSpectrum,props.notes,props.settings.bpm,props.settings.displayMode,props.settings.gridEnabled,props.settings.offsetMs,props.settings.spectrumOpacity,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas]);
+  },[coords,decoded,decodedTracks,directSpectrumCanvas,keyboardNote,kickPitchLines,props.kickPitchSelected,noteTimeIndex,props.directSpectrum,props.notes,props.settings.bpm,props.settings.displayMode,props.settings.gridEnabled,props.settings.offsetMs,props.settings.spectrumOpacity,props.settings.mutedLayers,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas]);
 
   useEffect(()=>{
     const canvas=playheadRef.current;if(!canvas)return;const dpr=window.devicePixelRatio||1;

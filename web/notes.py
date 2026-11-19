@@ -113,8 +113,15 @@ class NoteMixin:
         self._sync_notes_to_player()
         self._refresh_dirty_from_checkpoint()
 
+    def _active_notes(self) -> list[Note]:
+        """Notes on layers that are switched on (all notes when none are muted)."""
+        muted = set(self.settings.get("mutedLayers") or ())
+        if not muted:
+            return list(self.notes)
+        return [n for n in self.notes if (n.layer or "") not in muted]
+
     def _sync_notes_to_player(self) -> None:
-        self.player.set_preview_notes(self.notes)
+        self.player.set_preview_notes(self._active_notes())
         note_end = max((float(n.end) for n in self.notes), default=0.0)
         self.player.set_virtual_duration(max(float(self.duration), note_end, 0.001))
         self._apply_player_settings()
@@ -166,6 +173,7 @@ class NoteMixin:
             n.ctrl2_midi,
             n.interpolation,
             n.target_angle,
+            n.layer,
         ).normalized()
 
     def _valid_indices(self, indices: list[int]) -> list[int]:
@@ -347,7 +355,7 @@ class NoteMixin:
             if "velocity" in changes:
                 v = int(round(_clamp(changes["velocity"], 0.0, 127.0)))
                 u = updated.normalized()
-                updated = Note(u.start, u.end, u.midi, v, u.kind, u.midi_end, u.ctrl1_midi, u.ctrl2_midi, u.interpolation, u.target_angle).normalized()
+                updated = Note(u.start, u.end, u.midi, v, u.kind, u.midi_end, u.ctrl1_midi, u.ctrl2_midi, u.interpolation, u.target_angle, u.layer).normalized()
             if updated == n:
                 self._status = "ノートのプロパティは変更されませんでした"
                 return {"notes": self._note_dicts(), "index": i, "changed": False, "dirty": self._dirty, "status": self._status}

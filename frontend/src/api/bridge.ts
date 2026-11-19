@@ -1,6 +1,7 @@
 export type EditorSettings = {
   volume: number; speed: number; notePreview: boolean; previewVolume: number; previewOctave: number; previewSound: string;
   exportOctave: number; exportSemitone: number; gridEnabled: boolean; metronomeEnabled: boolean; bpm: number; offsetMs: number;
+  mutedLayers: string[];
   metronomeVolume: number; snapEnabled: boolean; snapDiv: number; contrast: number; gamma: number; enhance: boolean;
   displayMode: string; harmonics: string; colormap: string; analysisProfile: string; cqtResolution: string; analysisSource: "cqt" | "vorbis_direct";
   spectrumThreshold: number; spectrumOpacity: number; spectrumLayerMode: "raw" | "tracks" | "both";
@@ -8,7 +9,7 @@ export type EditorSettings = {
 };
 export type ViewState = { mode: "spec" | "notes" | "both"; start: number; windowSeconds: number; pitchBottom: number; visibleNotes: number };
 export type PlaybackState = { time: number; duration: number; playing: boolean; available: boolean; error: string | null };
-export type NoteDto = { start: number; end: number; midi: number; velocity?: number; kind?: "note" | "curve"; midi_end?: number; ctrl1_midi?: number; ctrl2_midi?: number; interpolation?: string; target_angle?: number };
+export type NoteDto = { start: number; end: number; midi: number; velocity?: number; kind?: "note" | "curve"; midi_end?: number; ctrl1_midi?: number; ctrl2_midi?: number; interpolation?: string; target_angle?: number; layer?: string };
 export type AnalysisState = { available: boolean; duration: number; midiMin: number; midiMax: number; pitchStep: number; source?: string; stats?: Record<string, unknown> };
 export type AppState = { settings: EditorSettings; view: ViewState; playback: PlaybackState; audio: { path: string | null; name: string | null; loaded: boolean }; projectPath: string | null; notes: NoteDto[]; analysis: AnalysisState; busy: boolean; status: string; dirty: boolean };
 export type SpectrogramPayload = { available: boolean; rows?: number; cols?: number; data?: string; duration?: number; start?: number; end?: number; midiMin?: number; midiMax?: number; pitchStep?: number };
@@ -37,7 +38,7 @@ export type AdoFAIExportOptions = {
   xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; angleCompressionMode: "auto" | "fixed"; angleCompressionFixedAngle: number;
   trackVisual: "normal" | "faint" | "very faint" | "hidden"; visualPathMode: "raw" | "upward" | "upward avoid" | "auto route twirl" | "twirl upward"; visualPathAngle: number;
   visualPositionMode: "off" | "note step"; visualPositionX: number; visualPositionY: number; finalAngleMode: "scaled" | "cardinal" | "horizontal" | "custom";
-  finalCustomAngle: number; finalCardinalStep: number; chainContiguous: boolean; useProjectSong: boolean; copyProjectSong: boolean; songConflictAction: "cancel" | "rename" | "overwrite"; songSourcePath: string; songOffsetAuto: boolean; songOffsetMs: number; fullSongOffsetMs: number; selectedSongOffsetMs: number; selectedOnly: boolean;
+  finalCustomAngle: number; finalCardinalStep: number; chainContiguous: boolean; mergeDuplicateNotes: boolean; useProjectSong: boolean; copyProjectSong: boolean; songConflictAction: "cancel" | "rename" | "overwrite"; songSourcePath: string; songOffsetAuto: boolean; songOffsetMs: number; fullSongOffsetMs: number; selectedSongOffsetMs: number; selectedOnly: boolean;
 };
 export type AdoFAITilePreview = { points: Array<{ x: number; y: number; angle: number }>; stats: Record<string, unknown>; shownTiles: number; totalTiles: number; limited: boolean };
 export type AdoFAIDebugPreview = { rows: Array<Record<string, unknown>>; summary: { rows: number; estimatedTiles: number; targetAngleUsed: number; targetAngleIgnored: number; finalVisualCorrections: number; warnings: number }; limited: boolean };

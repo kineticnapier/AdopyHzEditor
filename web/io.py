@@ -53,6 +53,9 @@ DEFAULT_EDITOR_SETTINGS: dict[str, Any] = {
     "curveShape": "ease",
     "curveInterpolation": "bezier_pitch",
     "targetAngle": 165.0,
+    # Layers switched off: excluded from playback and export.  "" = notes
+    # without a layer.
+    "mutedLayers": [],
 }
 
 
@@ -89,6 +92,7 @@ PROJECT_SETTING_FIELDS: tuple[tuple[str, str, type], ...] = (
     ("curve_shape", "curveShape", str),
     ("curve_interpolation", "curveInterpolation", str),
     ("target_angle", "targetAngle", float),
+    ("muted_layers", "mutedLayers", list),
 )
 
 # Older desktop projects used this name before preview_octave was introduced.
@@ -292,7 +296,7 @@ class IOMixin:
         return self.get_state()
 
     def _shifted_export_notes(self) -> list[Note]:
-        semitones=int(self.settings["exportOctave"])*12+int(self.settings["exportSemitone"]);return[n.with_pitch_offset(semitones) for n in self.notes]
+        semitones=int(self.settings["exportOctave"])*12+int(self.settings["exportSemitone"]);return[n.with_pitch_offset(semitones) for n in self._active_notes()]
 
     def import_midi_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.OPEN,file_types=MIDI_FILE_TYPES)
@@ -314,7 +318,7 @@ class IOMixin:
         tracks = [
             {
                 "index": int(info.index),
-                "name": info.name or f"Track {info.index + 1}",
+                "name": info.label or info.name or f"Track {info.index + 1}",
                 "channels": [int(c) + 1 for c in info.channels],
                 "noteCount": int(info.note_count),
                 "lowest": info.lowest,
@@ -326,11 +330,14 @@ class IOMixin:
         ]
         return {"cancelled": False, "fileName": Path(path).name, "tracks": tracks}
 
-    def import_midi_tracks(self, track_indices: list[int], merge_duplicates: bool = True) -> dict[str, Any]:
+    def import_midi_tracks(self, track_indices: list[int], merge_duplicates: bool = False) -> dict[str, Any]:
         """Import only the chosen tracks of the file picked by ``pick_midi_tracks_dialog``.
 
-        With ``merge_duplicates`` the same pitch sounding on several layers at
-        once (lead + a doubling layer) becomes one note covering both.
+        Every note keeps its track name as its layer, so layers can be switched
+        on and off later.  ``merge_duplicates`` instead merges the same pitch
+        sounding on several layers at once into one note right away (the merged
+        note keeps the first note's layer); export merges duplicates among the
+        active layers anyway.
         """
         path = getattr(self, "_pending_midi_path", None)
         if not path:

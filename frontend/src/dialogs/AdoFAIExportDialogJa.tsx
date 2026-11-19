@@ -487,6 +487,16 @@ export default function AdoFAIExportDialogJa({
             </label>
           </Field>
         )}
+        <Field label="同じ音の重なり" group>
+          <label className="inline-check">
+            <input
+              type="checkbox"
+              checked={options.mergeDuplicateNotes ?? true}
+              onChange={(e) => patch("mergeDuplicateNotes", e.target.checked)}
+            />
+            別のレイヤーで同じ音が同時に鳴るところは1つにまとめる
+          </label>
+        </Field>
         {!isHarmony && (
           <Field label="ノート連結" group>
             <label className="inline-check">

@@ -50,10 +50,9 @@ test("overlap chords expose legato and octave cleanup", () => {
   assert.match(backendSource, /"harmonyPolyMergeOctaves": True/);
 });
 
-test("MIDI track picker can merge duplicate layer notes", () => {
-  const tools = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
+test("duplicate layer notes merge at export, not at import", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(tools, /useState\(true\)/);
-  assert.match(tools, /onImport\(chosen\.map\(\(t\) => t\.index\), mergeDuplicates\)/);
-  assert.match(app, /api\.import_midi_tracks\(indices, mergeDuplicates\)/);
+  assert.match(app, /api\.import_midi_tracks\(indices\)/);
+  assert.match(dialogSource, /patch\("mergeDuplicateNotes", e\.target\.checked\)/);
+  assert.match(backendSource, /"mergeDuplicateNotes": True/);
 });

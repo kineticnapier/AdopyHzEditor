@@ -18,6 +18,8 @@ class MidiTrackInfo:
     note_count: int = 0
     lowest: float | None = None
     highest: float | None = None
+    # Unique, human-readable layer name given to this track's notes.
+    label: str = ""
 
     @property
     def looks_like_drums(self) -> bool:
@@ -105,6 +107,7 @@ def _copy_note_with_times(note: Note, start: float, end: float) -> Note:
         n.ctrl2_midi,
         n.interpolation,
         n.target_angle,
+        n.layer,
     ).normalized()
 
 
@@ -197,6 +200,7 @@ def cleanup_imported_midi_notes(
                         current.ctrl2_midi,
                         current.interpolation,
                         current.target_angle,
+                        current.layer,
                     ).normalized()
                 else:
                     result.append(current)
@@ -299,6 +303,16 @@ def _tick_to_seconds_converter(tempo_events: list[tuple[int, int]], ppq: int):
         return seconds_at[i] + (tick - ticks[i]) * tempos[i] / 1_000_000.0 / ppq
 
     return convert
+
+
+def _assign_track_labels(infos: list[MidiTrackInfo]) -> None:
+    """Name every track: its MIDI name, or "Track N", made unique with " (2)"."""
+    used: dict[str, int] = {}
+    for info in infos:
+        base = info.name or f"Track {info.index + 1}"
+        count = used.get(base, 0) + 1
+        used[base] = count
+        info.label = base if count == 1 else f"{base} ({count})"
 
 
 def _decode_midi_text(payload: bytes) -> str:
@@ -477,6 +491,7 @@ def import_midi(
 
     tempo_events = sorted(tempo_events, key=lambda x: x[0])
     tick_to_seconds = _tick_to_seconds_converter(tempo_events, ppq)
+    _assign_track_labels(track_infos)
 
     # Sort note_off before note_on at the same tick so repeated notes do not
     # accidentally overlap forever.
@@ -530,6 +545,7 @@ def import_midi(
             end=end,
             midi=float(event["note"]),
             velocity=int(start_event.get("velocity", 100)),
+            layer=info.label if info is not None else f"Track {track + 1}",
         ).normalized(), track))
 
     paired.sort(key=lambda item: (item[0].start, item[0].midi, item[0].end))

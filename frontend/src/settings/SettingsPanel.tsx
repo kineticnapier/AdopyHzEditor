@@ -16,6 +16,7 @@ import { midiLabel, midiToHz } from "../editor/musicMath";
 import { commitNumericEdit } from "./numericInputModel";
 import { isDialogCompositionKey, isPlainDialogEscape } from "../dialogs/dialogFocus";
 import { selectionIdentityKey } from "./selectionIdentity";
+import { setLayerActive, summarizeLayers } from "../editor/layers";
 
 type Page = "inspector" | "settings";
 type Props = {
@@ -138,6 +139,12 @@ export default function SettingsPanel({
       <div className="settings-body" inert={!api} aria-busy={!api}>
         {page === "inspector" && (
           <>
+            <LayerList
+              notes={notes}
+              muted={settings.mutedLayers ?? []}
+              disabled={busy}
+              onChange={(mutedLayers) => void onPatch({ mutedLayers })}
+            />
             {selected.length === 0 && trackSelection.ids.length === 0 && (
               <div className="inspector-empty">
                 <strong>選択なし</strong>
@@ -859,6 +866,57 @@ function BulkEditor({
   );
 }
 
+function LayerList({
+  notes,
+  muted,
+  disabled,
+  onChange,
+}: {
+  notes: NoteDto[];
+  muted: string[];
+  disabled: boolean;
+  onChange(muted: string[]): void;
+}) {
+  const layers = summarizeLayers(notes);
+  // A single unnamed layer means the project has no layers to choose from.
+  if (layers.length === 0 || (layers.length === 1 && layers[0].name === "")) return null;
+  const activeCount = layers.filter((l) => !muted.includes(l.name)).length;
+  return (
+    <section className="layer-list" aria-label="レイヤー">
+      <div className="inspector-summary">
+        <strong>レイヤー</strong>
+        <span>
+          {activeCount}/{layers.length} 使用中
+        </span>
+      </div>
+      {layers.map((layer) => (
+        <label key={layer.name} className="inline-check layer-row">
+          <input
+            type="checkbox"
+            checked={!muted.includes(layer.name)}
+            disabled={disabled}
+            onChange={(e) => onChange(setLayerActive(muted, layer.name, e.target.checked))}
+          />
+          <span className="layer-name">{layer.label}</span>
+          <span className="layer-count">{layer.count}</span>
+        </label>
+      ))}
+      <div className="layer-actions">
+        <button type="button" disabled={disabled || muted.length === 0} onClick={() => onChange([])}>
+          すべて使う
+        </button>
+        <button
+          type="button"
+          disabled={disabled || activeCount === 0}
+          onClick={() => onChange(layers.map((l) => l.name))}
+        >
+          すべて外す
+        </button>
+      </div>
+      <p className="inspector-help">外したレイヤーは薄く表示され、再生と出力に入りません。</p>
+    </section>
+  );
+}
 function Fold({
   title,
   open = false,

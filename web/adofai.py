@@ -16,6 +16,7 @@ from typing import Any
 import webview
 
 from core.atomic_io import atomic_write_text
+from importers.midi import cleanup_imported_midi_notes
 from exporters.adofai import (
     build_adofai_debug_rows,
     build_tile_preview_points,
@@ -171,6 +172,13 @@ class AdoFAIMixin:
             selected = self._valid_export_indices(selected_indices)
             all_notes = [n.normalized() for n in self.notes]
             selected_notes = [all_notes[i] for i in selected] if selected else all_notes
+            # Offsets follow what will actually be exported: active layers only.
+            muted = set(self.settings.get("mutedLayers") or ())
+            if muted:
+                active_all = [n for n in all_notes if (n.layer or "") not in muted]
+                active_selected = [n for n in selected_notes if (n.layer or "") not in muted]
+                all_notes = active_all or all_notes
+                selected_notes = active_selected or selected_notes
             full_offset = min((n.start for n in all_notes), default=0.0) * 1000.0
             selected_offset = min((n.start for n in selected_notes), default=0.0) * 1000.0
             auto_offset = selected_offset if selected_only and selected else full_offset
@@ -193,6 +201,7 @@ class AdoFAIMixin:
             "harmonyPolyMaxDenominator": 24,
             "harmonyPolyRatioOctaveMode": "octave-folded",
             "harmonyPolyCycleTiming": "pitch",
+            "mergeDuplicateNotes": True,
             "harmonyPolyLegatoMs": 50.0,
             "harmonyPolyMergeOctaves": True,
             "harmonyPolyBeatsPerCycle": 1.0,
@@ -240,7 +249,10 @@ class AdoFAIMixin:
             if selected_only and not selected:
                 # Never turn an explicitly selected-only export into a full export.
                 raise ValueError("選択ノートがありません")
+            muted = set(self.settings.get("mutedLayers") or ())
             source = [self.notes[i] for i in selected] if selected_only else list(self.notes)
+            # Switched-off layers are never exported.
+            source = [n for n in source if (n.layer or "") not in muted]
             semitones = int(self.settings.get("exportOctave", 0)) * 12 + int(self.settings.get("exportSemitone", 0))
             notes = [n.with_pitch_offset(semitones) for n in source]
             audio_path = self.audio_path
@@ -304,6 +316,12 @@ class AdoFAIMixin:
             "song_filename": Path(audio_path).name if use_song and audio_path else None,
             "song_offset_ms": float(song_offset_ms) if use_song else None,
         }
+        if bool(raw.get("mergeDuplicateNotes", True)):
+            # The same pitch on several active layers at once (a lead and its
+            # doubling layer) would generate that frequency twice.
+            notes, _cleanup = cleanup_imported_midi_notes(
+                notes, same_pitch_overlap_mode="merge", min_duration_seconds=0.0, min_velocity=0,
+            )
         if opts["method"] == "rabbit_zip":
             notes = _stabilize_rabbit_zip_cycle_boundaries(notes)
         cycle_timing = _choice(raw.get("harmonyPolyCycleTiming"), {"pitch", "beat", "manual"}, "pitch")

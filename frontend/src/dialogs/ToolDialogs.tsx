@@ -565,10 +565,9 @@ export function MidiTrackDialog({
 }: {
   fileName: string;
   tracks: MidiTrackSummary[];
-  onImport(trackIndices: number[], mergeDuplicates: boolean): void;
+  onImport(trackIndices: number[]): void;
   onClose(): void;
 }) {
-  const [mergeDuplicates, setMergeDuplicates] = useState(true);
   // Drum-like tracks start unchecked: their note numbers are drum sounds,
   // not pitches, so they would add bogus notes and chords.
   const [checked, setChecked] = useState<Set<number>>(
@@ -613,14 +612,9 @@ export function MidiTrackDialog({
             </label>
           ))}
         </div>
-        <label className="inline-check">
-          <input
-            type="checkbox"
-            checked={mergeDuplicates}
-            onChange={(e) => setMergeDuplicates(e.target.checked)}
-          />
-          別のトラックで同じ音が同時に鳴っているところは1つのノートにまとめる
-        </label>
+        <div className="info-card">
+          各トラックはレイヤーとして読み込まれます。読み込んだあとも、インスペクタのレイヤー一覧で使うレイヤーを切り替えられます。
+        </div>
         <div className="midi-track-actions">
           <button type="button" onClick={() => setChecked(new Set(tracks.map((t) => t.index)))}>
             すべて選択
@@ -638,7 +632,7 @@ export function MidiTrackDialog({
         <button
           className="primary"
           disabled={chosen.length === 0}
-          onClick={() => onImport(chosen.map((t) => t.index), mergeDuplicates)}
+          onClick={() => onImport(chosen.map((t) => t.index))}
         >
           読み込む
         </button>

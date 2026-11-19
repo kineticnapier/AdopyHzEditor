@@ -407,6 +407,15 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
             return _clamp(value, -600000.0, 600000.0)
         if key == "snapDiv":
             return _int_clamp(value, 1, 64)
+        if key == "mutedLayers":
+            if not isinstance(value, (list, tuple)):
+                raise ValueError("mutedLayers must be a list of layer names")
+            names: list[str] = []
+            for item in value:
+                name = "" if item is None else str(item)
+                if name not in names:
+                    names.append(name)
+            return names[:1024]
         if key == "contrast":
             return _int_clamp(value, 0, 300)
         if key == "gamma":
@@ -521,8 +530,12 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
             # must not mark an otherwise clean project as modified.
             if not any(self.settings[key] != value for key, value in normalized.items()):
                 return dict(self.settings)
+            layers_changed = "mutedLayers" in normalized and normalized["mutedLayers"] != self.settings.get("mutedLayers")
             self.settings.update(normalized)
-            self._apply_player_settings()
+            if layers_changed:
+                self._sync_notes_to_player()
+            else:
+                self._apply_player_settings()
             self._dirty = True
             return dict(self.settings)
 
