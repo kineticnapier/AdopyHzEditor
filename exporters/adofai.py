@@ -1415,13 +1415,21 @@ def curve_phase_samples(
         all_phases: list[float] = [0.0]
         total = 0.0
         for seg in n.segments:
+            base_t = seg.start - n.start
+            if not seg.is_curve:
+                # Fixed pitch: phase is exactly linear, so one sample at the
+                # segment end is exact (and avoids thousands of freq_at calls).
+                seg_total = float(seg.freq) * seg.duration
+                all_times.append(max(all_times[-1], base_t + seg.duration))
+                all_phases.append(total + seg_total)
+                total += seg_total
+                continue
             seg_times, seg_phases, seg_total = curve_phase_samples(
                 seg,
                 samples_per_second=samples_per_second,
-                min_samples=min_samples if seg.is_curve else 1,
+                min_samples=min_samples,
                 max_samples=max_samples,
             )
-            base_t = seg.start - n.start
             for t, p in zip(seg_times[1:], seg_phases[1:]):
                 # Clamp so a tiny overlap inside the tolerance keeps time monotonic.
                 all_times.append(max(all_times[-1], base_t + t))
@@ -2791,6 +2799,13 @@ def build_harmony_ratio_polyrhythm_pattern(
 _AUTO_CYCLE_PREVIEW_CYCLES = 12
 _AUTO_CYCLE_SEARCH_STEP = 5.0
 _AUTO_CYCLE_NEAR_RADIUS = 0.25
+# The overlap search simulates the path for every candidate angle, so its cost
+# grows with tiles x candidates (and candidates grow with tiles too).  Chords
+# taken from overlapping notes can have hundreds of hits per cycle, which made
+# a single shape take minutes.  Above this many tiles per cycle the path is a
+# dense scribble at any angle, so the search is skipped.  Every preset chord
+# (largest: minor triad, 28 tiles) stays below the limit.
+_AUTO_CYCLE_SEARCH_MAX_TILES = 32
 
 
 def _ratio_path_near_overlaps(
@@ -2800,8 +2815,13 @@ def _ratio_path_near_overlaps(
     cycles: int,
     twirl_each_cycle: bool,
     radius: float = _AUTO_CYCLE_NEAR_RADIUS,
+    stop_at: int | None = None,
 ) -> int:
-    """Count non-adjacent tile pairs closer than radius for a repeated cycle."""
+    """Count non-adjacent tile pairs closer than radius for a repeated cycle.
+
+    With ``stop_at``, counting stops once that many pairs are found; callers use
+    it when any count at or above the limit is already known to lose.
+    """
     heading = 0.0
     x = y = 0.0
     twirled = False
@@ -2828,11 +2848,13 @@ def _ratio_path_near_overlaps(
                         qx, qy = points[j]
                         if (px - qx) ** 2 + (py - qy) ** 2 < r2:
                             overlaps += 1
+                            if stop_at is not None and overlaps >= stop_at:
+                                return overlaps
         cells.setdefault((cx, cy), []).append(i)
     return overlaps
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=1024)
 def _harmony_poly_auto_cycle_angle(gaps: tuple[float, ...], twirl_each_cycle: bool) -> float:
     """
     Choose the emitted angle per cycle for a ratio-polyrhythm grid.
@@ -2848,22 +2870,35 @@ def _harmony_poly_auto_cycle_angle(gaps: tuple[float, ...], twirl_each_cycle: bo
     cap = 360.0 / max(EPS, widest)
     preferred = min(180.0 * tiles, cap)
 
-    def score(angle: float) -> int:
+    if tiles > _AUTO_CYCLE_SEARCH_MAX_TILES:
+        return preferred
+
+    def score(angle: float, stop_at: int | None = None) -> int:
         return _ratio_path_near_overlaps(
             gaps, angle, cycles=_AUTO_CYCLE_PREVIEW_CYCLES, twirl_each_cycle=twirl_each_cycle,
+            stop_at=stop_at,
         )
 
-    if score(preferred) == 0:
+    if score(preferred, stop_at=1) == 0:
         return preferred
-    narrowest = min(gaps) if gaps else 1.0
-    best_key: tuple[float, float, float] | None = None
-    best = preferred
+    # Same 5 degree grid as always.  The winner is the fewest overlaps, then
+    # the widest angle (wider minimum tile angle), so scanning from the widest
+    # angle down and keeping only strict improvements picks the same angle.
+    # That order lets a zero-overlap angle end the scan, and lets each score
+    # stop as soon as it can no longer beat the best so far.
+    candidates: list[float] = []
     angle = 180.0
     while angle <= cap + 1e-9:
-        key = (float(score(angle)), -narrowest * angle, abs(angle - preferred))
-        if best_key is None or key < best_key:
-            best_key, best = key, angle
+        candidates.append(angle)
         angle += _AUTO_CYCLE_SEARCH_STEP
+    best = preferred
+    best_score: int | None = None
+    for angle in reversed(candidates):
+        value = score(angle, stop_at=best_score)
+        if best_score is None or value < best_score:
+            best_score, best = value, angle
+            if value == 0:
+                break
     return best
 
 

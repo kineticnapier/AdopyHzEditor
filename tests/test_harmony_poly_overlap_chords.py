@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
 import unittest
 
 from core.note_model import Note
+from exporters import adofai
 from exporters.adofai import (
     _harmony_poly_overlap_units,
     build_adofai_level,
@@ -113,6 +115,74 @@ class OverlapChordPolyrhythmTests(unittest.TestCase):
         self.assertAlmostEqual(level["settings"]["bpm"], round(first_bpm, 6))
         speeds = [a["beatsPerMinute"] for a in level["actions"] if a["eventType"] == "SetSpeed"]
         self.assertTrue(any(abs(s - second_bpm) < 1e-6 for s in speeds))
+
+
+def _brute_force_auto_angle(gaps: tuple[float, ...], twirl: bool) -> float:
+    """The original exhaustive search, kept as a reference."""
+    tiles = len(gaps)
+    cap = 360.0 / max(gaps)
+    preferred = min(180.0 * tiles, cap)
+
+    def score(angle: float) -> int:
+        return adofai._ratio_path_near_overlaps(
+            gaps, angle, cycles=adofai._AUTO_CYCLE_PREVIEW_CYCLES, twirl_each_cycle=twirl,
+        )
+
+    if score(preferred) == 0:
+        return preferred
+    narrowest = min(gaps)
+    best_key = None
+    best = preferred
+    angle = 180.0
+    while angle <= cap + 1e-9:
+        key = (float(score(angle)), -narrowest * angle, abs(angle - preferred))
+        if best_key is None or key < best_key:
+            best_key, best = key, angle
+        angle += adofai._AUTO_CYCLE_SEARCH_STEP
+    return best
+
+
+class AutoCycleSearchPerformanceTests(unittest.TestCase):
+    def _gaps(self, specs) -> tuple[float, ...]:
+        pattern = adofai.build_harmony_ratio_polyrhythm_pattern(specs)
+        return tuple(float(g) for g in pattern["position_gaps"] if float(g) > 0)
+
+    def test_early_exit_search_matches_the_exhaustive_search(self):
+        presets = ("fifth +7", "major triad", "minor triad", "sus4", "dominant 7")
+        shapes = [adofai.build_harmony_voice_specs(p, harmony_tuning="just intonation") for p in presets]
+        shapes += [adofai._overlap_voice_specs(m) for m in ([60, 64], [60, 65], [60, 63], [60, 69])]
+        for specs in shapes:
+            gaps = self._gaps(specs)
+            self.assertLessEqual(len(gaps), adofai._AUTO_CYCLE_SEARCH_MAX_TILES)
+            for twirl in (False, True):
+                with self.subTest(tiles=len(gaps), twirl=twirl):
+                    adofai._harmony_poly_auto_cycle_angle.cache_clear()
+                    self.assertEqual(
+                        adofai._harmony_poly_auto_cycle_angle(gaps, twirl),
+                        _brute_force_auto_angle(gaps, twirl),
+                    )
+
+    def test_dense_grid_skips_the_search(self):
+        # A 9-note cluster gives hundreds of hits per cycle; the exhaustive
+        # search over it took minutes.
+        gaps = self._gaps(adofai._overlap_voice_specs([60, 61, 62, 63, 64, 65, 66, 67, 68]))
+        self.assertGreater(len(gaps), adofai._AUTO_CYCLE_SEARCH_MAX_TILES)
+        adofai._harmony_poly_auto_cycle_angle.cache_clear()
+        started = time.perf_counter()
+        angle = adofai._harmony_poly_auto_cycle_angle(gaps, True)
+        self.assertLess(time.perf_counter() - started, 0.5)
+        self.assertAlmostEqual(angle, min(180.0 * len(gaps), 360.0 / max(gaps)))
+
+    def test_dense_overlapping_chords_export_quickly(self):
+        notes = []
+        for k in range(8):
+            start = k * 4 * CYCLE
+            notes += _chord(start, start + 4 * CYCLE, *[60 + k + i for i in range(7)])
+        adofai._harmony_poly_auto_cycle_angle.cache_clear()
+        started = time.perf_counter()
+        _events_list, _dup, _specs, stats = _events(notes, cycle_mode="auto")
+        self.assertLess(time.perf_counter() - started, 10.0)
+        self.assertEqual(stats["chord_source"], "overlap")
 
 
 class OverlapChordBridgeOptionTests(unittest.TestCase):
