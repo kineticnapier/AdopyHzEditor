@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 import unittest
 
@@ -328,9 +329,11 @@ class ChordCleanupTests(unittest.TestCase):
         trimmed = adofai._trim_legato_overlaps([glide, Note(0.5, 1.0, 71.0)], 0.05)
         self.assertAlmostEqual(trimmed[0].end, 0.53)
 
-    def test_octave_doublings_fold_into_the_lower_voice(self):
+    def test_octave_doublings_fold_into_the_higher_voice(self):
+        # A3, A4, A5 and E5: the A's fold into A5 so the melody keeps its pitch.
+        self.assertEqual(adofai._overlap_chord_voices([57.0, 69.0, 81.0, 76.0], merge_octaves=True), [76.0, 81.0])
         doubled = adofai._overlap_voice_specs([57.0, 69.0, 81.0, 76.0], merge_octaves=True)
-        self.assertEqual([round(s["ratio"], 9) for s in doubled], [1.0, 3.0])  # A3 + E5 (3/1)
+        self.assertEqual([round(s["ratio"], 9) for s in doubled], [1.0, round(4 / 3, 9)])  # E5 + A5
         kept = adofai._overlap_voice_specs([57.0, 69.0, 81.0, 76.0], merge_octaves=False)
         self.assertEqual(len(kept), 4)
 
@@ -371,6 +374,53 @@ class ChordLimitTests(unittest.TestCase):
         )
         self.assertEqual(stats["ratio_text"].count(":") + 1, 3)
         self.assertLessEqual(stats["common_root_cycles"], 12)
+
+
+class PitchCycleCutTests(unittest.TestCase):
+    """Pitch timing must follow the melody even when a low bass makes long cycles."""
+
+    def _events(self, notes, **kwargs):
+        return build_harmony_ratio_polyrhythm_events(
+            notes, harmony_mode="off", play_bpm=BPM, harmony_poly_chord_source="overlap",
+            harmony_poly_pitch_timing=True, **kwargs,
+        )
+
+    def test_melody_note_inside_a_long_cycle_sounds_at_its_own_pitch(self):
+        # A1 bass (55 Hz) under E5 then F5; a 5-voice grid would span many
+        # bass periods, but the F5 must start when it starts.
+        bass = Note(0.0, 0.4, 33.0)
+        melody = [Note(0.0, 0.2, 76.0), Note(0.2, 0.4, 77.0)]
+        events, *_ = self._events([bass, *melody], harmony_poly_max_root_cycles=0)
+        f5 = 440.0 * 2 ** ((77 - 69) / 12)
+        top_hits = sorted(
+            e["time"] for e in events
+            if 0.2 <= e["time"] < 0.4 and str(e["poly_ratio_text"].count(":")) in str(e["poly_merged_voices"]).split(",")
+        )
+        self.assertAlmostEqual(top_hits[0], 0.2, places=6)  # starts exactly at the note
+        rate = (len(top_hits) - 1) / (top_hits[-1] - top_hits[0])
+        self.assertLess(abs(1200 * math.log2(rate / f5)), 30.0)
+        for cur, nxt in zip(events, events[1:]):
+            seconds = cur["poly_timing_rel_to_next"] * 60.0 / (180.0 * cur["poly_play_bpm"])
+            self.assertAlmostEqual(seconds, nxt["time"] - cur["time"], places=9)
+
+    def test_root_comes_from_kept_voices(self):
+        # C4 + C#4 needs 15 root periods; with a limit of 12 only C#4 stays,
+        # so the hits must run at C#4, not C4.
+        events, *_ = self._events([Note(0.0, 0.1, 60.0), Note(0.0, 0.1, 61.0)], harmony_poly_max_root_cycles=12)
+        gaps = {round(b["time"] - a["time"], 9) for a, b in zip(events, events[1:])}
+        self.assertEqual(gaps, {round(1 / (440.0 * 2 ** ((61 - 69) / 12)), 9)})
+
+    def test_phrase_end_tile_needs_no_extreme_speed(self):
+        # The note ends a hair after a hit; the closing tile used to last a
+        # few microseconds and need a multi-million BPM SetSpeed.
+        period = 1 / 440.0
+        notes = [Note(0.0, 10 * period + 2e-6, 69.0), Note(0.1, 0.2, 69.0)]
+        level, _stats = build_adofai_level(
+            notes, method="harmony", harmony_timing_mode="ratio-polyrhythm", harmony_mode="off",
+            harmony_poly_chord_source="overlap", harmony_poly_pitch_timing=True, harmony_poly_cycle_mode="fixed",
+        )
+        speeds = [a["beatsPerMinute"] for a in level["actions"] if a.get("eventType") == "SetSpeed"]
+        self.assertLess(max(speeds, default=0.0), 2 * 720.0 * 60.0 * 440.0 / 180.0)
 
 
 class OverlapChordBridgeOptionTests(unittest.TestCase):

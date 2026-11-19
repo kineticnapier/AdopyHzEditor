@@ -454,7 +454,7 @@ export default function AdoFAIExportDialogJa({
                         checked={options.harmonyPolyMergeOctaves ?? true}
                         onChange={(e) => patch("harmonyPolyMergeOctaves", e.target.checked)}
                       />
-                      1オクターブ上の重なりは下の音にまとめる
+                      オクターブ違いの重なりは高い方（メロディー側）にまとめる
                     </label>
                   </Field>
                 </>
