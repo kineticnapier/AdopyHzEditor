@@ -95,6 +95,20 @@ PROJECT_SETTING_FIELDS: tuple[tuple[str, str, type], ...] = (
 PROJECT_SETTING_ALIASES = {"note_octave": "previewOctave"}
 
 
+def _midi_tempo_bpm(result: Any) -> float | None:
+    """The MIDI file's starting tempo, or None when it has no tempo event."""
+    try:
+        if int(getattr(result, "explicit_tempo_event_count", 0)) <= 0:
+            return None
+        bpm = float(result.initial_bpm)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not (math.isfinite(bpm) and bpm > 0):
+        return None
+    # MIDI stores whole microseconds per beat, so 190 BPM reads as 190.000285.
+    return round(bpm, 3)
+
+
 class IOMixin:
     def _normalized_project_settings(self, data: dict[str, Any]) -> dict[str, Any]:
         settings = dict(DEFAULT_EDITOR_SETTINGS)
@@ -284,7 +298,7 @@ class IOMixin:
         path=self._dialog(webview.FileDialog.OPEN,file_types=MIDI_FILE_TYPES)
         if not path:return self.get_state()
         result = import_midi(path)
-        return self._apply_imported_midi_notes(result.notes)
+        return self._apply_imported_midi_notes(result.notes, _midi_tempo_bpm(result))
 
     def pick_midi_tracks_dialog(self) -> dict[str, Any]:
         """Choose a MIDI file and describe its tracks without importing yet.
@@ -328,9 +342,9 @@ class IOMixin:
                 return self._state_dict()
         result = import_midi(path, track_indices=indices)
         self._pending_midi_path = None
-        return self._apply_imported_midi_notes(result.notes)
+        return self._apply_imported_midi_notes(result.notes, _midi_tempo_bpm(result))
 
-    def _apply_imported_midi_notes(self, imported: list[Any]) -> dict[str, Any]:
+    def _apply_imported_midi_notes(self, imported: list[Any], tempo_bpm: float | None = None) -> dict[str, Any]:
         with self._lock:
             # An empty MIDI import must not create an Undo step, erase Redo,
             # or mark an otherwise unchanged project as modified.
@@ -361,6 +375,13 @@ class IOMixin:
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"MIDIから{len(prepared)}個のノートを読み込みました"
+            if tempo_bpm is not None:
+                # MIDI time 0 is the start of bar 1, so the grid offset is 0.
+                tempo = {"bpm": self._normalize_setting("bpm", tempo_bpm), "offsetMs": 0.0}
+                if any(self.settings.get(k) != v for k, v in tempo.items()):
+                    self.settings.update(tempo)
+                    self._apply_player_settings()
+                    self._status += f"（BPMを{tempo['bpm']:g}に設定）"
             return self._state_dict()
 
     def export_midi_dialog(self) -> dict[str, Any]:

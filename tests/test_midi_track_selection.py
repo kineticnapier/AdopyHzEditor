@@ -21,9 +21,17 @@ def _varlen(value: int) -> bytes:
     return bytes(reversed(out))
 
 
-def _track(name: str | None, notes: list[tuple[int, int, int, int]], channel: int = 0) -> bytes:
+def _track(
+    name: str | None,
+    notes: list[tuple[int, int, int, int]],
+    channel: int = 0,
+    bpm: float | None = None,
+) -> bytes:
     """notes: (start_tick, end_tick, pitch, velocity) on one channel."""
     events: list[tuple[int, bytes]] = []
+    if bpm is not None:
+        us = int(round(60_000_000 / bpm))
+        events.append((0, bytes([0xFF, 0x51, 0x03]) + us.to_bytes(3, "big")))
     if name is not None:
         encoded = name.encode("utf-8")
         events.append((0, b"\xff\x03" + _varlen(len(encoded)) + encoded))
@@ -125,6 +133,28 @@ class MidiTrackBridgeTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 self.bridge.import_midi_tracks(bad)
         self.assertEqual(self.bridge.notes, [])
+
+    def test_import_sets_project_bpm_from_midi_tempo(self):
+        path = Path(self.tmp.name) / "tempo.mid"
+        path.write_bytes(_midi_file([
+            _track(None, [], bpm=190.0),
+            _track("Lead", [(0, 480, 72, 100)], channel=0),
+        ]))
+        self.bridge.settings["offsetMs"] = 1234.0
+        with mock.patch.object(self.bridge, "_dialog", return_value=str(path)):
+            picked = self.bridge.pick_midi_tracks_dialog()
+        with mock.patch.object(self.bridge, "_sync_notes_to_player"):
+            state = self.bridge.import_midi_tracks([picked["tracks"][0]["index"]])
+        self.assertEqual(state["settings"]["bpm"], 190.0)
+        self.assertEqual(state["settings"]["offsetMs"], 0.0)
+        self.assertIn("BPM", state["status"])
+
+    def test_import_without_tempo_keeps_project_bpm(self):
+        self.bridge.settings["bpm"] = 150.0
+        picked = self._pick()  # setUp file has no tempo event
+        with mock.patch.object(self.bridge, "_sync_notes_to_player"):
+            state = self.bridge.import_midi_tracks([picked["tracks"][0]["index"]])
+        self.assertEqual(state["settings"]["bpm"], 150.0)
 
     def test_empty_selection_changes_nothing(self):
         self._pick()

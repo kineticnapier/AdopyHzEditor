@@ -3064,6 +3064,7 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_poly_cycle_mode: str = "fixed",
     harmony_poly_cycle_twirl: bool = False,
     harmony_poly_chord_source: str = "preset",
+    harmony_poly_grid_origin: float | None = None,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]], dict[str, Any]]:
     """
     Build Harmony events by repeating a Scratch-style ratio-derived grid.
@@ -3096,6 +3097,12 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_poly_cycle_twirl:
         the emitter will mirror every other cycle with a Twirl (auto mode on
         a raw path); the automatic angle is chosen for that geometry.
+
+    harmony_poly_grid_origin:
+        None restarts the cycle grid at every note (or overlap group).  A time
+        in seconds puts every cycle on one global grid from that origin, e.g.
+        the song's beat grid: hit positions before a note starts or after it
+        ends are skipped, so silence stays a rest.
     """
     del harmony_tuning, harmony_root_mode
     voice_specs = build_harmony_voice_specs(
@@ -3185,21 +3192,30 @@ def build_harmony_ratio_polyrhythm_events(
 
         note_events: list[dict[str, Any]] = []
         per_note_limit = max_tiles_per_note if int(max_tiles_per_note) > 0 else 10**12
-        cycle_index = 0
+        if harmony_poly_grid_origin is None:
+            grid_base = n0.start
+            cycle_index = 0
+        else:
+            # Global grid: start at the cycle that contains the note's start.
+            grid_base = float(harmony_poly_grid_origin)
+            cycle_index = int(math.floor((n0.start - grid_base) / cycle_seconds + 1e-9))
         seg_index = 0
         previous_shape: dict[str, Any] | None = None
         while True:
-            cycle_start = n0.start + cycle_index * cycle_seconds
+            cycle_start = grid_base + cycle_index * cycle_seconds
             if cycle_start >= n0.end - EPS:
                 break
+            # Where sound begins inside this cycle (later than the cycle start
+            # when the note starts mid-cycle on a global grid).
+            probe = max(cycle_start, n0.start)
 
             # A chord change takes effect at the next cycle boundary: the
-            # chord sounding when a cycle starts drives that whole cycle.
-            while seg_index + 1 < len(segments) and segments[seg_index][1] <= cycle_start + EPS:
+            # chord sounding when a cycle's sound begins drives that cycle.
+            while seg_index + 1 < len(segments) and segments[seg_index][1] <= probe + EPS:
                 seg_index += 1
             active = segments[seg_index][2]
             if use_overlap_chords:
-                midis = [float(n.midi_at(_harmony_poly_u(n, cycle_start))) for n in active]
+                midis = [float(n.midi_at(_harmony_poly_u(n, probe))) for n in active]
             else:
                 # Ratio-polyrhythm is meant for stable harmony shapes. For
                 # glides, use the start frequency so the rhythm stays readable.
@@ -3231,7 +3247,8 @@ def build_harmony_ratio_polyrhythm_events(
                     break
                 pos_float = float(merged.get("pos_float", 0.0))
                 raw_time = cycle_start + pos_float * cycle_seconds
-                if raw_time >= n0.end - EPS:
+                if raw_time >= n0.end - EPS or raw_time < n0.start - EPS:
+                    # No note sounds here: leave it as a rest.
                     continue
 
                 primary = dict(merged.get("primary") or {})
@@ -3389,6 +3406,7 @@ def build_harmony_ratio_polyrhythm_events(
         "chord_changes": int(chord_changes),
         "chord_sequence": " > ".join(chord_sequence),
         "chord_shapes": len(shapes),
+        "grid": "global" if harmony_poly_grid_origin is not None else "per_note",
     }
     return events, duplicate_hits_merged_total, voice_specs, pattern_stats
 
@@ -3852,6 +3870,7 @@ def build_adofai_level(
     harmony_poly_ratio_octave_mode: str = "octave-folded",
     harmony_poly_cycle_mode: str = "fixed",
     harmony_poly_chord_source: str = "preset",
+    harmony_poly_grid_origin_seconds: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
@@ -3930,6 +3949,13 @@ def build_adofai_level(
                 harmony_poly_ratio_octave_mode=harmony_poly_ratio_octave_mode,
                 harmony_poly_cycle_mode=harmony_poly_cycle_mode,
                 harmony_poly_chord_source=harmony_poly_chord_source,
+                # Notes were shifted so the first one starts at 0; shift the
+                # song-time grid origin the same way.
+                harmony_poly_grid_origin=(
+                    None
+                    if harmony_poly_grid_origin_seconds is None
+                    else float(harmony_poly_grid_origin_seconds) - first_note_offset
+                ),
                 harmony_poly_cycle_twirl=visual_path_key(visual_path_mode) == "raw",
             )
             # Auto cycle angle scales the global BPM to keep cycle durations.
@@ -4005,6 +4031,7 @@ def build_adofai_level(
             "harmony_poly_cycle_mode": str(harmony_ratio_pattern_stats.get("cycle_angle_mode", "")),
             "harmony_poly_chord_source": str(harmony_ratio_pattern_stats.get("chord_source", "")),
             "harmony_poly_chord_changes": int(harmony_ratio_pattern_stats.get("chord_changes", 0) or 0),
+            "harmony_poly_grid": str(harmony_ratio_pattern_stats.get("grid", "")),
             "harmony_poly_chord_sequence": str(harmony_ratio_pattern_stats.get("chord_sequence", "")),
             "harmony_poly_emitted_cycle_angle": float(harmony_ratio_pattern_stats.get("cycle_angle", 0.0) or 0.0),
             "harmony_poly_cycle_twirl": str(harmony_ratio_pattern_stats.get("cycle_twirl", "")),

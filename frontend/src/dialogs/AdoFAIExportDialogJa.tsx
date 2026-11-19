@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { beatSyncedOutputBpm } from "./beatSync";
 import type {
   AdoFAIDebugPreview,
   AdoFAIExportOptions,
@@ -35,6 +36,14 @@ type Props = {
   onStatus(text: string): void;
   onHelp(section?: string): void;
 };
+function formatBpm(bpm: number): string {
+  return Number.isFinite(bpm) ? `${Math.round(bpm * 1000) / 1000}` : "-";
+}
+function formatCycleSeconds(cycleAngle: number, bpm: number): string {
+  if (!(cycleAngle > 0) || !(bpm > 0)) return "-";
+  const seconds = (cycleAngle * 60) / (180 * bpm);
+  return `${seconds.toFixed(4)}秒`;
+}
 export default function AdoFAIExportDialogJa({
   api,
   selected,
@@ -252,7 +261,14 @@ export default function AdoFAIExportDialogJa({
     );
   const isHarmony = options.method === "harmony",
     isAngle = options.method === "angle_only",
-    isZip = options.method === "rabbit_zip";
+    isZip = options.method === "rabbit_zip",
+    isRatioPoly = options.harmonyTimingMode === "ratio-polyrhythm",
+    beatSync = options.harmonyPolyBeatSync ?? true,
+    syncedBpm = beatSyncedOutputBpm(
+      options.projectBpm,
+      options.harmonyPolyCycleAngle,
+      options.harmonyPolyBeatsPerCycle ?? 1,
+    );
   return (
     <Modal
       title="ADOFAI出力"
@@ -279,18 +295,31 @@ export default function AdoFAIExportDialogJa({
             }
           />
         </Field>
-        {!isAngle && (
-          <Field label="基準BPM">
+        {isHarmony && isRatioPoly && (
+          <Field label="拍に合わせる" group>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={beatSync}
+                onChange={(e) => patch("harmonyPolyBeatSync", e.target.checked)}
+              />
+              曲のBPM（{formatBpm(options.projectBpm)}）の拍に周期をそろえる
+            </label>
+          </Field>
+        )}
+        {isHarmony && isRatioPoly && beatSync && (
+          <Field label="1周期の拍数">
             <Num
-              value={options.baseBpm}
-              min={1}
-              max={999999}
+              value={options.harmonyPolyBeatsPerCycle ?? 1}
+              min={1 / 64}
+              max={64}
               step="any"
-              onChange={(v) => patch("baseBpm", v)}
+              suffix="拍"
+              onChange={(v) => patch("harmonyPolyBeatsPerCycle", v)}
             />
           </Field>
         )}
-        {isAngle && (
+        {(isAngle || isHarmony) && !(isRatioPoly && beatSync) && (
           <Field label="出力BPM">
             <Num
               value={options.angleOnlyBpm}
@@ -300,6 +329,13 @@ export default function AdoFAIExportDialogJa({
               onChange={(v) => patch("angleOnlyBpm", v)}
             />
           </Field>
+        )}
+        {isHarmony && isRatioPoly && (
+          <div className="info-card">
+            {beatSync
+              ? `出力BPM = ${formatBpm(syncedBpm)}（自動）、1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, syncedBpm)}。周期は曲の拍の位置から始まり、音符のないところは休みになります。`
+              : `1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, options.angleOnlyBpm)}（周期角 ÷ (3 × 出力BPM)）。`}
+          </div>
         )}
         {isHarmony && (
           <>

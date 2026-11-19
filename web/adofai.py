@@ -153,6 +153,11 @@ def _stabilize_rabbit_zip_cycle_boundaries(notes: list[Any]) -> list[Any]:
     return stabilized
 
 
+def beat_synced_output_bpm(song_bpm: float, cycle_angle: float, beats_per_cycle: float) -> float:
+    """Output BPM that makes one ratio-polyrhythm cycle last beats_per_cycle song beats."""
+    return float(cycle_angle) * float(song_bpm) / (180.0 * max(1e-9, float(beats_per_cycle)))
+
+
 class AdoFAIMixin:
     """Advanced ADOFAI export and help APIs used by the web UI."""
 
@@ -173,7 +178,6 @@ class AdoFAIMixin:
             has_song = bool(self.audio_path)
         return {
             "method": "rabbit_zip",
-            "baseBpm": bpm,
             "angleOnlyBpm": max(1000.0, bpm * 10.0),
             "harmonyMode": "fifth +7",
             "harmonyCustomSemitone": 7.0,
@@ -188,6 +192,9 @@ class AdoFAIMixin:
             "harmonyPolyChordSource": "overlap",
             "harmonyPolyMaxDenominator": 24,
             "harmonyPolyRatioOctaveMode": "octave-folded",
+            "harmonyPolyBeatSync": True,
+            "harmonyPolyBeatsPerCycle": 1.0,
+            "projectBpm": bpm,
             "xMode": "floor",
             "fixedX": 8.0,
             "targetBpm": max(1000.0, bpm * 10.0),
@@ -236,6 +243,7 @@ class AdoFAIMixin:
             notes = [n.with_pitch_offset(semitones) for n in source]
             audio_path = self.audio_path
             default_bpm = float(self.settings.get("bpm", 175.0))
+            grid_offset_seconds = float(self.settings.get("offsetMs", 0.0)) / 1000.0
 
         if not notes:
             raise ValueError("No notes to export")
@@ -248,7 +256,9 @@ class AdoFAIMixin:
 
         opts = {
             "method": _choice(raw.get("method"), {"rabbit_zip", "angle_only", "harmony"}, "rabbit_zip"),
-            "base_bpm": _as_float(raw.get("baseBpm"), default_bpm, 1.0, 999999.0),
+            # Angle Compression tile counts are freq x duration, so the base BPM
+            # cancels out; the dialog no longer asks for it.
+            "base_bpm": default_bpm,
             "angle_only_bpm": _as_float(raw.get("angleOnlyBpm"), max(1000.0, default_bpm * 10.0), 1.0, 999999.0),
             "harmony_mode": _choice(raw.get("harmonyMode"), {"off", "octave +12", "fifth +7", "major third +4", "minor third +3", "lower octave -12", "major triad", "minor triad", "sus4", "dominant 7", "custom"}, "fifth +7"),
             "harmony_custom_semitone": _as_float(raw.get("harmonyCustomSemitone"), 7.0, -48.0, 48.0),
@@ -264,6 +274,7 @@ class AdoFAIMixin:
             "harmony_poly_pseudo_angle": 30.0,
             "harmony_poly_max_denominator": _as_int(raw.get("harmonyPolyMaxDenominator"), 24, 1, 256),
             "harmony_poly_ratio_octave_mode": _choice(raw.get("harmonyPolyRatioOctaveMode"), {"octave-folded", "absolute"}, "octave-folded"),
+            "harmony_poly_grid_origin_seconds": None,
             "rabbit_x_mode": _choice(raw.get("xMode"), {"floor", "lowest_floor", "round", "ceil", "fixed", "target_bpm"}, "floor"),
             "rabbit_fixed_x": _as_float(raw.get("fixedX"), 8.0, 0.000001, 100000.0),
             "rabbit_target_bpm": _as_float(raw.get("targetBpm"), max(1000.0, default_bpm * 10.0), 1.0, 999999.0),
@@ -290,6 +301,19 @@ class AdoFAIMixin:
         }
         if opts["method"] == "rabbit_zip":
             notes = _stabilize_rabbit_zip_cycle_boundaries(notes)
+        if (
+            opts["method"] == "harmony"
+            and opts["harmony_timing_mode"] == "ratio-polyrhythm"
+            and bool(raw.get("harmonyPolyBeatSync", True))
+        ):
+            # Beat sync: one cycle lasts a whole number of song beats and every
+            # cycle sits on the project's beat grid (BPM + offset).  The output
+            # BPM follows from that: cycle seconds = cycle angle / (3 x BPM).
+            beats_per_cycle = _as_float(raw.get("harmonyPolyBeatsPerCycle"), 1.0, 1.0 / 64.0, 64.0)
+            opts["angle_only_bpm"] = beat_synced_output_bpm(
+                default_bpm, opts["harmony_poly_cycle_angle"], beats_per_cycle
+            )
+            opts["harmony_poly_grid_origin_seconds"] = grid_offset_seconds
 
         workflow = {
             "copySong": copy_song,

@@ -144,7 +144,6 @@ test("ADOFAI export accepts fractional values for every Python float option", ()
   const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const backend = readFileSync(new URL("../../web/adofai.py", import.meta.url), "utf8");
   const continuous = [
-    "baseBpm",
     "angleOnlyBpm",
     "harmonyCustomSemitone",
     "targetBpm",

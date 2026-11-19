@@ -185,6 +185,48 @@ class AutoCycleSearchPerformanceTests(unittest.TestCase):
         self.assertEqual(stats["chord_source"], "overlap")
 
 
+class BeatGridTests(unittest.TestCase):
+    """harmony_poly_grid_origin puts cycles on one global grid with rests."""
+
+    def test_cycles_sit_on_the_global_grid_and_silence_is_a_rest(self):
+        # Notes start half a cycle in and leave a one-cycle silent gap.
+        notes = [Note(0.5 * CYCLE, 2.0 * CYCLE, 60.0), Note(3.0 * CYCLE, 4.25 * CYCLE, 60.0)]
+        events, *_ = build_harmony_ratio_polyrhythm_events(
+            notes, harmony_mode="fifth +7", play_bpm=BPM, harmony_poly_grid_origin=0.0,
+        )
+        positions = {0.0, 1 / 3, 0.5, 2 / 3}  # fifth 2:3 grid
+        for e in events:
+            cycle_pos = e["time"] / CYCLE - e["poly_cycle_index"]
+            self.assertTrue(any(abs(cycle_pos - p) < 1e-9 for p in positions), e["time"])
+            # Only inside a sounding note.
+            self.assertTrue(any(n.start - 1e-9 <= e["time"] < n.end - 1e-9 for n in notes), e["time"])
+        times = [round(e["time"] / CYCLE, 6) for e in events]
+        self.assertEqual(times[0], 0.5)  # first grid hit inside the first note
+        self.assertFalse([t for t in times if 2.0 <= t < 3.0])  # the gap is a rest
+        self.assertIn(3.0, times)
+
+    def test_per_note_grid_is_unchanged_without_origin(self):
+        notes = [Note(0.5 * CYCLE, 2.0 * CYCLE, 60.0)]
+        events, *_ = build_harmony_ratio_polyrhythm_events(notes, harmony_mode="fifth +7", play_bpm=BPM)
+        self.assertAlmostEqual(events[0]["time"], 0.5 * CYCLE)
+        self.assertEqual(events[0]["poly_cycle_index"], 0)
+
+    def test_level_shifts_the_song_time_origin_with_the_first_note(self):
+        notes = [Note(10.0 + 0.5 * CYCLE, 10.0 + 2.0 * CYCLE, 60.0)]
+        level, stats = build_adofai_level(
+            notes,
+            method="harmony",
+            harmony_timing_mode="ratio-polyrhythm",
+            harmony_mode="fifth +7",
+            angle_only_bpm=BPM,
+            harmony_poly_cycle_mode="fixed",
+            harmony_poly_grid_origin_seconds=10.0,
+        )
+        self.assertEqual(stats["harmony_poly_grid"], "global")
+        # Grid hits at cycle positions 0.5, 2/3, 1, 4/3, 1.5, 5/3 -> 6 tiles.
+        self.assertEqual(stats["tiles_total"], 6)
+
+
 class OverlapChordBridgeOptionTests(unittest.TestCase):
     def test_web_defaults_to_overlap_chords(self):
         bridge = Bridge()
@@ -194,6 +236,24 @@ class OverlapChordBridgeOptionTests(unittest.TestCase):
         self.assertEqual(options["harmony_poly_chord_source"], "overlap")
         _, options, _ = bridge._prepare_adofai_export({"method": "harmony", "harmonyPolyChordSource": "preset"}, None)
         self.assertEqual(options["harmony_poly_chord_source"], "preset")
+
+    def test_beat_sync_derives_output_bpm_and_grid_from_project(self):
+        bridge = Bridge()
+        bridge.notes = [Note(0.0, 0.5, 60.0).normalized()]
+        bridge.settings["bpm"] = 190.0
+        bridge.settings["offsetMs"] = 250.0
+        base = {"method": "harmony", "harmonyTimingMode": "ratio-polyrhythm", "harmonyPolyCycleAngle": 720.0}
+        self.assertTrue(bridge.get_adofai_export_defaults()["harmonyPolyBeatSync"])
+        _, options, _ = bridge._prepare_adofai_export(base, None)
+        self.assertAlmostEqual(options["angle_only_bpm"], 760.0)  # one cycle = one beat
+        self.assertAlmostEqual(options["harmony_poly_grid_origin_seconds"], 0.25)
+        _, options, _ = bridge._prepare_adofai_export({**base, "harmonyPolyBeatsPerCycle": 0.5}, None)
+        self.assertAlmostEqual(options["angle_only_bpm"], 1520.0)
+        _, options, _ = bridge._prepare_adofai_export(
+            {**base, "harmonyPolyBeatSync": False, "angleOnlyBpm": 1234.0}, None,
+        )
+        self.assertAlmostEqual(options["angle_only_bpm"], 1234.0)
+        self.assertIsNone(options["harmony_poly_grid_origin_seconds"])
 
 
 if __name__ == "__main__":
