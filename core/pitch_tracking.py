@@ -103,8 +103,9 @@ class PitchTrackingSettings:
     # one 15 dB louder has full confidence.
     cycle_floor_db: float = -30.0
     # cycle method: pitch bend (second difference between neighbouring cycles)
-    # at which confidence falls to 1/e; larger means a stray crossing.
-    cycle_bend_cents: float = 300.0
+    # at which confidence falls to 1/e.  Zaag bends move several hundred
+    # cents per cycle, so only jumps far beyond that are distrusted.
+    cycle_bend_cents: float = 900.0
 
 
 @dataclass
@@ -875,6 +876,100 @@ def _spectral_frames(
     return times, out_hz, out_strength, out_conf, out_flags, out_window, frame_components, stats
 
 
+def _crossing_positions(x: np.ndarray, index: np.ndarray) -> np.ndarray:
+    """Sub-sample positions of the rising zero crossings after ``index``."""
+    if not index.size:
+        return np.zeros(0)
+    return index + (-x[index] / (x[index + 1] - x[index]))
+
+
+def _cycle_shape(x: np.ndarray, a: float, b: float, points: int = 48) -> np.ndarray:
+    """One cycle resampled to ``points`` samples, zero mean, unit norm."""
+    at = a + (b - a) * np.arange(points) / points
+    shape = np.interp(at, np.arange(x.size, dtype=np.float64), x)
+    shape -= shape.mean()
+    norm = float(np.linalg.norm(shape))
+    return shape / norm if norm > 0 else shape
+
+
+def _repair_stray_crossings(x: np.ndarray, positions: np.ndarray, ups: np.ndarray) -> np.ndarray:
+    """Fix the two classic period errors, judged against both neighbours.
+
+    An extra crossing (a strong harmonic dipping through zero) splits one
+    cycle into two short ones whose sum matches the neighbours: the middle
+    crossing is dropped.  A missed crossing (the swing stayed inside the
+    hysteresis band) makes one cycle about twice as long as both neighbours:
+    the plain zero crossing nearest its middle is put back.  Both neighbours
+    must agree.  A real jump up for two cycles has the same timing as an
+    extra crossing, so a merge also needs the merged cycle to look more like
+    its neighbour than the two short cycles do: real Zaag cycles keep their
+    shape, the halves of a split cycle do not.
+    """
+    pos = list(map(float, positions))
+    k = 1
+    while k + 2 < len(pos) - 1:
+        left = pos[k] - pos[k - 1]
+        a = pos[k + 1] - pos[k]
+        b = pos[k + 2] - pos[k + 1]
+        right = pos[k + 3] - pos[k + 2]
+        ref = 0.5 * (left + right)
+        if (
+            abs(left - right) <= 0.3 * ref
+            and max(a, b) < 0.75 * ref
+            and abs(a + b - ref) <= 0.25 * ref
+        ):
+            neighbour = _cycle_shape(x, pos[k - 1], pos[k])
+            merged = float(np.dot(_cycle_shape(x, pos[k], pos[k + 2]), neighbour))
+            split = max(
+                float(np.dot(_cycle_shape(x, pos[k], pos[k + 1]), neighbour)),
+                float(np.dot(_cycle_shape(x, pos[k + 1], pos[k + 2]), neighbour)),
+            )
+            if merged <= split:
+                k += 1
+                continue
+            del pos[k + 1]
+            continue
+        k += 1
+    out = [pos[0]] if pos else []
+    for k in range(1, len(pos)):
+        span = pos[k] - pos[k - 1]
+        before = pos[k - 1] - pos[k - 2] if k >= 2 else None
+        after = pos[k + 1] - pos[k] if k + 1 < len(pos) else None
+        refs = [r for r in (before, after) if r is not None]
+        if (
+            len(refs) == 2
+            and abs(refs[0] - refs[1]) <= 0.3 * (0.5 * sum(refs))
+            and abs(span - sum(refs)) <= 0.2 * sum(refs)
+        ):
+            middle = pos[k - 1] + 0.5 * span
+            inside = ups[(ups > pos[k - 1] + 0.3 * span) & (ups < pos[k - 1] + 0.7 * span)]
+            if inside.size:
+                nearest = inside[np.argmin(np.abs(inside - middle))]
+                out.append(float(_crossing_positions(x, np.array([nearest]))[0]))
+            else:
+                out.append(middle)
+        out.append(pos[k])
+    return np.asarray(out, dtype=np.float64)
+
+
+def _cycle_shape_confidence(x: np.ndarray, positions: np.ndarray, points: int = 48) -> np.ndarray:
+    """How much each cycle looks like a neighbouring cycle (0..1).
+
+    Cycles are resampled to the same length, so a pitch bend does not lower
+    the match; a stray half cycle or noise does.
+    """
+    n = max(0, positions.size - 1)
+    if n == 0:
+        return np.zeros(0)
+    shapes = np.array([_cycle_shape(x, positions[k], positions[k + 1], points) for k in range(n)])
+    match = np.zeros(n)
+    if n > 1:
+        pair = np.sum(shapes[:-1] * shapes[1:], axis=1)
+        match[:-1] = pair
+        match[1:] = np.maximum(match[1:], pair)
+    return np.clip((match - 0.3) / 0.5, 0.0, 1.0)
+
+
 def _cycle_frames(
     y: np.ndarray,
     sr: int,
@@ -884,18 +979,49 @@ def _cycle_frames(
 ):
     """Frame-wise pitch from the period of each cycle (``cycle`` method).
 
+    The low-pass must keep the fundamental above its harmonics.  ``max_hz``
+    is often set well above the kick (the panel default is 500 Hz), which
+    lets a strong 3rd harmonic add crossings, so a first pass finds the
+    typical pitch and a second pass low-passes at six times that: room for
+    bends of more than two octaves up.
+    """
+    margin = 3.0 / options.min_hz + 0.02
+    excerpt, first_sample = _excerpt(y, sr, start, end, margin)
+    wide = min(options.max_hz * 1.2, sr * 0.45)
+    result = _cycle_pass(excerpt, first_sample, sr, start, end, options, wide)
+    out_hz, out_conf = result[1], result[3]
+    confident = np.isfinite(out_hz) & (out_conf >= 0.5)
+    if np.any(confident):
+        narrow = max(6.0 * float(np.median(out_hz[confident])), 2.0 * options.min_hz)
+        if narrow < 0.8 * wide:
+            result = _cycle_pass(excerpt, first_sample, sr, start, end, options, narrow)
+            result[7]["lowPassHz"] = narrow
+            return result
+    result[7]["lowPassHz"] = wide
+    return result
+
+
+def _cycle_pass(
+    excerpt: np.ndarray,
+    first_sample: int,
+    sr: int,
+    start: float,
+    end: float,
+    options: PitchTrackingSettings,
+    low_pass: float,
+):
+    """One cycle-tracking pass over ``excerpt`` low-passed at ``low_pass`` Hz.
+
     Rising zero crossings of the band-limited signal are taken only when the
     signal swings past a hysteresis threshold on both sides, so noise near
     zero adds no crossings.  Each cycle gives one pitch at its midpoint; hop
     frames between two neighbouring cycles interpolate in log frequency.
-    Confidence comes from the cycle's level and from how well its pitch lines
-    up with its neighbours (a stray crossing bends sharply).
+    Confidence comes from the cycle's level, from how much its waveform
+    matches a neighbouring cycle (resampled to the same length, so a bend
+    keeps the match) and, loosely, from how sharply its pitch bends.
     """
     from scipy.signal import butter, sosfiltfilt
 
-    margin = 3.0 / options.min_hz + 0.02
-    excerpt, first_sample = _excerpt(y, sr, start, end, margin)
-    low_pass = min(options.max_hz * 1.2, sr * 0.45)
     x = sosfiltfilt(butter(4, low_pass, btype="low", fs=sr, output="sos"), excerpt)
     x = sosfiltfilt(butter(2, options.min_hz * 0.5, btype="high", fs=sr, output="sos"), x)
 
@@ -908,17 +1034,18 @@ def _cycle_frames(
     threshold = 0.3 * rms
     state = np.where(x > threshold, 1, np.where(x < -threshold, -1, 0))
     nonzero = np.flatnonzero(state)
-    crossings = np.zeros(0)
-    crossing_index = np.zeros(0, dtype=np.int64)
+    positions = np.zeros(0)
+    ups = np.zeros(0, dtype=np.int64)
     if nonzero.size >= 2:
         filled = state[nonzero]
         rises = nonzero[1:][(filled[:-1] == -1) & (filled[1:] == 1)]  # first sample above +threshold
         ups = np.flatnonzero((x[:-1] < 0.0) & (x[1:] >= 0.0))
         if ups.size and rises.size:
             pick = np.searchsorted(ups, rises - 1, side="right") - 1
-            crossing_index = np.unique(ups[pick[pick >= 0]])
-            frac = -x[crossing_index] / (x[crossing_index + 1] - x[crossing_index])
-            crossings = (first_sample + crossing_index + frac) / sr
+            positions = _crossing_positions(x, np.unique(ups[pick[pick >= 0]]))
+    positions = _repair_stray_crossings(x, positions, ups)
+    crossings = (first_sample + positions) / sr
+    crossing_index = np.floor(positions).astype(np.int64)
 
     hop = options.hop_seconds
     times = np.arange(start, end + 1e-9, hop)
@@ -944,6 +1071,7 @@ def _cycle_frames(
         level_db = 20.0 * np.log10(np.maximum(amp, 1e-30) / max(peak, 1e-30))
     level_conf = np.clip((level_db - options.cycle_floor_db) / 15.0, 0.0, 1.0)
 
+    shape_conf = _cycle_shape_confidence(x, positions)
     log_hz = np.log2(hz) * 1200.0
     n = hz.size
     bend = np.full(n, np.nan)
@@ -957,7 +1085,7 @@ def _cycle_frames(
         elif left is not None or right is not None:
             bend[k] = 0.5 * abs(log_hz[k] - (left if left is not None else right))
     bend_conf = np.where(np.isfinite(bend), np.exp(-((np.nan_to_num(bend) / options.cycle_bend_cents) ** 2)), 0.5)
-    cycle_conf = np.where(valid, level_conf * bend_conf, 0.0)
+    cycle_conf = np.where(valid, level_conf * shape_conf * bend_conf, 0.0)
     cycle_flags = np.zeros(n, dtype=np.int64)
     cycle_flags[level_db < options.cycle_floor_db] |= FLAG_LOW_ENERGY
     cycle_flags[np.nan_to_num(bend) > options.cycle_bend_cents] |= FLAG_PITCH_JUMP

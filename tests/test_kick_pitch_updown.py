@@ -101,10 +101,17 @@ class CycleMethodTests(unittest.TestCase):
         self.assertGreater(_coverage(body, 0.28), 0.85)
         self.assertLess(_median_error(body, freq), 5.0)
 
-    def test_noise_and_silence_have_no_confident_pitch(self):
+    def test_quiet_noise_between_kicks_and_silence_have_no_confident_pitch(self):
+        # Low-passed noise looks like a slow wave cycle by cycle, so the cycle
+        # method relies on the kick being the loudest low sound in the region:
+        # quieter noise between hits must not count.
         rng = np.random.default_rng(7)
-        noise = analyze_pitch_region(rng.standard_normal(int(0.3 * SR)), SR, 0.0, 0.3, self.settings())
-        self.assertLess(float(np.mean(noise.frames.confidence >= 0.5)), 0.2)
+        kick = _zaag(lambda t: np.full_like(t, 55.0), 0.2)
+        gap = 0.01 * rng.standard_normal(int(0.2 * SR))  # -40 dB
+        result = analyze_pitch_region(np.concatenate((kick, gap)), SR, 0.0, 0.4, self.settings())
+        times, confidence = result.frames.times, result.frames.confidence
+        self.assertGreater(float(np.mean(confidence[(times > 0.03) & (times < 0.17)] >= 0.5)), 0.9)
+        self.assertLess(float(np.mean(confidence[times > 0.23] >= 0.5)), 0.05)
         silence = analyze_pitch_region(np.zeros(int(0.2 * SR)), SR, 0.0, 0.2, self.settings())
         self.assertEqual(silence.candidates, [])
         self.assertTrue(np.all(silence.frames.flags & FLAG_NO_PITCH))

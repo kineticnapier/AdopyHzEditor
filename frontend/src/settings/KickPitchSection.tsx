@@ -117,8 +117,8 @@ export default function KickPitchSection({
       </label>
       {method === "cycle" && (
         <p className="inspector-help">
-          波形の1周期ごとに音高を測ります。上下する動きに強い一方、範囲内で他の低音が大きいと乱れます。
-          最高Hzを基本周波数の少し上まで下げると安定します。
+          波形の1周期ごとに音高を測ります。速く上下する動きも追えます。
+          キックが範囲内で一番大きい低音である必要があり、キックのない雑音だけの区間でも音高が出ることがあります。
         </p>
       )}
       <div className="track-actions">
