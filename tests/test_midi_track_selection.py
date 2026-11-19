@@ -149,6 +149,22 @@ class MidiTrackBridgeTests(unittest.TestCase):
         self.assertEqual(state["settings"]["offsetMs"], 0.0)
         self.assertIn("BPM", state["status"])
 
+    def test_same_pitch_on_two_layers_becomes_one_note(self):
+        path = Path(self.tmp.name) / "layers.mid"
+        path.write_bytes(_midi_file([
+            _track("Lead", [(0, 480, 72, 100), (480, 960, 74, 100)], channel=0),
+            _track("Layer", [(0, 480, 72, 90), (480, 720, 76, 90)], channel=1),
+        ]))
+        for merge, expected in ((True, [72.0, 74.0, 76.0]), (False, [72.0, 72.0, 74.0, 76.0])):
+            with self.subTest(merge=merge):
+                bridge = Bridge()
+                with mock.patch.object(bridge, "_dialog", return_value=str(path)):
+                    picked = bridge.pick_midi_tracks_dialog()
+                with mock.patch.object(bridge, "_sync_notes_to_player"):
+                    state = bridge.import_midi_tracks([t["index"] for t in picked["tracks"]], merge)
+                self.assertEqual(sorted(n.midi for n in bridge.notes), expected)
+                self.assertEqual("1個を1つにまとめました" in state["status"], merge)
+
     def test_import_without_tempo_keeps_project_bpm(self):
         self.bridge.settings["bpm"] = 150.0
         picked = self._pick()  # setUp file has no tempo event

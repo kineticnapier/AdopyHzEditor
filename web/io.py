@@ -9,7 +9,7 @@ import webview
 
 from exporters.adofai import build_adofai_level
 from exporters.midi import export_midi
-from importers.midi import import_midi
+from importers.midi import cleanup_imported_midi_notes, import_midi
 from core.note_model import Note
 from core.project_io import load_project, save_project
 
@@ -326,8 +326,12 @@ class IOMixin:
         ]
         return {"cancelled": False, "fileName": Path(path).name, "tracks": tracks}
 
-    def import_midi_tracks(self, track_indices: list[int]) -> dict[str, Any]:
-        """Import only the chosen tracks of the file picked by ``pick_midi_tracks_dialog``."""
+    def import_midi_tracks(self, track_indices: list[int], merge_duplicates: bool = True) -> dict[str, Any]:
+        """Import only the chosen tracks of the file picked by ``pick_midi_tracks_dialog``.
+
+        With ``merge_duplicates`` the same pitch sounding on several layers at
+        once (lead + a doubling layer) becomes one note covering both.
+        """
         path = getattr(self, "_pending_midi_path", None)
         if not path:
             raise ValueError("MIDIファイルが選択されていません")
@@ -342,7 +346,20 @@ class IOMixin:
                 return self._state_dict()
         result = import_midi(path, track_indices=indices)
         self._pending_midi_path = None
-        return self._apply_imported_midi_notes(result.notes, _midi_tempo_bpm(result))
+        notes = result.notes
+        merged = 0
+        if merge_duplicates:
+            # Only merge same-pitch overlaps; keep short and quiet notes.
+            notes, cleanup = cleanup_imported_midi_notes(
+                notes, same_pitch_overlap_mode="merge", min_duration_seconds=0.0, min_velocity=0,
+            )
+            merged = int(cleanup.merged_notes)
+        state = self._apply_imported_midi_notes(notes, _midi_tempo_bpm(result))
+        if merged:
+            with self._lock:
+                self._status += f"（重なった同じ音{merged}個を1つにまとめました）"
+                state["status"] = self._status
+        return state
 
     def _apply_imported_midi_notes(self, imported: list[Any], tempo_bpm: float | None = None) -> dict[str, Any]:
         with self._lock:

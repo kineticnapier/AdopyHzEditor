@@ -1568,9 +1568,9 @@ export default function App() {
           fileName={midiTrackPick.fileName}
           tracks={midiTrackPick.tracks}
           onClose={() => setMidiTrackPick(null)}
-          onImport={(indices) => {
+          onImport={(indices, mergeDuplicates) => {
             setMidiTrackPick(null);
-            void runStateAction(() => api.import_midi_tracks(indices), true);
+            void runStateAction(() => api.import_midi_tracks(indices, mergeDuplicates), true);
           }}
         />
       )}{" "}
