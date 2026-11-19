@@ -2972,6 +2972,66 @@ def _overlap_voice_specs(midis: list[float]) -> list[dict[str, Any]]:
     return specs
 
 
+def _harmony_poly_event_templates(shape: dict[str, Any], fallback_octave_mode: str) -> list[tuple[float, dict[str, Any], float, float, int]]:
+    """Per-position event fields that only depend on the chord shape.
+
+    Building these once per shape instead of once per hit keeps export time
+    proportional to the tile count with a small constant.  Each entry is
+    (position in cycle, fields, midi offset from root, freq factor from root,
+    duplicate hits merged at this position).
+    """
+    pattern = shape["pattern"]
+    specs = shape["specs"]
+    root_ratio = shape["root_ratio"]
+    shared = {
+        "root_factor": float(specs[0].get("root_factor", 1.0)) if specs else 1.0,
+        "poly_cluster_index": 0,
+        "poly_cycle_angle": shape["cycle_angle"],
+        "poly_pseudo_angle": 0.0,
+        "poly_ratio_text": str(pattern.get("ratio_text", "")),
+        "poly_fraction_text": str(pattern.get("fraction_text", "")),
+        "poly_actual_fraction_text": str(pattern.get("actual_fraction_text", "")),
+        "poly_ratio_octave_mode": str(pattern.get("ratio_octave_mode", fallback_octave_mode)),
+        "poly_root_cycles": max(1, int(pattern.get("common_root_cycles", 1))),
+        "poly_timing_source": "global_bpm",
+        "poly_scratch_merge": True,
+    }
+    templates: list[tuple[float, dict[str, Any], float, float, int]] = []
+    for merged in shape["positions"]:
+        pos_float = float(merged.get("pos_float", 0.0))
+        primary = dict(merged.get("primary") or {})
+        voice_index = int(primary.get("voice_index", 0))
+        if not (0 <= voice_index < len(specs)):
+            voice_index = 0
+        pattern_ratio = max(EPS, float(primary.get("pattern_ratio", primary.get("ratio", 1.0))) * root_ratio)
+        actual_ratio = max(EPS, float(primary.get("actual_ratio", primary.get("ratio", 1.0))) * root_ratio)
+        cluster_size = int(merged.get("cluster_size", 1))
+        fields = dict(shared)
+        fields.update({
+            "voice": int(primary.get("voice", 0)),
+            "interval": ratio_to_semitones(pattern_ratio),
+            "ratio": pattern_ratio,
+            "pattern_ratio": pattern_ratio,
+            "actual_ratio": actual_ratio,
+            "actual_interval": ratio_to_semitones(actual_ratio),
+            "voice_label": "+".join(str(x) for x in merged.get("labels", [])) or str(primary.get("label", "root")),
+            "tuning": str(specs[voice_index].get("tuning", "just intonation")) if specs else "",
+            "poly_pos": merged.get("pos", Fraction(0, 1)),
+            "poly_pos_float": pos_float,
+            "poly_cluster_size": cluster_size,
+            "poly_merged_voices": ",".join(str(x) for x in merged.get("voices", [])),
+            "poly_merged_labels": ",".join(str(x) for x in merged.get("labels", [])),
+        })
+        templates.append((
+            pos_float,
+            fields,
+            ratio_to_semitones(pattern_ratio / max(EPS, root_ratio)),
+            pattern_ratio / max(EPS, root_ratio),
+            max(0, cluster_size - 1),
+        ))
+    return templates
+
+
 def _harmony_poly_positions(pattern: dict[str, Any]) -> list[dict[str, Any]]:
     positions: list[dict[str, Any]] = list(pattern.get("merged_positions", []))
     if positions:
@@ -3170,6 +3230,7 @@ def build_harmony_ratio_polyrhythm_events(
                 "bpm": max(EPS, float(play_bpm)) * float(angle) / timing_cycle_angle,
                 "root_ratio": max(EPS, float(pat.get("root_ratio", 1.0))),
             }
+            shape["templates"] = _harmony_poly_event_templates(shape, harmony_poly_ratio_octave_mode)
             shapes[key] = shape
         return shape
 
@@ -3269,59 +3330,28 @@ def build_harmony_ratio_polyrhythm_events(
                 cycle_len = cycle_seconds
                 cycle_bpm = shape["bpm"]
 
-            for merged in shape["positions"]:
+            note_start_limit = n0.start - EPS
+            note_end_limit = n0.end - EPS
+            for pos_float, template, midi_offset, freq_factor, merged_hits in shape["templates"]:
                 if len(note_events) >= per_note_limit:
                     break
-                pos_float = float(merged.get("pos_float", 0.0))
                 raw_time = cycle_start + pos_float * cycle_len
-                if raw_time >= n0.end - EPS or raw_time < n0.start - EPS:
+                if raw_time >= note_end_limit or raw_time < note_start_limit:
                     # No note sounds here: leave it as a rest.
                     continue
+                duplicate_hits_merged_total += merged_hits
 
-                primary = dict(merged.get("primary") or {})
-                voice_index = int(primary.get("voice_index", 0))
-                if not (0 <= voice_index < len(shape_specs)):
-                    voice_index = 0
-                pattern_ratio = max(EPS, float(primary.get("pattern_ratio", primary.get("ratio", 1.0))) * shape_root_ratio)
-                actual_ratio = max(EPS, float(primary.get("actual_ratio", primary.get("ratio", 1.0))) * shape_root_ratio)
-                cluster_size = int(merged.get("cluster_size", 1))
-                duplicate_hits_merged_total += max(0, cluster_size - 1)
-
-                event = {
-                    "time": raw_time,
-                    "raw_time": raw_time,
-                    "midi": root_midi + ratio_to_semitones(pattern_ratio / max(EPS, shape_root_ratio)),
-                    "freq": root_freq * (pattern_ratio / max(EPS, shape_root_ratio)),
-                    "voice": int(primary.get("voice", 0)),
-                    "interval": ratio_to_semitones(pattern_ratio),
-                    "ratio": pattern_ratio,
-                    "pattern_ratio": pattern_ratio,
-                    "actual_ratio": actual_ratio,
-                    "actual_interval": ratio_to_semitones(actual_ratio),
-                    "voice_label": "+".join(str(x) for x in merged.get("labels", [])) or str(primary.get("label", "root")),
-                    "tuning": str(shape_specs[voice_index].get("tuning", "just intonation")) if shape_specs else "",
-                    "root_factor": float(shape_specs[0].get("root_factor", 1.0)) if shape_specs else 1.0,
-                    "note": n0,
-                    "note_id": note_id,
-                    "poly_cycle_index": cycle_index,
-                    "poly_pos": merged.get("pos", Fraction(0, 1)),
-                    "poly_pos_float": pos_float,
-                    "poly_cluster_index": 0,
-                    "poly_cluster_size": cluster_size,
-                    "poly_merged_voices": ",".join(str(x) for x in merged.get("voices", [])),
-                    "poly_merged_labels": ",".join(str(x) for x in merged.get("labels", [])),
-                    "poly_cycle_angle": shape_cycle_angle,
-                    "poly_play_bpm": cycle_bpm,
-                    "poly_pseudo_angle": 0.0,
-                    "poly_ratio_text": str(shape_pattern.get("ratio_text", "")),
-                    "poly_fraction_text": str(shape_pattern.get("fraction_text", "")),
-                    "poly_actual_fraction_text": str(shape_pattern.get("actual_fraction_text", "")),
-                    "poly_ratio_octave_mode": str(shape_pattern.get("ratio_octave_mode", harmony_poly_ratio_octave_mode)),
-                    "poly_root_cycles": max(1, int(shape_pattern.get("common_root_cycles", 1))),
-                    "poly_cycle_seconds": cycle_len,
-                    "poly_timing_source": "global_bpm",
-                    "poly_scratch_merge": True,
-                }
+                # Copy the per-shape fields, then set the per-hit ones.
+                event = dict(template)
+                event["time"] = raw_time
+                event["raw_time"] = raw_time
+                event["midi"] = root_midi + midi_offset
+                event["freq"] = root_freq * freq_factor
+                event["note"] = n0
+                event["note_id"] = note_id
+                event["poly_cycle_index"] = cycle_index
+                event["poly_play_bpm"] = cycle_bpm
+                event["poly_cycle_seconds"] = cycle_len
                 note_events.append(event)
             if len(note_events) >= per_note_limit:
                 break
@@ -3394,7 +3424,7 @@ def build_harmony_ratio_polyrhythm_events(
                 primary.setdefault("poly_global_midis", []).append(float(event.get("midi", 0.0)))
                 global_simultaneous_merged += 1
                 continue
-            event = dict(event)
+            # Events are built fresh above and not shared, so annotate in place.
             event["poly_global_cluster_size"] = 1
             event["poly_global_note_ids"] = {int(event.get("note_id", -1))}
             event["poly_global_voice_labels"] = [str(event.get("voice_label", ""))]
