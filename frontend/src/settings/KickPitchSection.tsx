@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { BackendApi, KickPitchPayload, NoteMutationResult } from "./bridge";
+import type { BackendApi, KickPitchMethod, KickPitchPayload, NoteMutationResult } from "./bridge";
 import type { TrackSelectionRange } from "../editor/trackSelection";
 import {
   candidateRoleLabel,
@@ -46,6 +46,7 @@ export default function KickPitchSection({
   );
   const [maxErrorCents, setMaxErrorCents] = useState(5);
   const [minConfidence, setMinConfidence] = useState(0.5);
+  const [method, setMethod] = useState<KickPitchMethod>("harmonic");
   const [running, setRunning] = useState(false);
   const invalid = validKickPitchRegion(region);
   const candidates = kickPitch?.available ? (kickPitch.candidates ?? []) : [];
@@ -73,6 +74,8 @@ export default function KickPitchSection({
         region.end,
         region.minHz,
         region.maxHz,
+        1,
+        method,
       );
       onKickPitch(payload.available ? payload : null, defaultKickPitchSelection(payload));
       if (payload.status) onStatus(payload.status);
@@ -105,6 +108,19 @@ export default function KickPitchSection({
         {field("minHz", "最低 Hz", 1)}
         {field("maxHz", "最高 Hz", 1)}
       </div>
+      <label className="kick-pitch-field kick-pitch-method">
+        <span>方式</span>
+        <select value={method} onChange={(event) => setMethod(event.target.value as KickPitchMethod)}>
+          <option value="harmonic">倍音解析（標準・音高が安定した音向け）</option>
+          <option value="cycle">1周期ごと（音高が上下するZaag向け）</option>
+        </select>
+      </label>
+      {method === "cycle" && (
+        <p className="inspector-help">
+          波形の1周期ごとに音高を測ります。上下する動きに強い一方、範囲内で他の低音が大きいと乱れます。
+          最高Hzを基本周波数の少し上まで下げると安定します。
+        </p>
+      )}
       <div className="track-actions">
         <button
           className="quiet-button"
