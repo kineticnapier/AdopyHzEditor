@@ -411,6 +411,31 @@ export default function AdoFAIExportDialogJa({
                 />
               </Field>
             )}
+            {options.harmonyTimingMode === "ratio-polyrhythm" &&
+              (options.harmonyPolyChordSource ?? "overlap") === "overlap" && (
+                <>
+                  <Field label="短い重なりを無視">
+                    <Num
+                      value={options.harmonyPolyLegatoMs ?? 50}
+                      min={0}
+                      max={1000}
+                      step="any"
+                      suffix=" ms"
+                      onChange={(v) => patch("harmonyPolyLegatoMs", v)}
+                    />
+                  </Field>
+                  <Field label="オクターブ重複" group>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={options.harmonyPolyMergeOctaves ?? true}
+                        onChange={(e) => patch("harmonyPolyMergeOctaves", e.target.checked)}
+                      />
+                      1オクターブ上の重なりは下の音にまとめる
+                    </label>
+                  </Field>
+                </>
+              )}
             <div className="info-card">
               {options.harmonyTimingMode === "ratio-polyrhythm"
                 ? (options.harmonyPolyChordSource ?? "overlap") === "overlap"

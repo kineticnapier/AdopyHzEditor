@@ -307,6 +307,47 @@ class PitchTimingTests(unittest.TestCase):
         self.assertAlmostEqual(level["settings"]["bpm"], 720.0 * 60.0 * 440.0 / 180.0, places=3)
 
 
+class ChordCleanupTests(unittest.TestCase):
+    """Legato tails and octave doublings should not create extra harmony."""
+
+    def test_short_legato_tail_is_trimmed_but_real_overlap_kept(self):
+        notes = [
+            Note(0.0, 0.53, 69.0),   # rings 30 ms into the next note
+            Note(0.5, 1.0, 71.0),
+            Note(1.0, 2.0, 72.0),    # held 300 ms under the next note: real overlap
+            Note(1.7, 2.2, 67.0),
+        ]
+        trimmed = adofai._trim_legato_overlaps(notes, 0.05)
+        self.assertAlmostEqual(trimmed[0].end, 0.5)
+        self.assertAlmostEqual(trimmed[2].end, 2.0)
+        self.assertEqual(len(adofai._trim_legato_overlaps(notes, 0.0)), 4)
+        self.assertAlmostEqual(adofai._trim_legato_overlaps(notes, 0.0)[0].end, 0.53)
+
+    def test_glides_are_not_trimmed(self):
+        glide = Note(0.0, 0.53, 69.0, kind="curve", midi_end=72.0)
+        trimmed = adofai._trim_legato_overlaps([glide, Note(0.5, 1.0, 71.0)], 0.05)
+        self.assertAlmostEqual(trimmed[0].end, 0.53)
+
+    def test_octave_doublings_fold_into_the_lower_voice(self):
+        doubled = adofai._overlap_voice_specs([57.0, 69.0, 81.0, 76.0], merge_octaves=True)
+        self.assertEqual([round(s["ratio"], 9) for s in doubled], [1.0, 3.0])  # A3 + E5 (3/1)
+        kept = adofai._overlap_voice_specs([57.0, 69.0, 81.0, 76.0], merge_octaves=False)
+        self.assertEqual(len(kept), 4)
+
+    def test_lead_with_octave_double_is_one_voice(self):
+        notes = [Note(0.0, 0.1, 69.0), Note(0.0, 0.1, 57.0)]
+        _events_list, _dup, _specs, merged = build_harmony_ratio_polyrhythm_events(
+            notes, harmony_mode="off", play_bpm=BPM, harmony_poly_chord_source="overlap",
+            harmony_poly_pitch_timing=True, harmony_poly_merge_octaves=True,
+        )
+        _events_list, _dup, _specs, plain = build_harmony_ratio_polyrhythm_events(
+            notes, harmony_mode="off", play_bpm=BPM, harmony_poly_chord_source="overlap",
+            harmony_poly_pitch_timing=True,
+        )
+        self.assertEqual(merged["ratio_text"], "1")
+        self.assertEqual(plain["ratio_text"], "1:2")
+
+
 class OverlapChordBridgeOptionTests(unittest.TestCase):
     def test_web_defaults_to_overlap_chords(self):
         bridge = Bridge()
@@ -316,6 +357,21 @@ class OverlapChordBridgeOptionTests(unittest.TestCase):
         self.assertEqual(options["harmony_poly_chord_source"], "overlap")
         _, options, _ = bridge._prepare_adofai_export({"method": "harmony", "harmonyPolyChordSource": "preset"}, None)
         self.assertEqual(options["harmony_poly_chord_source"], "preset")
+
+    def test_web_defaults_clean_up_chords(self):
+        bridge = Bridge()
+        bridge.notes = [Note(0.0, 0.5, 60.0).normalized()]
+        defaults = bridge.get_adofai_export_defaults()
+        self.assertEqual(defaults["harmonyPolyLegatoMs"], 50.0)
+        self.assertTrue(defaults["harmonyPolyMergeOctaves"])
+        _, options, _ = bridge._prepare_adofai_export({"method": "harmony"}, None)
+        self.assertEqual(options["harmony_poly_legato_ms"], 50.0)
+        self.assertTrue(options["harmony_poly_merge_octaves"])
+        _, options, _ = bridge._prepare_adofai_export(
+            {"method": "harmony", "harmonyPolyLegatoMs": 0, "harmonyPolyMergeOctaves": False}, None,
+        )
+        self.assertEqual(options["harmony_poly_legato_ms"], 0.0)
+        self.assertFalse(options["harmony_poly_merge_octaves"])
 
     def test_beat_sync_derives_output_bpm_and_grid_from_project(self):
         bridge = Bridge()

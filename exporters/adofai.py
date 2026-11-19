@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from fractions import Fraction
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import wraps
 import bisect
 import json
@@ -2950,8 +2950,13 @@ def just_ratio_for_semitones(semitones: float) -> float:
     return float(_JUST_RATIO_BY_SEMITONE[pitch_class]) * (2.0 ** octave)
 
 
-def _overlap_voice_specs(midis: list[float]) -> list[dict[str, Any]]:
-    """Voice specs for a chord of overlapping notes, rooted on the lowest one."""
+def _overlap_voice_specs(midis: list[float], *, merge_octaves: bool = False) -> list[dict[str, Any]]:
+    """Voice specs for a chord of overlapping notes, rooted on the lowest one.
+
+    Unisons always collapse into one voice.  With ``merge_octaves`` a voice
+    one or more octaves above a lower voice also collapses into it: doubled
+    octaves (lead + lead an octave up) add many hits but no new pitch class.
+    """
     root = min(midis)
     specs: list[dict[str, Any]] = []
     seen: set[float] = set()
@@ -2960,6 +2965,11 @@ def _overlap_voice_specs(midis: list[float]) -> list[dict[str, Any]]:
         ratio = just_ratio_for_semitones(semitones)
         key = round(ratio, 9)
         if key in seen:
+            continue
+        if merge_octaves and any(
+            abs(octaves - round(octaves)) < 1e-9
+            for octaves in (math.log2(ratio / float(spec["ratio"])) for spec in specs)
+        ):
             continue
         seen.add(key)
         specs.append({
@@ -3055,6 +3065,27 @@ def _harmony_poly_u(note: Note, t: float) -> float:
     return (min(max(t, note.start), note.end) - note.start) / note.duration
 
 
+def _trim_legato_overlaps(notes: list[Note], max_overlap_seconds: float) -> list[Note]:
+    """Cut a note's tail when another note starts at most max_overlap before it ends.
+
+    MIDI legato often lets one note ring a few milliseconds into the next.
+    Treated as harmony, that blip becomes a momentary two-note chord with its
+    own grid and speed change.  Glides are left alone so their shape stays.
+    """
+    if max_overlap_seconds <= 0:
+        return list(notes)
+    items = sorted((n.normalized() for n in notes if n.duration > EPS), key=lambda n: (n.start, n.end, n.midi))
+    starts = [n.start for n in items]
+    out: list[Note] = []
+    for n in items:
+        if not n.is_curve:
+            i = bisect.bisect_left(starts, max(n.start + EPS, n.end - max_overlap_seconds))
+            if i < len(starts) and starts[i] < n.end - EPS:
+                n = replace(n, end=starts[i])
+        out.append(n)
+    return out
+
+
 def _harmony_poly_overlap_units(
     notes: list[Note],
     *,
@@ -3126,6 +3157,8 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_poly_chord_source: str = "preset",
     harmony_poly_grid_origin: float | None = None,
     harmony_poly_pitch_timing: bool = False,
+    harmony_poly_legato_ms: float = 0.0,
+    harmony_poly_merge_octaves: bool = False,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]], dict[str, Any]]:
     """
     Build Harmony events by repeating a Scratch-style ratio-derived grid.
@@ -3172,6 +3205,10 @@ def build_harmony_ratio_polyrhythm_events(
         chord sounds at pitch (A#5 hits 932 times a second).  Ratios keep their
         octaves (no folding), each cycle runs at its own BPM, and the global
         grid origin is ignored because cycles follow the notes.
+
+    harmony_poly_legato_ms / harmony_poly_merge_octaves (overlap chords only):
+        ignore note tails that ring at most this long into the next note, and
+        fold octave doublings into the lower voice.
     """
     del harmony_tuning, harmony_root_mode
     voice_specs = build_harmony_voice_specs(
@@ -3237,7 +3274,9 @@ def build_harmony_ratio_polyrhythm_events(
     preset_shape = chord_shape(voice_specs)
     use_overlap_chords = _harmony_key(harmony_poly_chord_source) in ("overlap", "overlaps", "notes", "auto")
     if use_overlap_chords:
-        units = _harmony_poly_overlap_units(notes)
+        units = _harmony_poly_overlap_units(
+            _trim_legato_overlaps(notes, max(0.0, float(harmony_poly_legato_ms)) / 1000.0)
+        )
     else:
         units = []
         for note in notes:
@@ -3299,8 +3338,13 @@ def build_harmony_ratio_polyrhythm_events(
                 # Ratio-polyrhythm is meant for stable harmony shapes. For
                 # glides, use the start frequency so the rhythm stays readable.
                 midis = [float(n0.midi_at(0.0))]
-            if use_overlap_chords and len({round(m, 6) for m in midis}) > 1:
-                shape = chord_shape(_overlap_voice_specs(midis))
+            chord_specs = (
+                _overlap_voice_specs(midis, merge_octaves=bool(harmony_poly_merge_octaves))
+                if use_overlap_chords
+                else []
+            )
+            if len(chord_specs) > 1:
+                shape = chord_shape(chord_specs)
             else:
                 shape = preset_shape
             if first_shape is None:
@@ -3934,6 +3978,8 @@ def build_adofai_level(
     harmony_poly_chord_source: str = "preset",
     harmony_poly_grid_origin_seconds: float | None = None,
     harmony_poly_pitch_timing: bool = False,
+    harmony_poly_legato_ms: float = 0.0,
+    harmony_poly_merge_octaves: bool = False,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
@@ -4020,6 +4066,8 @@ def build_adofai_level(
                     else float(harmony_poly_grid_origin_seconds) - first_note_offset
                 ),
                 harmony_poly_pitch_timing=bool(harmony_poly_pitch_timing),
+                harmony_poly_legato_ms=float(harmony_poly_legato_ms),
+                harmony_poly_merge_octaves=bool(harmony_poly_merge_octaves),
                 harmony_poly_cycle_twirl=visual_path_key(visual_path_mode) == "raw",
             )
             # Auto cycle angle scales the global BPM to keep cycle durations.

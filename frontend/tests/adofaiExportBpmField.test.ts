@@ -42,3 +42,10 @@ test("beat-synced output BPM matches the backend formula", async () => {
   assert.equal(beatSyncedOutputBpm(190, 720, 0.5), 1520);
   assert.ok(Number.isNaN(beatSyncedOutputBpm(0, 720, 1)));
 });
+
+test("overlap chords expose legato and octave cleanup", () => {
+  assert.match(dialogSource, /patch\("harmonyPolyLegatoMs", v\)/);
+  assert.match(dialogSource, /patch\("harmonyPolyMergeOctaves", e\.target\.checked\)/);
+  assert.match(backendSource, /"harmonyPolyLegatoMs": 50\.0/);
+  assert.match(backendSource, /"harmonyPolyMergeOctaves": True/);
+});
