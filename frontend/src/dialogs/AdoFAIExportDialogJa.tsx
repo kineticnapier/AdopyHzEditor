@@ -765,24 +765,6 @@ export default function AdoFAIExportDialogJa({
                 )}
               </>
             )}
-            <Field label="最大床数">
-              <Num
-                value={options.maxTiles}
-                min={0}
-                max={10000000}
-                step={1}
-                onChange={(v) => patch("maxTiles", Math.round(v))}
-              />
-            </Field>
-            <Field label="1ノート上限">
-              <Num
-                value={options.maxTilesPerNote}
-                min={0}
-                max={1000000}
-                step={1}
-                onChange={(v) => patch("maxTilesPerNote", Math.round(v))}
-              />
-            </Field>
           </div>
         </details>
         </fieldset>

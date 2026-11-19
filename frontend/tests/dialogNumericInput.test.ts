@@ -168,23 +168,6 @@ test("ADOFAI export accepts fractional values for every Python float option", ()
   }
 });
 
-test("ADOFAI export tile limits accept every backend-supported integer", () => {
-  const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-  const backend = readFileSync(new URL("../../web/adofai.py", import.meta.url), "utf8");
-  // The backend accepts arbitrary integer counts, not only multiples of
-  // 10000 (maxTiles) or 500 (maxTilesPerNote). HTML must agree.
-  for (const field of ["maxTiles", "maxTilesPerNote"] as const) {
-    assert.ok(backend.includes(`_as_int(raw.get("${field}")`), `backend must parse ${field} as int`);
-    const start = source.indexOf(`value={options.${field}}`);
-    assert.ok(start >= 0, `missing ${field} input`);
-    const end = source.indexOf("/>", start);
-    assert.ok(end > start && end - start < 500, `missing end of ${field} input`);
-    const control = source.slice(start, end);
-    assert.match(control, /min=\{0\}/);
-    assert.match(control, /step=\{1\}/, `${field} must allow any integer count`);
-  }
-});
-
 test("ADOFAI export clears stale errors after editing an option", () => {
   const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("  function patch<K extends keyof AdoFAIExportOptions>(");
@@ -243,7 +226,7 @@ test("ADOFAI integer fields round exact halves like the Python backend", () => {
   assert.equal(commitNumericEdit("2.5", 1, 0, 10000000, false, true, true), 2);
   assert.equal(commitNumericEdit("3.5", 1, 0, 10000000, false, true, true), 4);
   assert.equal(commitNumericEdit("2.5", 1, 0, 10000000, false, false, true), 2.5);
-  for (const field of ["maxTiles", "maxTilesPerNote", "harmonyPolyMaxDenominator"]) {
+  for (const field of ["harmonyPolyMaxDenominator"]) {
     const start = source.indexOf("value={options." + field + "}");
     assert.ok(start >= 0, "missing integer field " + field);
     const end = source.indexOf("/>", start);

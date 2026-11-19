@@ -16,7 +16,7 @@ test("ADOFAI export settings are disabled during an operation", () => {
   const settings = dialogSource.slice(start, end);
   assert.match(settings, /<Field label="方式">/);
   assert.match(settings, /<details className="advanced-fold">/);
-  assert.match(settings, /<Field label="最大床数">/);
+  assert.match(settings, /<Field label="端数タイル">/);
   assert.match(dialogSource, /locked={working}/);
   const patch = dialogSource.slice(
     dialogSource.indexOf("function patch<"),

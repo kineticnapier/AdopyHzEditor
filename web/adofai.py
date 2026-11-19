@@ -191,8 +191,6 @@ class AdoFAIMixin:
             "xMode": "floor",
             "fixedX": 8.0,
             "targetBpm": max(1000.0, bpm * 10.0),
-            "maxTiles": 200000,
-            "maxTilesPerNote": 5000,
             "trackVisual": "normal",
             "visualPathMode": "raw",
             "visualPathAngle": 90.0,
@@ -269,8 +267,9 @@ class AdoFAIMixin:
             "rabbit_x_mode": _choice(raw.get("xMode"), {"floor", "lowest_floor", "round", "ceil", "fixed", "target_bpm"}, "floor"),
             "rabbit_fixed_x": _as_float(raw.get("fixedX"), 8.0, 0.000001, 100000.0),
             "rabbit_target_bpm": _as_float(raw.get("targetBpm"), max(1000.0, default_bpm * 10.0), 1.0, 999999.0),
-            "max_tiles": _as_int(raw.get("maxTiles"), 200000, 0, 10000000),
-            "max_tiles_per_note": _as_int(raw.get("maxTilesPerNote"), 5000, 0, 1000000),
+            # Tile counts are not capped (0 = unlimited); only the preview limits drawing.
+            "max_tiles": 0,
+            "max_tiles_per_note": 0,
             "track_visual": _choice(raw.get("trackVisual"), {"normal", "faint", "very faint", "hidden"}, "normal"),
             "visual_path_mode": _choice(
                 raw.get("visualPathMode"),

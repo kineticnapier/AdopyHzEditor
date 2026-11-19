@@ -359,13 +359,13 @@ class ExportAdoFAIDialog(QtWidgets.QDialog):
 
         self.max_tiles = QtWidgets.QSpinBox()
         self.max_tiles.setRange(0, 10000000)
-        self.max_tiles.setValue(200000)
+        self.max_tiles.setValue(0)
         self.max_tiles.setSingleStep(10000)
         self.max_tiles.setSpecialValueText("Unlimited")
 
         self.max_tiles_per_note = QtWidgets.QSpinBox()
         self.max_tiles_per_note.setRange(0, 1000000)
-        self.max_tiles_per_note.setValue(5000)
+        self.max_tiles_per_note.setValue(0)
         self.max_tiles_per_note.setSingleStep(500)
         self.max_tiles_per_note.setSpecialValueText("Unlimited")
 
