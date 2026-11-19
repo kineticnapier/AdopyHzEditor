@@ -424,6 +424,29 @@ export default function AdoFAIExportDialogJa({
                       onChange={(v) => patch("harmonyPolyLegatoMs", v)}
                     />
                   </Field>
+                  <Field label="和音の最大音数">
+                    <Num
+                      value={options.harmonyPolyMaxVoices ?? 3}
+                      min={0}
+                      max={16}
+                      step={1}
+                      suffix="音（0で無制限）"
+                      onChange={(v) => patch("harmonyPolyMaxVoices", Math.round(v))}
+                    />
+                  </Field>
+                  <Field label="和音の細かさ上限">
+                    <Num
+                      value={options.harmonyPolyMaxRootCycles ?? 12}
+                      min={0}
+                      max={1024}
+                      step={1}
+                      suffix="（0で無制限）"
+                      onChange={(v) => patch("harmonyPolyMaxRootCycles", Math.round(v))}
+                    />
+                  </Field>
+                  <div className="info-card">
+                    音が多い和音は濁り、打点も詰まりすぎます。一番高い音（メロディー）は必ず残し、ほかは一番低い音と響きの単純な音から残します。細かさ上限は「1周期が根音の何周期分か」で、長三和音(4:5:6)は4、短三和音(10:12:15)は10です。
+                  </div>
                   <Field label="オクターブ重複" group>
                     <label className="inline-check">
                       <input

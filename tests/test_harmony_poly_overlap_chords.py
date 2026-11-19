@@ -348,6 +348,31 @@ class ChordCleanupTests(unittest.TestCase):
         self.assertEqual(plain["ratio_text"], "1:2")
 
 
+class ChordLimitTests(unittest.TestCase):
+    def test_max_voices_keeps_top_root_and_simplest(self):
+        # C3 E3 G3 B3 D4 + melody A5: keep C3 (root), A5 (top) and G3 (3:2, simplest).
+        kept = adofai._limit_chord_voices([48, 52, 55, 59, 62, 81], 3, 0)
+        self.assertEqual(kept, [48, 55, 81])
+        self.assertEqual(adofai._limit_chord_voices([48, 52, 55, 81], 1, 0), [81])
+        self.assertEqual(adofai._limit_chord_voices([48, 52, 55], 0, 0), [48, 52, 55])
+
+    def test_root_cycle_limit_keeps_the_top_note(self):
+        self.assertEqual(adofai._chord_root_cycles([60, 64, 67]), 4)   # 4:5:6
+        self.assertEqual(adofai._chord_root_cycles([60, 63, 67]), 10)  # 10:12:15
+        self.assertEqual(adofai._limit_chord_voices([60, 64, 67], 0, 12), [60, 64, 67])
+        # Semitone 16:15 needs 15 root periods: drop the root, keep the melody.
+        self.assertEqual(adofai._limit_chord_voices([60, 61], 0, 12), [61])
+
+    def test_limits_apply_in_the_export(self):
+        notes = _chord(0.0, 0.2, 48, 52, 55, 59, 62, 81)
+        _events_list, _dup, _specs, stats = build_harmony_ratio_polyrhythm_events(
+            notes, harmony_mode="off", play_bpm=BPM, harmony_poly_chord_source="overlap",
+            harmony_poly_pitch_timing=True, harmony_poly_max_voices=3, harmony_poly_max_root_cycles=12,
+        )
+        self.assertEqual(stats["ratio_text"].count(":") + 1, 3)
+        self.assertLessEqual(stats["common_root_cycles"], 12)
+
+
 class OverlapChordBridgeOptionTests(unittest.TestCase):
     def test_web_defaults_to_overlap_chords(self):
         bridge = Bridge()
@@ -367,6 +392,8 @@ class OverlapChordBridgeOptionTests(unittest.TestCase):
         _, options, _ = bridge._prepare_adofai_export({"method": "harmony"}, None)
         self.assertEqual(options["harmony_poly_legato_ms"], 50.0)
         self.assertTrue(options["harmony_poly_merge_octaves"])
+        self.assertEqual(options["harmony_poly_max_voices"], 3)
+        self.assertEqual(options["harmony_poly_max_root_cycles"], 12)
         _, options, _ = bridge._prepare_adofai_export(
             {"method": "harmony", "harmonyPolyLegatoMs": 0, "harmonyPolyMergeOctaves": False}, None,
         )

@@ -2950,13 +2950,74 @@ def just_ratio_for_semitones(semitones: float) -> float:
     return float(_JUST_RATIO_BY_SEMITONE[pitch_class]) * (2.0 ** octave)
 
 
-def _overlap_voice_specs(midis: list[float], *, merge_octaves: bool = False) -> list[dict[str, Any]]:
+def _just_fraction(semitones: float) -> Fraction:
+    return Fraction(just_ratio_for_semitones(semitones)).limit_denominator(1024)
+
+
+def _chord_root_cycles(midis: list[float]) -> int:
+    """Root periods per cycle of a just-ratio grid for these pitches."""
+    root = min(midis)
+    cycles = 1
+    for midi in midis:
+        cycles = math.lcm(cycles, _just_fraction(midi - root).denominator)
+    return cycles
+
+
+def _limit_chord_voices(midis: list[float], max_voices: int, max_root_cycles: int) -> list[float]:
+    """Thin out a chord so it stays clean and its grid stays coarse.
+
+    The highest note (usually the melody) is always kept.  Above max_voices,
+    the lowest note and the simplest intervals over it stay.  Above
+    max_root_cycles, voices are dropped one at a time, each time the one
+    whose removal makes the grid coarsest.
+    """
+    kept = sorted(set(midis))
+    if len(kept) <= 1:
+        return kept
+    top = kept[-1]
+
+    def height(midi: float, root: float) -> int:
+        frac = _just_fraction(midi - root)
+        return frac.numerator * frac.denominator
+
+    if max_voices > 0 and len(kept) > max_voices:
+        if max_voices == 1:
+            kept = [top]
+        else:
+            root = kept[0]
+            others = sorted((m for m in kept[1:-1]), key=lambda m: (height(m, root), m))
+            kept = sorted([root, top, *others[: max_voices - 2]])
+    while max_root_cycles > 0 and len(kept) > 1 and _chord_root_cycles(kept) > max_root_cycles:
+        candidates = [m for m in kept if m != top]
+        drop = min(
+            candidates,
+            key=lambda m: (_chord_root_cycles([x for x in kept if x != m]), -height(m, min(kept)), m),
+        )
+        kept.remove(drop)
+    return kept
+
+
+def _overlap_voice_specs(
+    midis: list[float],
+    *,
+    merge_octaves: bool = False,
+    max_voices: int = 0,
+    max_root_cycles: int = 0,
+) -> list[dict[str, Any]]:
     """Voice specs for a chord of overlapping notes, rooted on the lowest one.
 
     Unisons always collapse into one voice.  With ``merge_octaves`` a voice
     one or more octaves above a lower voice also collapses into it: doubled
     octaves (lead + lead an octave up) add many hits but no new pitch class.
+    ``max_voices`` / ``max_root_cycles`` (0 = no limit) then thin the chord
+    out with _limit_chord_voices.
     """
+    if max_voices > 0 or max_root_cycles > 0:
+        base = _overlap_voice_specs(midis, merge_octaves=merge_octaves)
+        root = min(midis)
+        voices = [root + float(spec["semitone"]) for spec in base]
+        limited = _limit_chord_voices(voices, int(max_voices), int(max_root_cycles))
+        return _overlap_voice_specs(limited)
     root = min(midis)
     specs: list[dict[str, Any]] = []
     seen: set[float] = set()
@@ -3159,6 +3220,8 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_poly_pitch_timing: bool = False,
     harmony_poly_legato_ms: float = 0.0,
     harmony_poly_merge_octaves: bool = False,
+    harmony_poly_max_voices: int = 0,
+    harmony_poly_max_root_cycles: int = 0,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]], dict[str, Any]]:
     """
     Build Harmony events by repeating a Scratch-style ratio-derived grid.
@@ -3209,6 +3272,11 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_poly_legato_ms / harmony_poly_merge_octaves (overlap chords only):
         ignore note tails that ring at most this long into the next note, and
         fold octave doublings into the lower voice.
+
+    harmony_poly_max_voices / harmony_poly_max_root_cycles (overlap chords,
+    0 = no limit): keep at most this many voices, and keep the grid at most
+    this many root periods per cycle.  Big chords sound muddy and their fine
+    grids put hits microseconds apart.
     """
     del harmony_tuning, harmony_root_mode
     voice_specs = build_harmony_voice_specs(
@@ -3339,7 +3407,12 @@ def build_harmony_ratio_polyrhythm_events(
                 # glides, use the start frequency so the rhythm stays readable.
                 midis = [float(n0.midi_at(0.0))]
             chord_specs = (
-                _overlap_voice_specs(midis, merge_octaves=bool(harmony_poly_merge_octaves))
+                _overlap_voice_specs(
+                    midis,
+                    merge_octaves=bool(harmony_poly_merge_octaves),
+                    max_voices=int(harmony_poly_max_voices),
+                    max_root_cycles=int(harmony_poly_max_root_cycles),
+                )
                 if use_overlap_chords
                 else []
             )
@@ -3980,6 +4053,8 @@ def build_adofai_level(
     harmony_poly_pitch_timing: bool = False,
     harmony_poly_legato_ms: float = 0.0,
     harmony_poly_merge_octaves: bool = False,
+    harmony_poly_max_voices: int = 0,
+    harmony_poly_max_root_cycles: int = 0,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
@@ -4068,6 +4143,8 @@ def build_adofai_level(
                 harmony_poly_pitch_timing=bool(harmony_poly_pitch_timing),
                 harmony_poly_legato_ms=float(harmony_poly_legato_ms),
                 harmony_poly_merge_octaves=bool(harmony_poly_merge_octaves),
+                harmony_poly_max_voices=int(harmony_poly_max_voices),
+                harmony_poly_max_root_cycles=int(harmony_poly_max_root_cycles),
                 harmony_poly_cycle_twirl=visual_path_key(visual_path_mode) == "raw",
             )
             # Auto cycle angle scales the global BPM to keep cycle durations.
