@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BackendApi, KickPitchMethod, KickPitchPayload, NoteMutationResult } from "./bridge";
 import type { TrackSelectionRange } from "../editor/trackSelection";
 import {
@@ -6,7 +6,9 @@ import {
   candidateSummary,
   defaultKickPitchRegion,
   defaultKickPitchSelection,
+  kickPitchRegionFromPick,
   validKickPitchRegion,
+  type KickPitchPick,
   type KickPitchRegion,
 } from "./kickPitchModel";
 
@@ -18,6 +20,11 @@ type Props = {
   viewStart: number;
   kickPitch: KickPitchPayload | null;
   selectedIds: number[];
+  /** True while the next drag on the canvas sets the region. */
+  picking: boolean;
+  /** The last box dragged on the canvas. */
+  pick: KickPitchPick | null;
+  onPickingChange(picking: boolean): void;
   onKickPitch(payload: KickPitchPayload | null, selectedIds: number[]): void;
   onSelectIds(ids: number[]): void;
   onQueuedMutation(
@@ -36,6 +43,9 @@ export default function KickPitchSection({
   viewStart,
   kickPitch,
   selectedIds,
+  picking,
+  pick,
+  onPickingChange,
   onKickPitch,
   onSelectIds,
   onQueuedMutation,
@@ -65,15 +75,49 @@ export default function KickPitchSection({
     </label>
   );
 
-  async function analyze() {
-    if (!api || invalid) return;
+  // A box dragged on the canvas sets the region and analyses it at once.
+  const handledPick = useRef(pick?.seq ?? 0);
+  useEffect(() => {
+    if (!pick || pick.seq === handledPick.current) return;
+    handledPick.current = pick.seq;
+    const next = kickPitchRegionFromPick(pick.range);
+    setRegion(next);
+    void analyze(next);
+    // analyze reads the latest method and api from this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pick]);
+
+  // A Track rectangle (Shift+drag) also becomes the region, without analysing.
+  useEffect(() => {
+    if (trackRange && trackRange.endTime > trackRange.startTime)
+      setRegion(defaultKickPitchRegion(trackRange, viewStart));
+    // viewStart only matters without a rectangle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackRange]);
+
+  // Esc leaves pick mode.
+  useEffect(() => {
+    if (!picking) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onPickingChange(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [picking, onPickingChange]);
+
+  async function analyze(target: KickPitchRegion = region) {
+    if (!api || validKickPitchRegion(target)) {
+      const reason = validKickPitchRegion(target);
+      if (reason) onStatus(reason);
+      return;
+    }
     setRunning(true);
     try {
       const payload = await api.analyze_kick_pitch(
-        region.start,
-        region.end,
-        region.minHz,
-        region.maxHz,
+        target.start,
+        target.end,
+        target.minHz,
+        target.maxHz,
         1,
         method,
       );
@@ -102,6 +146,22 @@ export default function KickPitchSection({
         短い区間の基本周波数を追跡します。倍音（Piepの高い成分）は基本周波数へまとめ、
         独立した成分は別候補として表示します。
       </p>
+      <div className="track-actions">
+        <button
+          className={picking ? "primary-soft active" : "primary-soft"}
+          aria-pressed={picking}
+          disabled={!api || !audioLoaded || busy || running}
+          onClick={() => onPickingChange(!picking)}
+        >
+          {picking ? "ドラッグ待ち…（Escで取消）" : "画面でドラッグして解析"}
+        </button>
+      </div>
+      {picking && (
+        <p className="inspector-help">
+          キックの音高線を囲むように、時間×音高の四角をドラッグしてください。
+          離すとその範囲で解析します。
+        </p>
+      )}
       <div className="kick-pitch-grid">
         {field("start", "開始 s", 0.001)}
         {field("end", "終了 s", 0.001)}
@@ -135,7 +195,7 @@ export default function KickPitchSection({
           title={invalid ?? undefined}
           onClick={() => void analyze()}
         >
-          {running ? "解析中…" : "解析"}
+          {running ? "解析中…" : "数値で解析"}
         </button>
       </div>
       {invalid && <p className="inspector-help">{invalid}</p>}

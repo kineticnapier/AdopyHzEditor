@@ -7,6 +7,7 @@ import {
   defaultKickPitchRegion,
   defaultKickPitchSelection,
   kickPitchPolylines,
+  kickPitchRegionFromPick,
   validKickPitchRegion,
 } from "../src/settings/kickPitchModel.ts";
 
@@ -81,4 +82,27 @@ test("low-confidence points split polylines instead of being bridged", () => {
   assert.deepEqual(lines[0].points.map((p) => p.midi), [50, 49]);
   assert.deepEqual(lines[1].points.map((p) => p.midi), [47, 46]);
   assert.equal(kickPitchPolylines(payload([candidate()]), 0.05)[0].points.length, 5);
+});
+
+test("a dragged box becomes the analysis region", () => {
+  // A2 (110 Hz) to A3 (220 Hz), 0.2 s long.
+  const region = kickPitchRegionFromPick({ startTime: 43.3, endTime: 43.5, minMidi: 45, maxMidi: 57 });
+  assert.equal(region.start, 43.3);
+  assert.equal(region.end, 43.5);
+  assert.ok(Math.abs(region.minHz - 110) < 0.2);
+  assert.ok(Math.abs(region.maxHz - 220) < 0.2);
+  assert.equal(validKickPitchRegion(region), null);
+});
+
+test("a flat box is widened around its pitch so it still validates", () => {
+  const region = kickPitchRegionFromPick({ startTime: 1, endTime: 1.3, minMidi: 33, maxMidi: 34 });
+  assert.equal(validKickPitchRegion(region), null);
+  const centre = Math.sqrt(region.minHz * region.maxHz);
+  assert.ok(Math.abs(centre - 440 * 2 ** ((33.5 - 69) / 12)) < 0.5);
+});
+
+test("a box longer than the limit is cut to the limit", () => {
+  const region = kickPitchRegionFromPick({ startTime: 0, endTime: 30, minMidi: 30, maxMidi: 50 });
+  assert.equal(validKickPitchRegion(region), null);
+  assert.ok(region.end - region.start <= 10);
 });

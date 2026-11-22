@@ -151,3 +151,4 @@ input:disabled, select:disabled { opacity: .48; }
 .layer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer-count { margin-left: auto; color: #9aa4ae; font-size: 12px; }
 .layer-actions { display: flex; gap: 6px; margin-top: 4px; }
+.kick-pitch-section .primary-soft.active { background: #b0408a; color: #fff; }

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AdoFAIExportDialog from "./dialogs/AdoFAIExportDialogJa";
 import AppMenus from "./components/AppMenus";
 import EditorCanvas, {
@@ -32,6 +32,7 @@ import {
   spectrumRegionKey,
 } from "./editor/directSpectrum";
 import type { TrackSelectionRange } from "./editor/trackSelection";
+import type { KickPitchPick } from "./settings/kickPitchModel";
 import { resolveTrackLookup } from "./editor/trackLookup";
 import { midiLabel, midiToHz } from "./editor/musicMath";
 import { retainValidSelection, selectionAfterMutation } from "./editor/selectionValidity";
@@ -205,6 +206,12 @@ export default function App() {
     [hoveredTrack, setHoveredTrack] = useState<TrackHoverInfo | null>(null);
   const [kickPitch, setKickPitch] = useState<KickPitchPayload | null>(null),
     [kickPitchSelected, setKickPitchSelected] = useState<number[]>([]);
+  const [kickPitchPicking, setKickPitchPicking] = useState(false),
+    [kickPitchPick, setKickPitchPick] = useState<KickPitchPick | null>(null);
+  const pickKickPitchRegion = useCallback((range: TrackSelectionRange) => {
+    setKickPitchPicking(false);
+    setKickPitchPick((previous) => ({ range, seq: (previous?.seq ?? 0) + 1 }));
+  }, []);
   const kickPitchAudioPath = useRef<string | null>(null);
   const [cursorReadout, setCursorReadout] = useState<{
     time: number;
@@ -1431,6 +1438,8 @@ export default function App() {
               frequencyTracks={visibleFrequencyTracks}
               kickPitch={kickPitch}
               kickPitchSelected={kickPitchSelected}
+              kickPitchPicking={kickPitchPicking}
+              onKickPitchPicked={pickKickPitchRegion}
               trackSelection={trackSelection}
               onViewportSize={setViewportSize}
               onSelect={changeNoteSelection}
@@ -1514,6 +1523,9 @@ export default function App() {
               setKickPitchSelected(ids);
             }}
             onKickPitchSelect={setKickPitchSelected}
+            kickPitchPicking={kickPitchPicking}
+            kickPitchPick={kickPitchPick}
+            onKickPitchPickingChange={setKickPitchPicking}
           />
         )}
       </main>

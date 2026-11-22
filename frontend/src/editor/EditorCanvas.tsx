@@ -28,6 +28,9 @@ type Props = {
   frequencyTracks: FrequencyTrackPayload | null;
   kickPitch?: KickPitchPayload | null;
   kickPitchSelected?: number[];
+  /** While true, the next drag draws the kick pitch region instead of editing. */
+  kickPitchPicking?: boolean;
+  onKickPitchPicked?(range: TrackSelectionRange): void;
   trackSelection: TrackSelectionState;
   onViewportSize?(size: {width:number;height:number}): void;
   onSelect(indices: number[]): void;
@@ -45,7 +48,7 @@ type Props = {
   onFindTracks(range: TrackSelectionRange): Promise<number[] | null>;
 };
 
-type DragMode = "create" | "curve" | "region" | "track-region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
+type DragMode = "create" | "curve" | "region" | "track-region" | "kick-region" | "cut-range" | "move" | "duplicate-move" | "resize-start" | "resize-end";
 type DragState = { mode: DragMode; startTime: number; startMidi: number; nowTime: number; nowMidi: number; indices: number[]; trackAdditive?: boolean };
 
 function hitNote(notes: NoteDto[], index: NoteTimeIndex, time: number, midi: number, midiPerPixel:number) {
@@ -385,6 +388,11 @@ export default function EditorCanvas(props: Props) {
       ctx.restore();
     }
 
+    if(props.kickPitch?.available&&Number.isFinite(props.kickPitch.start)&&Number.isFinite(props.kickPitch.end)){
+      // The analysed range, so it is clear what the lines cover.
+      const x1=coords.x(props.kickPitch.start as number),x2=coords.x(props.kickPitch.end as number);
+      if(x2>=0&&x1<=w){ctx.save();ctx.fillStyle="rgba(255,120,200,.07)";ctx.fillRect(x1,0,x2-x1,h);ctx.strokeStyle="rgba(255,150,210,.45)";ctx.setLineDash([3,4]);ctx.beginPath();ctx.moveTo(x1,0);ctx.lineTo(x1,h);ctx.moveTo(x2,0);ctx.lineTo(x2,h);ctx.stroke();ctx.restore();}
+    }
     if(kickPitchLines.length){
       // Kick pitch candidates: selected ones bright, primary solid, others dashed.
       const selectedKick=new Set(props.kickPitchSelected??[]);
@@ -444,7 +452,7 @@ export default function EditorCanvas(props: Props) {
     for(const index of notesInTimeRange(noteTimeIndex,props.view.start,props.view.start+props.view.windowSeconds)){const note=props.notes[index];if(note)drawNote(note,selectedSet.has(index))}
     if(keyboardNote!==null){const note=props.notes[keyboardNote];if(note){const x=coords.x(note.start),y=coords.y(note.midi);ctx.save();ctx.strokeStyle="#ffffff";ctx.lineWidth=2;ctx.setLineDash([2,2]);ctx.strokeRect(x-6,y-7,12,14);ctx.restore();}}
 
-  },[coords,decoded,decodedTracks,directSpectrumCanvas,keyboardNote,kickPitchLines,props.kickPitchSelected,noteTimeIndex,props.directSpectrum,props.notes,props.settings.bpm,props.settings.displayMode,props.settings.gridEnabled,props.settings.offsetMs,props.settings.spectrumOpacity,props.settings.mutedLayers,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas]);
+  },[coords,decoded,decodedTracks,directSpectrumCanvas,keyboardNote,kickPitchLines,props.kickPitchSelected,noteTimeIndex,props.directSpectrum,props.notes,props.settings.bpm,props.settings.displayMode,props.settings.gridEnabled,props.settings.offsetMs,props.settings.spectrumOpacity,props.settings.mutedLayers,props.view,selectedSet,selectedTrackSet,size,spectrumCanvas,props.kickPitch]);
 
   useEffect(()=>{
     const canvas=playheadRef.current;if(!canvas)return;const dpr=window.devicePixelRatio||1;
@@ -477,8 +485,8 @@ export default function EditorCanvas(props: Props) {
         ctx.strokeStyle="rgba(255,120,120,.98)";ctx.fillStyle="rgba(255,80,80,.2)";
         ctx.fillRect(Math.min(x1,x2),0,Math.abs(x2-x1),size.height);ctx.strokeRect(Math.min(x1,x2),0,Math.abs(x2-x1),size.height);
       }else{
-        ctx.strokeStyle=drag.mode==="track-region"?"rgba(255,235,95,.98)":"rgba(255,255,255,.9)";ctx.fillStyle=drag.mode==="track-region"?"rgba(255,220,70,.14)":"rgba(70,175,255,.16)";
-        if(drag.mode==="region"||drag.mode==="track-region"){ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));}
+        ctx.strokeStyle=drag.mode==="track-region"?"rgba(255,235,95,.98)":drag.mode==="kick-region"?"rgba(255,140,210,.98)":"rgba(255,255,255,.9)";ctx.fillStyle=drag.mode==="track-region"?"rgba(255,220,70,.14)":drag.mode==="kick-region"?"rgba(255,110,200,.15)":"rgba(70,175,255,.16)";
+        if(drag.mode==="region"||drag.mode==="track-region"||drag.mode==="kick-region"){ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));}
         else if(drag.mode==="create"){const ym=coords.y((drag.startMidi+drag.nowMidi)/2),rh=Math.abs(coords.y(0)-coords.y(.9));ctx.fillRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);ctx.strokeRect(Math.min(x1,x2),ym-rh/2,Math.abs(x2-x1),rh);}
         else if(drag.mode==="curve"){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();}
       }
@@ -523,6 +531,10 @@ export default function EditorCanvas(props: Props) {
     event.currentTarget.setPointerCapture(event.pointerId);
     activePointerIdRef.current = event.pointerId;
     const p=eventPosition(event);
+    if(props.kickPitchPicking){
+      setDrag({mode:"kick-region",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:[]});
+      return;
+    }
     if(event.ctrlKey&&event.altKey&&props.selected.length){
       clearTrackSelection();
       setDrag({mode:"cut-range",startTime:p.time,startMidi:p.midi,nowTime:p.time,nowMidi:p.midi,indices:props.selected});
@@ -569,7 +581,7 @@ export default function EditorCanvas(props: Props) {
       props.onCursorMove?.(value.time,value.midi);
       props.onTrackHover?.(value.track);
     });
-    if(event.ctrlKey&&event.altKey&&props.selected.length){event.currentTarget.style.cursor="crosshair";return;}
+    if(props.kickPitchPicking||(event.ctrlKey&&event.altKey&&props.selected.length)){event.currentTarget.style.cursor="crosshair";return;}
     const hit=hitNote(props.notes,noteTimeIndex,p.time,p.midi,props.view.visibleNotes/Math.max(1,size.height));
     event.currentTarget.style.cursor=hit!==null&&!event.altKey&&edgeFor(hit,p.x)?"ew-resize":hit!==null?"move":track?"pointer":"crosshair";
   }
@@ -578,6 +590,12 @@ export default function EditorCanvas(props: Props) {
     activePointerIdRef.current = null;
     if(!drag)return;
     const p=eventPosition(event),cur={...drag,nowTime:p.time,nowMidi:p.midi};setDrag(null);
+    if(cur.mode==="kick-region"){
+      // A click (no real box) keeps pick mode on so the user can try again.
+      const range=normalizeTrackRange(cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi);
+      if(range.endTime-range.startTime>=.01)props.onKickPitchPicked?.(range);
+      return;
+    }
     if(cur.mode==="track-region"){
       const range=normalizeTrackRange(cur.startTime,cur.nowTime,cur.startMidi,cur.nowMidi);
       if(range.endTime-range.startTime>=.001){

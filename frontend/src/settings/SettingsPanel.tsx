@@ -8,6 +8,7 @@ import type {
   NoteMutationResult,
 } from "./bridge";
 import KickPitchSection from "./KickPitchSection";
+import type { KickPitchPick } from "./kickPitchModel";
 import type {
   TrackHoverInfo,
   TrackSelectionState,
@@ -44,6 +45,9 @@ type Props = {
   kickPitchSelected: number[];
   onKickPitch(payload: KickPitchPayload | null, selectedIds: number[]): void;
   onKickPitchSelect(ids: number[]): void;
+  kickPitchPicking: boolean;
+  kickPitchPick: KickPitchPick | null;
+  onKickPitchPickingChange(picking: boolean): void;
 };
 
 type CurveShapeState = { mode: string; p1: number; p2: number };
@@ -85,6 +89,9 @@ export default function SettingsPanel({
   kickPitchSelected,
   onKickPitch,
   onKickPitchSelect,
+  kickPitchPicking,
+  kickPitchPick,
+  onKickPitchPickingChange,
 }: Props) {
   const [page, setPage] = useState<Page>("inspector");
   const one = selected.length === 1 ? notes[selected[0]] : null;
@@ -459,6 +466,9 @@ export default function SettingsPanel({
               selectedIds={kickPitchSelected}
               onKickPitch={onKickPitch}
               onSelectIds={onKickPitchSelect}
+              picking={kickPitchPicking}
+              pick={kickPitchPick}
+              onPickingChange={onKickPitchPickingChange}
               onQueuedMutation={onQueuedMutation}
               onStatus={onStatus}
             />

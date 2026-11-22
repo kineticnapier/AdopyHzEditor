@@ -31,6 +31,35 @@ export function defaultKickPitchRegion(
   return { start, end: start + 0.5, minHz: 25, maxHz: 500 };
 }
 
+/** A box dragged on the canvas, numbered so the same box twice still counts. */
+export type KickPitchPick = { range: TrackSelectionRange; seq: number };
+
+/** Narrowest pitch span the tracker accepts (max Hz must exceed 1.5 x min Hz). */
+const MIN_PICK_RATIO = 1.6;
+
+/**
+ * Region from a box dragged around the kick on the canvas.  A box only a few
+ * semitones tall is widened around its centre so it still passes validation.
+ */
+export function kickPitchRegionFromPick(range: TrackSelectionRange): KickPitchRegion {
+  const start = Math.max(0, range.startTime);
+  const end = Math.min(Math.max(range.endTime, start + 0.01), start + KICK_PITCH_MAX_SECONDS);
+  let low = midiToHz(range.minMidi);
+  let high = midiToHz(range.maxMidi);
+  if (high / low < MIN_PICK_RATIO) {
+    const centre = Math.sqrt(low * high);
+    const half = Math.sqrt(MIN_PICK_RATIO);
+    low = centre / half;
+    high = centre * half;
+  }
+  return {
+    start,
+    end,
+    minHz: Math.max(10, Math.floor(low * 10) / 10),
+    maxHz: Math.min(2000, Math.ceil(high * 10) / 10),
+  };
+}
+
 export function validKickPitchRegion(region: KickPitchRegion): string | null {
   const values = [region.start, region.end, region.minHz, region.maxHz];
   if (!values.every(Number.isFinite)) return "数値を入力してください";
