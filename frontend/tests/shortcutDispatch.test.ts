@@ -260,6 +260,18 @@ test("explicit Ctrl+Shift actions and Ctrl+Alt+A still work", () => {
   ]);
 });
 
+test("Ctrl+Shift+PageUp/PageDown move the selection by one octave", () => {
+  const { calls, press } = setup();
+  assert.equal(press("PageUp", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("PageDown", { ctrlKey: true, shiftKey: true }), true);
+  assert.equal(press("PageDown", { metaKey: true, shiftKey: true }), true);
+  // Other modifier combinations stay unassigned.
+  assert.equal(press("PageDown", { ctrlKey: true, altKey: true, shiftKey: true }), false);
+  assert.equal(press("PageDown", { shiftKey: true }), false);
+  assert.equal(press("PageDown"), false);
+  assert.deepEqual(calls, ["move:0,12", "move:0,-12", "move:0,-12"]);
+});
+
 test("keyboard pitch scrolling never moves the view outside MIDI 0..127", () => {
   const upper = setup({ pitchBottom: 65, visibleNotes: 60 });
   assert.equal(upper.press("w"), true);

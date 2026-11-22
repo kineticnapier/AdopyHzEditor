@@ -1390,6 +1390,7 @@ export default function App() {
       onRedo={() => void redo()}
       onDuplicate={() => void duplicate()}
       onQuantize={() => void quantize()}
+      onMoveOctave={(semitones) => void moveNotes(selected, 0, semitones)}
       onSplit={() => void splitSelected()}
       onHarmonicDiagram={() => setToolDialog("harmonic")}
       onReanalyze={() => stateAction(() => toolsApi.reanalyze_audio())}

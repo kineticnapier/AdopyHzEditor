@@ -22,6 +22,7 @@ type Props = {
   onRedo():void;
   onDuplicate():void;
   onQuantize():void;
+  onMoveOctave(semitones:number):void;
   onSplit():void;
   onHarmonicDiagram():void;
   onReanalyze():void;
@@ -123,6 +124,8 @@ export default function AppMenus(p:Props){
       <hr/>
       <Action close={close} shortcut="Ctrl+D" disabled={!p.hasSelection} onClick={p.onDuplicate}>選択ノートを複製</Action>
       <Action close={close} shortcut="Q" disabled={!p.hasSelection} onClick={p.onQuantize}>選択ノートをクオンタイズ</Action>
+      <Action close={close} shortcut="Ctrl+Shift+PageUp" disabled={!p.hasSelection} onClick={()=>p.onMoveOctave(12)}>選択ノートを1オクターブ上げる</Action>
+      <Action close={close} shortcut="Ctrl+Shift+PageDown" disabled={!p.hasSelection} onClick={()=>p.onMoveOctave(-12)}>選択ノートを1オクターブ下げる</Action>
       <Action close={close} disabled={!p.hasSelection} onClick={p.onSplit}>再生位置で分割</Action>
     </Menu>
     <Menu id="analyze" label="解析" active={active} setActive={setActive}>

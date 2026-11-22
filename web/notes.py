@@ -255,7 +255,13 @@ class NoteMixin:
             for n in original:
                 pitch_values.extend(v for v in (n.midi, n.midi_end, n.ctrl1_midi, n.ctrl2_midi) if v is not None)
             if pitch_values:
-                dy = _clamp(dy, -min(pitch_values), 127.0 - max(pitch_values))
+                clamped = _clamp(dy, -min(pitch_values), 127.0 - max(pitch_values))
+                octaves = float(dy) / 12.0
+                if octaves and abs(octaves - round(octaves)) < 1e-9 and abs(clamped - float(dy)) > 1e-9:
+                    # A cut-short octave move would change the note names.
+                    self._status = "MIDIの音域（0〜127）を超えるため、オクターブ移動できません"
+                    return {"notes": self._note_dicts(), "changed": False, "status": self._status}
+                dy = clamped
 
             # Snap the group using its first note so relative spacing is preserved.
             if self.settings["snapEnabled"] and original and abs(float(dx)) > 1e-12:
