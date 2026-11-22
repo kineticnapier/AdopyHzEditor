@@ -7,6 +7,15 @@ candidate tracks into normal Curve Notes in one undo step, reusing the Bezier
 fit of the Frequency Track transcription path.  One cubic Bezier rarely fits
 a whole kick sweep within a few cents, so the confident part of a track is
 split recursively until every segment stays inside ``max_error_cents``.
+
+Two ways to build the notes (``fit_mode``):
+
+* ``"exact"``: only confident stretches, and any hole longer than two frames
+  ends the line.  Faithful, but a fast sweep often comes out in pieces.
+* ``"line"``: one continuous line through the whole kick.  Holes are bridged
+  (up to ``LINE_MAX_GAP_SECONDS``), points far from the local trend (octave
+  slips, stray frames) are dropped, and the trend is fitted with as few
+  joined Curve Notes as the tolerance allows.
 """
 
 from __future__ import annotations
@@ -25,6 +34,13 @@ from web.track_transcription import _minimum_note_span, _smooth_midis, _velocity
 DEFAULT_MAX_ERROR_CENTS = 5.0
 DEFAULT_MIN_CONFIDENCE = 0.5
 MAX_CURVE_SEGMENTS_PER_TRACK = 256
+FIT_MODES = ("line", "exact")
+DEFAULT_LINE_ERROR_CENTS = 30.0
+# Holes longer than this still split the line: it is probably another hit.
+LINE_MAX_GAP_SECONDS = 0.15
+# Half width of the trend window and how far a point may sit from the trend.
+LINE_TREND_HALF_SECONDS = 0.005
+LINE_OUTLIER_CENTS = 60.0
 
 
 def _bezier_midis(times: np.ndarray, controls: tuple[float, float, float, float]) -> np.ndarray:
@@ -129,6 +145,63 @@ def _confident_runs(times: np.ndarray, confidence: np.ndarray, min_confidence: f
     return [run for run in runs if len(run) >= 2]
 
 
+def _rolling_median(times: np.ndarray, values: np.ndarray, half_width: float) -> np.ndarray:
+    lo = np.searchsorted(times, times - half_width, side="left")
+    hi = np.searchsorted(times, times + half_width, side="right")
+    return np.array([float(np.median(values[a:b])) for a, b in zip(lo, hi)])
+
+
+def fit_one_line(
+    times: np.ndarray,
+    midis: np.ndarray,
+    weights: np.ndarray,
+    strengths: np.ndarray | None = None,
+    *,
+    max_error_cents: float = DEFAULT_LINE_ERROR_CENTS,
+    max_gap: float = LINE_MAX_GAP_SECONDS,
+    max_segments: int = MAX_CURVE_SEGMENTS_PER_TRACK,
+) -> list[tuple[np.ndarray, np.ndarray, list[tuple[int, int, tuple[float, float, float, float], float]]]]:
+    """Continuous line through scattered pitch points.
+
+    ``times`` must be sorted.  Returns ``(grid_times, grid_strengths,
+    segments)`` per stretch (normally one); segment indices point into the
+    grid.  Points further than ``LINE_OUTLIER_CENTS`` from a short running
+    median are dropped, then the rest is resampled on an even grid with holes
+    filled by straight lines, so the curves cannot swing through a hole.
+    ``max_segments`` caps the notes per stretch (1 = a single curve), even if
+    the tolerance is then exceeded.
+    """
+    times = np.asarray(times, dtype=np.float64)
+    midis = np.asarray(midis, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    strengths = np.ones_like(times) if strengths is None else np.asarray(strengths, dtype=np.float64)
+    out = []
+    if times.size < 2:
+        return out
+    breaks = np.flatnonzero(np.diff(times) > max_gap) + 1
+    for part in np.split(np.arange(times.size), breaks):
+        if part.size < 2:
+            continue
+        t, m = times[part], midis[part]
+        trend = _rolling_median(t, m, LINE_TREND_HALF_SECONDS)
+        kept = part[np.abs(m - trend) * 100.0 <= LINE_OUTLIER_CENTS]
+        if kept.size < 2 or times[kept[-1]] - times[kept[0]] <= 0:
+            continue
+        tk = times[kept]
+        step = max(1e-4, float(np.median(np.diff(tk))))
+        count = min(20_000, int(round((tk[-1] - tk[0]) / step)) + 1)
+        grid = np.linspace(tk[0], tk[-1], max(2, count))
+        grid_m = np.interp(grid, tk, midis[kept])
+        # Bridged holes count, but less than measured points.
+        near = np.abs(tk[np.clip(np.searchsorted(tk, grid), 0, tk.size - 1)] - grid) <= step * 1.5
+        near |= np.abs(tk[np.clip(np.searchsorted(tk, grid) - 1, 0, tk.size - 1)] - grid) <= step * 1.5
+        grid_w = np.where(near, np.interp(grid, tk, weights[kept]), 0.3)
+        grid_s = np.interp(grid, tk, strengths[kept])
+        segments = fit_curve_segments(grid, grid_m, grid_w, max_error_cents=max_error_cents, max_segments=max_segments)
+        out.append((grid, grid_s, segments))
+    return out
+
+
 class KickPitchMixin:
     """pywebview API surface for the kick pitch prototype."""
 
@@ -203,9 +276,13 @@ class KickPitchMixin:
         candidate_ids: list[int],
         min_confidence: float = DEFAULT_MIN_CONFIDENCE,
         max_error_cents: float = DEFAULT_MAX_ERROR_CENTS,
+        fit_mode: str = "exact",
+        max_notes: int = 0,
     ) -> dict[str, Any]:
         if not isinstance(candidate_ids, list):
             raise TypeError("candidate_ids must be an array")
+        if str(fit_mode) not in FIT_MODES:
+            raise ValueError(f"fit_mode must be one of {FIT_MODES}")
         with self._lock:
             result = self.kick_pitch_result
             if result is None:
@@ -220,24 +297,44 @@ class KickPitchMixin:
             threshold = min(1.0, max(0.0, float(min_confidence)))
             tolerance = min(100.0, max(0.5, float(max_error_cents)))
             gap = float(result.stats.get("hopSeconds", 0.001)) * 3.5  # <= 2 missing frames
+            # 0 = no cap; otherwise notes per continuous stretch in line mode.
+            limit = MAX_CURVE_SEGMENTS_PER_TRACK if int(max_notes) <= 0 else min(MAX_CURVE_SEGMENTS_PER_TRACK, int(max_notes))
             created: list[Note] = []
             worst_error = 0.0
-            for candidate in chosen:
-                midis = np.array([hz_to_midi(float(h)) for h in candidate.hz])
-                for run in _confident_runs(candidate.times, candidate.confidence, threshold, gap):
-                    t = candidate.times[run]
-                    m = midis[run]
-                    w = candidate.confidence[run]
-                    s = candidate.strength[run]
-                    for a, b, controls, error in fit_curve_segments(t, m, w, max_error_cents=tolerance):
-                        start, end = _minimum_note_span(float(t[a]), float(t[b]), float(self.duration))
-                        if end <= start:
-                            continue
-                        p0, p1, p2, p3 = (max(0.0, min(127.0, value)) for value in controls)
-                        created.append(
-                            Note(start, end, p0, _velocity(s[a : b + 1]), "curve", p3, p1, p2, "bezier_pitch").normalized()
-                        )
-                        worst_error = max(worst_error, error)
+
+            def add(t, s, segments):
+                nonlocal worst_error
+                for a, b, controls, error in segments:
+                    start, end = _minimum_note_span(float(t[a]), float(t[b]), float(self.duration))
+                    if end <= start:
+                        continue
+                    p0, p1, p2, p3 = (max(0.0, min(127.0, value)) for value in controls)
+                    created.append(
+                        Note(start, end, p0, _velocity(s[a : b + 1]), "curve", p3, p1, p2, "bezier_pitch").normalized()
+                    )
+                    worst_error = max(worst_error, error)
+
+            if fit_mode == "line":
+                # All chosen candidates feed one line, ordered by time.
+                parts = [
+                    (c.times[ok], np.array([hz_to_midi(float(h)) for h in c.hz[ok]]), c.confidence[ok], c.strength[ok])
+                    for c in chosen
+                    for ok in [np.flatnonzero((c.confidence >= threshold) & np.isfinite(c.hz) & (c.hz > 0))]
+                ]
+                if parts:
+                    t_all, m_all, w_all, s_all = (np.concatenate([p[i] for p in parts]) for i in range(4))
+                    order = np.argsort(t_all, kind="stable")
+                    t_all, m_all, w_all, s_all = t_all[order], m_all[order], w_all[order], s_all[order]
+                    for grid, grid_s, segments in fit_one_line(
+                        t_all, m_all, w_all, s_all, max_error_cents=tolerance, max_segments=limit
+                    ):
+                        add(grid, grid_s, segments)
+            else:
+                for candidate in chosen:
+                    midis = np.array([hz_to_midi(float(h)) for h in candidate.hz])
+                    for run in _confident_runs(candidate.times, candidate.confidence, threshold, gap):
+                        t = candidate.times[run]
+                        add(t, candidate.strength[run], fit_curve_segments(t, midis[run], candidate.confidence[run], max_error_cents=tolerance))
             if not created:
                 return {
                     "notes": self._note_dicts(),

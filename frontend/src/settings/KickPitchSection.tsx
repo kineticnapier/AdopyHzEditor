@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { BackendApi, KickPitchMethod, KickPitchPayload, NoteMutationResult } from "./bridge";
+import type { BackendApi, KickPitchFitMode, KickPitchMethod, KickPitchPayload, NoteMutationResult } from "./bridge";
 import type { TrackSelectionRange } from "../editor/trackSelection";
 import {
   candidateRoleLabel,
@@ -54,7 +54,9 @@ export default function KickPitchSection({
   const [region, setRegion] = useState<KickPitchRegion>(() =>
     defaultKickPitchRegion(trackRange, viewStart),
   );
-  const [maxErrorCents, setMaxErrorCents] = useState(5);
+  const [fitMode, setFitMode] = useState<KickPitchFitMode>("line");
+  const [maxErrorCents, setMaxErrorCents] = useState(30);
+  const [maxNotes, setMaxNotes] = useState(0);
   const [minConfidence, setMinConfidence] = useState(0.5);
   const [method, setMethod] = useState<KickPitchMethod>("harmonic");
   const [running, setRunning] = useState(false);
@@ -133,7 +135,7 @@ export default function KickPitchSection({
   async function convert() {
     if (!api || !selectedIds.length) return;
     const result = await onQueuedMutation(
-      () => api.create_notes_from_kick_pitch(selectedIds, minConfidence, maxErrorCents),
+      () => api.create_notes_from_kick_pitch(selectedIds, minConfidence, maxErrorCents, fitMode, maxNotes),
       (r) => r.indices,
     );
     if (result?.status) onStatus(result.status);
@@ -227,6 +229,25 @@ export default function KickPitchSection({
             ))}
             {!candidates.length && <li>信頼できる音高が見つかりませんでした</li>}
           </ul>
+          <label className="kick-pitch-field kick-pitch-method">
+            <span>作り方</span>
+            <select
+              value={fitMode}
+              onChange={(event) => {
+                const next = event.target.value as KickPitchFitMode;
+                setFitMode(next);
+                setMaxErrorCents(next === "line" ? 30 : 5);
+              }}
+            >
+              <option value="line">1本につなげて近似（途切れを埋める）</option>
+              <option value="exact">信頼できる区間だけ正確に</option>
+            </select>
+          </label>
+          <p className="inspector-help">
+            {fitMode === "line"
+              ? "途切れた解析点を直線でつなぎ、外れた点を除いて1本の線にします。最大本数を1にすると曲線1個で近似します。"
+              : "信頼度の高い区間だけを使い、途切れた所で分けます。"}
+          </p>
           <div className="kick-pitch-grid">
             <label className="kick-pitch-field">
               <span>許容誤差 cent</span>
@@ -250,6 +271,19 @@ export default function KickPitchSection({
                 onChange={(event) => setMinConfidence(Number(event.target.value))}
               />
             </label>
+            {fitMode === "line" && (
+              <label className="kick-pitch-field">
+                <span>最大本数（0=制限なし）</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={256}
+                  step={1}
+                  value={maxNotes}
+                  onChange={(event) => setMaxNotes(Math.max(0, Math.round(Number(event.target.value) || 0)))}
+                />
+              </label>
+            )}
           </div>
           <div className="track-actions">
             <button
