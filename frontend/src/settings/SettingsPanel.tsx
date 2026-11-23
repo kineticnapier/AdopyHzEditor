@@ -704,8 +704,6 @@ export default function SettingsPanel({
                         ["50 cents", "50セント"],
                         ["25 cents", "25セント"],
                         ["12.5 cents", "12.5セント"],
-                        ["41 EDO", "41平均律"],
-                        ["53 EDO", "53平均律"],
                       ]}
                       onChange={(v) => void onPatch({ cqtResolution: v })}
                     />

@@ -785,9 +785,7 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
             "50 cents": 24,
             "25 cents": 48,
             "12.5 cents": 96,
-            "41 EDO": 41,
-            "53 EDO": 53,
-        }.get(resolution)
+        }.get(resolution)  # anything else (also old "41/53 EDO") = profile default
         if bins_per_octave is not None:
             options["cqt_bins_per_octave"] = bins_per_octave
             options["fold_to_semitone"] = False

@@ -1,6 +1,6 @@
 # Releasing AdopyHzEditor
 
-The distributable application is the current React / TypeScript + pywebview UI (`web_ui.py`), not the legacy PySide6 entry point (`main.py`).
+The distributable application is the React / TypeScript + pywebview UI (`web_ui.py`).
 
 ## Local release build
 
@@ -50,4 +50,4 @@ To prepare the commit and tag without pushing them:
 
 ## Version source
 
-`app_metadata.py` is the single source of truth for `APP_VERSION` and GitHub repository metadata. Both desktop and Web UI code import from it. Do not add a second hard-coded application version elsewhere.
+`app_metadata.py` is the single source of truth for `APP_VERSION` and GitHub repository metadata. The application imports it from there. Do not add a second hard-coded application version elsewhere.

@@ -63,12 +63,6 @@ ffmpeg -i input.ogg input.wav
 
 ## 起動
 
-従来の PySide6 UI:
-
-```bash
-python main.py
-```
-
 Web UI:
 
 ```bash
@@ -302,14 +296,12 @@ Hz Chart は高音や長いノートでタイル数が非常に多くなり、`.
 
 ```text
 AdopyHzEditor/
-├─ main.py                 # 従来のPySide6 UI
 ├─ web_ui.py               # React + pywebview UIのエントリポイント
 ├─ core/                   # ノート・音声・解析・project I/O
 ├─ exporters/              # ADOFAI / MIDI出力
 ├─ importers/              # MIDI等の読み込み
 ├─ web/                    # Web UI backend / I/O / tools
 ├─ frontend/               # React + TypeScript frontend
-├─ desktop/                # Desktop側ダイアログ等
 ├─ locales/                # 翻訳JSON
 ├─ tests/                  # テスト
 ├─ scripts/                # ビルド・テスト音声生成等

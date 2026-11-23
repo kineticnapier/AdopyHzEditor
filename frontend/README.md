@@ -1,6 +1,6 @@
 # React / TypeScript UI prototype
 
-AdopyHzEditor の React / TypeScript フロントエンドです。既存の PySide6 版はそのまま残し、Web UI は `web_ui.py` から別起動します。
+AdopyHzEditor の React / TypeScript フロントエンドです。`web_ui.py` から起動します。
 
 ## ビルドと起動
 
@@ -74,6 +74,3 @@ Python側の音声解析・再生・MIDI・プロジェクト・ADOFAI処理は�
 - 旧MIDI読み込み時の詳細cleanupオプション
 - プロジェクト音声が見つからない場合のLocateフロー
 - Web UIでファイルを置き換える / 閉じる際の未保存確認
-- 旧PySide6版に残っている細かい確認ダイアログの差
-
-これらが終わるまではPySide6版も並行して利用できます。

@@ -413,7 +413,9 @@ export default function AdoFAIExportDialogJa({
             )}
             {options.harmonyTimingMode === "ratio-polyrhythm" &&
               (options.harmonyPolyChordSource ?? "overlap") === "overlap" && (
-                <>
+                <details className="advanced-fold">
+                  <summary>和音の詳細</summary>
+                  <div className="advanced-grid">
                   <Field label="短い重なりを無視">
                     <Num
                       value={options.harmonyPolyLegatoMs ?? 50}
@@ -457,7 +459,8 @@ export default function AdoFAIExportDialogJa({
                       オクターブ違いの重なりは高い方（メロディー側）にまとめる
                     </label>
                   </Field>
-                </>
+                  </div>
+                </details>
               )}
             <div className="info-card">
               {options.harmonyTimingMode === "ratio-polyrhythm"
@@ -510,31 +513,31 @@ export default function AdoFAIExportDialogJa({
             </label>
           </Field>
         )}
-        <Field label="同じ音の重なり" group>
-          <label className="inline-check">
-            <input
-              type="checkbox"
-              checked={options.mergeDuplicateNotes ?? true}
-              onChange={(e) => patch("mergeDuplicateNotes", e.target.checked)}
-            />
-            別のレイヤーで同じ音が同時に鳴るところは1つにまとめる
-          </label>
-        </Field>
-        {!isHarmony && (
-          <Field label="ノート連結" group>
-            <label className="inline-check">
-              <input
-                type="checkbox"
-                checked={options.chainContiguous ?? true}
-                onChange={(e) => patch("chainContiguous", e.target.checked)}
-              />
-              隙間なく続くノートを1本につなげる（境目で切らない）
-            </label>
-          </Field>
-        )}
         <details className="advanced-fold">
           <summary>詳細設定</summary>
           <div className="advanced-grid">
+            <Field label="同じ音の重なり" group>
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={options.mergeDuplicateNotes ?? true}
+                  onChange={(e) => patch("mergeDuplicateNotes", e.target.checked)}
+                />
+                別のレイヤーで同じ音が同時に鳴るところは1つにまとめる
+              </label>
+            </Field>
+            {!isHarmony && (
+              <Field label="ノート連結" group>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={options.chainContiguous ?? true}
+                    onChange={(e) => patch("chainContiguous", e.target.checked)}
+                  />
+                  隙間なく続くノートを1本につなげる（境目で切らない）
+                </label>
+              </Field>
+            )}
             {isZip && (
               <>
                 <Field label="圧縮角度">
