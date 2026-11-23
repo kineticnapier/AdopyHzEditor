@@ -291,7 +291,19 @@ def _start_exit_watchdog(grace: float = EXIT_GRACE_SECONDS, exit_fn=os._exit, st
     return thread
 
 
+def _quiet_qt_environment() -> None:
+    """Turn off Qt's DXGI vblank thread before the QApplication exists.
+
+    Qt starts a QDxgiVSyncService on Windows for Qt Quick frame pacing; this
+    app draws through WebEngine, so it is not needed, and at shutdown it
+    prints "QDxgiVSyncService not destroyed in time" into the console.
+    A value the user set is kept.
+    """
+    os.environ.setdefault("QT_D3D_NO_VBLANK_THREAD", "1")
+
+
 def main() -> int:
+    _quiet_qt_environment()
     # The React/TypeScript shell is currently Japanese-only. Help text and other
     # Python-side translated strings should match it as well.
     set_language("ja", save=False)

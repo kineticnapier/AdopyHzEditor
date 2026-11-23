@@ -45,5 +45,20 @@ class ExitWatchdogTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+
+@unittest.skipIf(web_ui is None, "pywebview is not installed")
+class QtEnvironmentTests(unittest.TestCase):
+    def test_vblank_thread_is_turned_off_unless_the_user_set_it(self):
+        import os
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("QT_D3D_NO_VBLANK_THREAD", None)
+            web_ui._quiet_qt_environment()
+            self.assertEqual(os.environ["QT_D3D_NO_VBLANK_THREAD"], "1")
+            os.environ["QT_D3D_NO_VBLANK_THREAD"] = "0"
+            web_ui._quiet_qt_environment()
+            self.assertEqual(os.environ["QT_D3D_NO_VBLANK_THREAD"], "0")
+
 if __name__ == "__main__":
     unittest.main()
