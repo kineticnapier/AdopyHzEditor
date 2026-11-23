@@ -22,6 +22,7 @@ from exporters.adofai import (
     build_tile_preview_points,
 )
 from web.gap_bridge import build_adofai_level_with_gap_bridges as build_adofai_level
+from exporters.adofai_append import AppendError, append_level, load_adofai_text
 from app_metadata import APP_VERSION, GITHUB_RELEASES_URL
 from i18n import tr
 
@@ -230,6 +231,9 @@ class AdoFAIMixin:
             "fullSongOffsetMs": round(full_offset, 3),
             "selectedSongOffsetMs": round(selected_offset, 3),
             "selectedOnly": bool(selected_only and selected),
+            # Append the tiles to the end of an existing chart instead of
+            # writing a new one.
+            "appendToChart": False,
         }
 
     def _valid_export_indices(self, indices: list[int] | None) -> list[int]:
@@ -388,6 +392,8 @@ class AdoFAIMixin:
         return {"rows": rows[:max_rows], "summary": summary, "limited": len(rows) > max_rows}
 
     def export_adofai_advanced(self, options: dict[str, Any], selected_indices: list[int] | None = None) -> dict[str, Any]:
+        if bool((options or {}).get("appendToChart", False)):
+            return self._append_adofai_export(options, selected_indices)
         notes, build_opts, workflow = self._prepare_adofai_export(options, selected_indices)
         path = self._dialog(webview.FileDialog.SAVE, file_types=ADOF_FILE_TYPES, save_filename="level.adofai")
         if not path:
@@ -451,6 +457,61 @@ class AdoFAIMixin:
             "copiedSong": copied_song,
             "stats": stats,
             "status": self._status,
+        }
+
+    def _append_adofai_export(self, options: dict[str, Any], selected_indices: list[int] | None) -> dict[str, Any]:
+        """Append the generated tiles to the end of a chart the user picks.
+
+        The chart keeps its settings (song, offset, BPM) and events; a copy of
+        the original is kept as ``<name>.adofai.bak`` before it is replaced.
+        """
+        notes, build_opts, _workflow = self._prepare_adofai_export(options, selected_indices)
+        path = self._dialog(webview.FileDialog.OPEN, file_types=ADOF_FILE_TYPES)
+        if not path:
+            return {"ok": False, "status": "Cancelled"}
+        target = Path(path)
+        try:
+            original = target.read_bytes()
+            base = load_adofai_text(original.decode("utf-8-sig"))
+        except (OSError, UnicodeDecodeError) as exc:
+            return {"ok": False, "status": f"譜面を読み込めません: {exc}"}
+        except AppendError as exc:
+            return {"ok": False, "status": str(exc)}
+        # The existing chart's song and offset stay; the generated part only
+        # contributes tiles and events.
+        build_opts["song_filename"] = None
+        build_opts["song_offset_ms"] = None
+        generated, stats = build_adofai_level(notes, **build_opts)
+        try:
+            merged, info = append_level(base, generated)
+        except AppendError as exc:
+            return {"ok": False, "status": str(exc)}
+        backup = target.with_name(target.name + ".bak")
+        try:
+            backup.write_bytes(original)
+            atomic_write_text(
+                str(target),
+                json.dumps(merged, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            return {"ok": False, "path": str(target), "status": f"追記に失敗しました: {exc}"}
+        status = (
+            f"{target.name} の最後に {info['addedFloors']} タイルを追記しました"
+            f"（元の譜面は {backup.name} に保存）"
+        )
+        if info["warnings"]:
+            status += "。" + " ".join(info["warnings"])
+        with self._lock:
+            self._status = status
+        return {
+            "ok": True,
+            "path": str(target),
+            "backupPath": str(backup),
+            "appended": True,
+            "stats": {**stats, "tiles_total": info["addedFloors"]},
+            "warnings": info["warnings"],
+            "status": status,
         }
 
     def debug_rows_as_text(self, rows: list[dict[str, Any]], fmt: str = "tsv") -> str:

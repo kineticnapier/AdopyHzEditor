@@ -283,6 +283,23 @@ export default function AdoFAIExportDialogJa({
           aria-label="ADOFAI出力設定"
           style={{ display: "grid", gap: 8, border: 0, margin: 0, padding: 0, minWidth: 0 }}
         >
+        <Field label="出力先">
+          <Select
+            value={options.appendToChart ? "append" : "new"}
+            options={[
+              ["new", "新しい譜面を作る"],
+              ["append", "既存の譜面の最後に追記"],
+            ]}
+            onChange={(v) => patch("appendToChart", v === "append")}
+          />
+        </Field>
+        {options.appendToChart && (
+          <div className="info-card">
+            「出力」を押すと譜面を選ぶ画面が出ます。選んだ譜面の最後のタイルの後ろにタイルを足します。
+            曲・オフセット・BPMなど元の設定とイベントはそのままで、曲の時間には合わせません。
+            元のファイルは「名前.adofai.bak」に保存してから上書きします。
+          </div>
+        )}
         <Field label="方式">
           <Select
             value={options.method}
@@ -471,6 +488,7 @@ export default function AdoFAIExportDialogJa({
             </div>
           </>
         )}
+        {!options.appendToChart && (<>
         <Field label="音声" group>
           <label className="inline-check">
             <input
@@ -501,6 +519,7 @@ export default function AdoFAIExportDialogJa({
             </div>
           </Field>
         )}
+        </>)}
         {selected.length > 0 && (
           <Field label="出力範囲" group>
             <label className="inline-check">
@@ -815,7 +834,7 @@ export default function AdoFAIExportDialogJa({
                 )}
               </>
             )}
-            {options.useProjectSong && (
+            {options.useProjectSong && !options.appendToChart && (
               <>
                 <Field label="音声コピー" group>
                   <label className="inline-check">
@@ -897,7 +916,7 @@ export default function AdoFAIExportDialogJa({
           onClick={() => void exportLevel()}
           disabled={working}
         >
-          {working ? "処理中…" : "出力"}
+          {working ? "処理中…" : options?.appendToChart ? "譜面を選んで追記" : "出力"}
         </button>
       </div>
     </Modal>

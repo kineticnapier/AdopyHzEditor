@@ -42,6 +42,8 @@ export type AdoFAIExportOptions = {
   trackVisual: "normal" | "faint" | "very faint" | "hidden"; visualPathMode: "raw" | "upward" | "upward avoid" | "auto route twirl" | "twirl upward"; visualPathAngle: number;
   visualPositionMode: "off" | "note step"; visualPositionX: number; visualPositionY: number; finalAngleMode: "scaled" | "cardinal" | "horizontal" | "custom";
   finalCustomAngle: number; finalCardinalStep: number; chainContiguous: boolean; mergeDuplicateNotes: boolean; useProjectSong: boolean; copyProjectSong: boolean; songConflictAction: "cancel" | "rename" | "overwrite"; songSourcePath: string; songOffsetAuto: boolean; songOffsetMs: number; fullSongOffsetMs: number; selectedSongOffsetMs: number; selectedOnly: boolean;
+  /** Append to the end of an existing chart (picked on export) instead of writing a new one. */
+  appendToChart?: boolean;
 };
 export type AdoFAITilePreview = { points: Array<{ x: number; y: number; angle: number }>; stats: Record<string, unknown>; shownTiles: number; totalTiles: number; limited: boolean };
 export type AdoFAIDebugPreview = { rows: Array<Record<string, unknown>>; summary: { rows: number; estimatedTiles: number; targetAngleUsed: number; targetAngleIgnored: number; finalVisualCorrections: number; warnings: number }; limited: boolean };
