@@ -146,7 +146,7 @@ class AppendExportBridgeTests(unittest.TestCase):
             original = '﻿{"settings": {"songFilename": "song.ogg", "offset": 500, "bpm": 150, }, "angleData": [0, 90, 180, ], "actions": [], "decorations": []}'
             chart.write_bytes(original.encode("utf-8"))
             options = bridge.get_adofai_export_defaults()
-            self.assertFalse(options["appendToChart"])
+            self.assertTrue(options["appendToChart"])  # append is the default
             options.update(appendToChart=True, useProjectSong=True)
             with mock.patch.object(bridge, "_dialog", return_value=str(chart)) as dialog:
                 result = bridge.export_adofai_advanced(options)

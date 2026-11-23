@@ -25,6 +25,7 @@ class AdoFAIAudioCopySafetyTests(unittest.TestCase):
         bridge.notes = [Note(0.0, 0.5, 69.0).normalized()]
         defaults = bridge.get_adofai_export_defaults()
         defaults.update(
+            appendToChart=False,  # new-chart export copies the song
             useProjectSong=True,
             copyProjectSong=True,
             songSourcePath=str(source),

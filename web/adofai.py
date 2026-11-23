@@ -231,9 +231,9 @@ class AdoFAIMixin:
             "fullSongOffsetMs": round(full_offset, 3),
             "selectedSongOffsetMs": round(selected_offset, 3),
             "selectedOnly": bool(selected_only and selected),
-            # Append the tiles to the end of an existing chart instead of
-            # writing a new one.
-            "appendToChart": False,
+            # Append the tiles to the end of an existing chart (the default)
+            # instead of writing a new one.
+            "appendToChart": True,
         }
 
     def _valid_export_indices(self, indices: list[int] | None) -> list[int]:
