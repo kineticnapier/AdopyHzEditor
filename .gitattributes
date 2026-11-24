@@ -1,0 +1,9 @@
+# Frontend tests read source files and match text with LF line breaks;
+# keep these checked out with LF even where core.autocrlf is on.
+frontend/**/*.ts text eol=lf
+frontend/**/*.tsx text eol=lf
+frontend/**/*.css text eol=lf
+frontend/**/*.html text eol=lf
+frontend/**/*.json text eol=lf
+frontend/**/*.md text eol=lf
+frontend/**/*.js text eol=lf
