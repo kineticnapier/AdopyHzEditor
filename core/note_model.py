@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, fields
 from typing import Any
 import math
 
@@ -181,7 +181,10 @@ class Note:
         ).normalized()
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self.normalized())
+        n = self.normalized()
+        # Every field is a plain value, so a shallow dict equals asdict()
+        # without its recursive copying (this runs for every note per edit).
+        d = {name: getattr(n, name) for name in _NOTE_FIELD_NAMES}
         # Keep old project files readable-ish and avoid noisy nulls.
         if d.get("kind") == "note":
             d.pop("midi_end", None)
@@ -278,3 +281,6 @@ def note_name(midi: float) -> str:
     m = int(math.floor(float(midi) + 0.5))
     names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     return f"{names[m % 12]}{m // 12 - 1}"
+
+
+_NOTE_FIELD_NAMES = tuple(f.name for f in fields(Note))

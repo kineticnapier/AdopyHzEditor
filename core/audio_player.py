@@ -4,6 +4,8 @@ from pathlib import Path
 from bisect import bisect_right
 from dataclasses import dataclass
 import threading
+from typing import Any
+
 import numpy as np
 
 
@@ -42,6 +44,69 @@ class PreviewSegment:
         yield self.end
         yield self.midi
 
+
+
+_PREVIEW_KEY_FIELDS = ("start", "end", "midi", "kind", "midi_end", "ctrl1_midi", "ctrl2_midi", "interpolation")
+
+
+def _preview_note_key(note, sr: int):
+    """Everything a note's preview depends on (velocity and layer do not count)."""
+    if hasattr(note, "start") and hasattr(note, "midi"):
+        return (sr,) + tuple(getattr(note, name, None) for name in _PREVIEW_KEY_FIELDS)
+    return (sr, "tuple") + tuple(note)
+
+
+def _prepare_preview_note(note, sr: int) -> tuple[list[PreviewSegment], np.ndarray]:
+    """Preview segments and click-sample hit positions of one note.
+
+    Curve notes are sampled into short fixed-pitch segments whose phase runs
+    on across segments, so hits stay one per cycle through a glide.
+    """
+    two_pi = 2.0 * np.pi
+    try:
+        segments = note.sample_fixed_segments(max_seconds=0.020, max_pitch_step=0.20)
+    except AttributeError:
+        segments = [note]
+    prepared: list[PreviewSegment] = []
+    hit_chunks: list[np.ndarray] = []
+    phase = 0.0
+    for segment_index, seg in enumerate(segments):
+        try:
+            start = float(seg.start)
+            end = float(seg.end)
+            midi = float(seg.midi)
+        except AttributeError:
+            start, end, midi = float(seg[0]), float(seg[1]), float(seg[2])
+
+        if end <= start:
+            continue
+        start_sample = max(0, int(start * sr))
+        end_sample = max(start_sample + 1, int(end * sr))
+        prepared.append(PreviewSegment(
+            start_sample,
+            end_sample,
+            float(midi),
+            phase,
+            segment_index == 0,
+            segment_index == len(segments) - 1,
+        ))
+
+        freq = midi_to_hz(float(midi))
+        phase_end = phase + two_pi * freq * (end_sample - start_sample) / sr
+        first_cycle = int(np.ceil((phase - 1e-12) / two_pi))
+        last_cycle = int(np.floor((phase_end - 1e-12) / two_pi))
+        if last_cycle >= first_cycle and freq > 0:
+            cycles = np.arange(first_cycle, last_cycle + 1, dtype=np.float64)
+            hits = (
+                float(start_sample)
+                + (cycles * two_pi - phase) * sr / (two_pi * freq)
+            )
+            valid = (hits >= start_sample - 1e-7) & (hits < end_sample - 1e-7)
+            if np.any(valid):
+                hit_chunks.append(hits[valid])
+        phase = phase_end
+    hits_all = np.concatenate(hit_chunks) if hit_chunks else np.empty(0, dtype=np.float64)
+    return prepared, hits_all
 
 class AudioPlayer:
     """
@@ -82,6 +147,9 @@ class AudioPlayer:
         self.preview_notes: list[PreviewSegment | tuple[int, int, float]] = []
         self._preview_ends: list[int] = []
         self._preview_hit_samples = np.empty(0, dtype=np.float64)
+        # Per-note preview data from the last set_preview_notes call, so an
+        # edit only recomputes the notes that changed.
+        self._preview_note_cache: dict[Any, tuple[list[PreviewSegment], np.ndarray]] = {}
 
         try:
             import sounddevice as sd  # noqa
@@ -205,50 +273,19 @@ class AudioPlayer:
         prepared: list[PreviewSegment] = []
         hit_chunks: list[np.ndarray] = []
         sr = max(1, int(self.sr))
-        two_pi = 2.0 * np.pi
+        previous = self._preview_note_cache
+        cache: dict[Any, tuple[list[PreviewSegment], np.ndarray]] = {}
 
         for n in notes:
-            try:
-                segments = n.sample_fixed_segments(max_seconds=0.020, max_pitch_step=0.20)
-            except AttributeError:
-                segments = [n]
-
-            phase = 0.0
-            for segment_index, seg in enumerate(segments):
-                try:
-                    start = float(seg.start)
-                    end = float(seg.end)
-                    midi = float(seg.midi)
-                except AttributeError:
-                    start, end, midi = float(seg[0]), float(seg[1]), float(seg[2])
-
-                if end <= start:
-                    continue
-                start_sample = max(0, int(start * sr))
-                end_sample = max(start_sample + 1, int(end * sr))
-                prepared.append(PreviewSegment(
-                    start_sample,
-                    end_sample,
-                    float(midi),
-                    phase,
-                    segment_index == 0,
-                    segment_index == len(segments) - 1,
-                ))
-
-                freq = midi_to_hz(float(midi))
-                phase_end = phase + two_pi * freq * (end_sample - start_sample) / sr
-                first_cycle = int(np.ceil((phase - 1e-12) / two_pi))
-                last_cycle = int(np.floor((phase_end - 1e-12) / two_pi))
-                if last_cycle >= first_cycle and freq > 0:
-                    cycles = np.arange(first_cycle, last_cycle + 1, dtype=np.float64)
-                    hits = (
-                        float(start_sample)
-                        + (cycles * two_pi - phase) * sr / (two_pi * freq)
-                    )
-                    valid = (hits >= start_sample - 1e-7) & (hits < end_sample - 1e-7)
-                    if np.any(valid):
-                        hit_chunks.append(hits[valid])
-                phase = phase_end
+            key = _preview_note_key(n, sr)
+            entry = cache.get(key) or previous.get(key)
+            if entry is None:
+                entry = _prepare_preview_note(n, sr)
+            cache[key] = entry
+            prepared.extend(entry[0])
+            if entry[1].size:
+                hit_chunks.append(entry[1])
+        self._preview_note_cache = cache
 
         prepared.sort(key=lambda x: x.start)
         if hit_chunks:

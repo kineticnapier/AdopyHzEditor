@@ -457,7 +457,7 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
         }
 
     def _note_dicts(self) -> list[dict[str, Any]]:
-        return [n.normalized().to_dict() for n in self.notes]
+        return [n.to_dict() for n in self.notes]  # to_dict normalizes
 
     def _analysis_state(self) -> dict[str, Any]:
         direct = self.vorbis_spectrum_store if self.audio_path else None
