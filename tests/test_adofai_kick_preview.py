@@ -488,7 +488,7 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
 
     def test_frozen_build_prefers_bundled_extractor(self):
         with tempfile.TemporaryDirectory() as tmp:
-            exe = Path(tmp) / "AdopyHzEditor.exe"
+            exe = Path(tmp).resolve() / "AdopyHzEditor.exe"
             expected = exe.parent / "AssetExtractor" / adofai_assets._EXTRACTOR_NAME
             with (
                 mock.patch.object(adofai_assets.sys, "frozen", True, create=True),
@@ -498,12 +498,12 @@ class AdoFaiAssetLocatorTests(unittest.TestCase):
 
     def test_frozen_build_runs_bundled_extractor_without_dotnet(self):
         with tempfile.TemporaryDirectory() as tmp:
-            exe = Path(tmp) / "AdopyHzEditor.exe"
+            exe = Path(tmp).resolve() / "AdopyHzEditor.exe"
             bundled = exe.parent / "AssetExtractor" / adofai_assets._EXTRACTOR_NAME
             bundled.parent.mkdir(parents=True)
             bundled.write_bytes(b"test executable placeholder")
-            game_root = Path(tmp) / "game"
-            output = Path(tmp) / "sndKick.wav"
+            game_root = Path(tmp).resolve() / "game"
+            output = Path(tmp).resolve() / "sndKick.wav"
 
             with (
                 mock.patch.object(adofai_assets.sys, "frozen", True, create=True),
