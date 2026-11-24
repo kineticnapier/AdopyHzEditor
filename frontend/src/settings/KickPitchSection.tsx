@@ -143,7 +143,7 @@ export default function KickPitchSection({
 
   return (
     <details className="kick-pitch-section">
-      <summary>キック音高解析（試作）</summary>
+      <summary>キック音高解析</summary>
       <p className="inspector-help">
         短い区間の基本周波数を追跡します。倍音（Piepの高い成分）は基本周波数へまとめ、
         独立した成分は別候補として表示します。
