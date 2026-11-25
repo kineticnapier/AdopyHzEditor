@@ -17,6 +17,13 @@ colors:
   warning-gold: "#e4bc5b"
   danger-red: "#ef7d7d"
   focus-blue: "#78c7ff"
+  primary-blue: "#1769aa"
+  primary-border: "#0d4f85"
+  surface-raised: "#30363c"
+  surface-hover: "#454d56"
+  seam: "#101419"
+  field: "#3a4148"
+  field-text: "#f2f4f7"
   track-cyan: "rgba(135, 240, 255, 0.92)"
   selection-yellow: "#ffe65a"
   note-blue: "#46afff"
@@ -137,6 +144,8 @@ The palette is a low-chroma dark editor frame around brighter analytical and edi
 
 **The Semantic Canvas Rule.** Blue is editable Note data, cyan is analysis-derived Track evidence, yellow is current selection, and white is current playback time. Never reuse those hues decoratively on the Canvas.
 
+**Default colormap.** New sessions start on Magma: it has no blue or cyan, so Note blue and Track cyan never blend into the Spectrum. WaveTone and the others stay selectable.
+
 **The Spectrum Is Evidence Rule.** Spectrum color comes from the active analysis colormap and settings. Do not force it into a brand gradient, label its layers as melody/harmony/noise, or let chrome styling reduce its readability.
 
 ## Typography
@@ -155,6 +164,8 @@ The palette is a low-chroma dark editor frame around brighter analytical and edi
 - **Label** (400, 11px, 1.3): Dense tabs, property labels, secondary controls, and compact explanatory text.
 - **Data** (400, 11px, 1.3): Time, pitch, Hz, Track IDs, output values, and keyboard hints; use tabular numerals where values update in place.
 
+In CSS these are `--text-lg` (14px), `--text-md` (12px, the root size every control and dialog inherits) and `--text-sm` (11px, the smallest text size). Nothing goes below 11px.
+
 **The Instrument Readout Rule.** Values that change with playback, cursor movement, or selection use the data face and stable width; prose and control names stay in the system UI face.
 
 ## Layout
@@ -163,7 +174,7 @@ The shell fills the viewport and uses four fixed-height horizontal bands: title/
 
 Spacing follows a tight 2/4/6/8/12/16px rhythm. Four pixels separates controls inside a group; 6–8px separates neighboring controls and field rows; 8–12px pads chrome and compact sections; 16px is reserved for roomier dialog content. Do not inflate the rhythm into dashboard whitespace.
 
-Narrow desktop behavior preserves function and Canvas priority rather than transforming into a mobile layout. Below 1180px the Inspector narrows to 272px, button horizontal padding tightens, and timeline labels may disappear while their fields remain. Below 920px the Inspector narrows to 250px, view controls and time output become more compact, and secondary timeline labels collapse. Tool and dialog grids become single-column near 1100px/900px where necessary. Horizontal overflow, clipped primary actions, and a permanently expanded rail are regressions.
+Narrow desktop behavior preserves function and Canvas priority rather than transforming into a mobile layout. Below 1180px the Inspector narrows to 272px and button horizontal padding tightens; timeline labels stay visible so their number fields never stand unlabeled at the minimum window width. Below 920px the Inspector narrows to 250px and view controls and time output become more compact. Tool and dialog grids become single-column near 1100px/900px where necessary. Horizontal overflow, clipped primary actions, and a permanently expanded rail are regressions.
 
 **The Canvas Wins Rule.** New persistent UI must not take space from the Canvas when it can be contextual, collapsible, folded, or placed in an existing menu.
 
@@ -215,7 +226,7 @@ Avoid excessive containment. Inspector sections and settings folds may have a to
 
 ### Navigation
 
-Title/menu, transport/view toolbar, Canvas readout/timeline, and status bar are compact horizontal bands. Menus use desktop arrow, Home, End, Escape, and focus-return behavior. The right rail has two pressed-state tabs—Inspector and Settings—and can be collapsed from a stable toolbar affordance. File operations remain in the File menu, never the toolbar.
+Title/menu, transport/view toolbar (transport and playback time on the left, view mode and the rail toggle on the right), Canvas readout/timeline, and status bar are compact horizontal bands. Menus use desktop arrow, Home, End, Escape, and focus-return behavior. The right rail has two pressed-state tabs—Inspector and Settings—and can be collapsed from a stable toolbar affordance. File operations remain in the File menu, never the toolbar.
 
 ### Contextual Inspector
 
