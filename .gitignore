@@ -78,3 +78,9 @@ temp/
 # Release artifacts
 releases/*
 !releases/.gitkeep
+
+# PyInstaller writes this on every release build (scripts/build_release.ps1).
+AdopyHzEditor.spec
+# .NET build output of the bundled ADOFAI kick extractor.
+tools/AdopyHzEditor.AssetExtractor/bin/
+tools/AdopyHzEditor.AssetExtractor/obj/
