@@ -124,9 +124,8 @@ export default function SettingsPanel({
   }, [selectionKey]);
 
   return (
-    <aside className="settings inspector-panel">
-      <h2>{page === "inspector" ? "インスペクタ" : "設定"}</h2>
-      <nav className="inspector-tabs">
+    <aside className="settings inspector-panel" aria-label={page === "inspector" ? "インスペクタ" : "設定"}>
+      <nav className="inspector-tabs" aria-label="右パネルの表示">
         <button
           className={page === "inspector" ? "active" : ""}
           aria-pressed={page === "inspector"}
@@ -659,12 +658,12 @@ export default function SettingsPanel({
               <div
                 className={fallback ? "analysis-state warn" : "analysis-state"}
               >
-                <span>Requested</span>
+                <span>指定</span>
                 <b>{requested}</b>
-                <span>Actual</span>
+                <span>実際</span>
                 <b>
                   {actual}
-                  {fallback ? " · fallback" : ""}
+                  {fallback ? "（代替）" : ""}
                 </b>
               </div>
               <Row label="解析元">

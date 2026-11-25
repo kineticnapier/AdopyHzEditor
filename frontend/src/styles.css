@@ -80,13 +80,13 @@ button:disabled { cursor: default; opacity: .48; }
 .timeline-field.pitch-field input[type="number"] { width: 48px; }
 .timeline-follow { display: flex; align-items: center; gap: 4px; white-space: nowrap; color: #d6dce2; }
 .timeline-follow input { margin: 0; }
-.settings { min-height: 0; min-width: 0; background: var(--surface-1); display: grid; grid-template-rows: 34px 34px minmax(0, 1fr); }
-.settings h2 { height: 34px; margin: 0; display: flex; align-items: center; padding: 0 10px; background: var(--surface-2); border-bottom: 1px solid #101419; font-size: 12px; }
-.settings nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 4px; background: #2f343a; border-bottom: 1px solid #171a1e; }
+.settings { min-height: 0; min-width: 0; background: var(--surface-1); display: flex; flex-direction: column; }
+.settings nav { flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 4px; background: #2f343a; border-bottom: 1px solid #171a1e; }
 .settings nav button { border: 0; border-radius: 5px; background: transparent; color: #d6dbe1; padding: 5px 4px; min-height: 28px; font-size: 11px; white-space: nowrap; }
 .settings nav button:hover { background: #454d56; }
 .settings nav button.active { background: #1769aa; color: #fff; font-weight: 700; }
 .settings-body {
+  flex: 1;
   min-height: 0;
   display: grid;
   /* Keep expanded <details> at their full height so the panel can scroll. */

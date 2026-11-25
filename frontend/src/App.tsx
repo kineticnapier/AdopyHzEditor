@@ -1468,19 +1468,16 @@ export default function App() {
             )}
           </div>
           <div className="canvas-readout" aria-live="off">
-            <span>
-              {cursorReadout ? `${cursorReadout.time.toFixed(3)} s` : "—.—— s"}
-            </span>
-            <span>
-              {cursorReadout
-                ? `MIDI ${cursorReadout.midi.toFixed(2)}`
-                : "MIDI —"}
-            </span>
-            <span>
-              {cursorReadout
-                ? `${midiLabel(cursorReadout.midi)} · ${midiToHz(cursorReadout.midi).toFixed(2)} Hz`
-                : "Pitch —"}
-            </span>
+            {/* Off the Canvas there is nothing to read; leave the band empty. */}
+            {cursorReadout && (
+              <>
+                <span>{`${cursorReadout.time.toFixed(3)} s`}</span>
+                <span>{`MIDI ${cursorReadout.midi.toFixed(2)}`}</span>
+                <span>
+                  {`${midiLabel(cursorReadout.midi)} · ${midiToHz(cursorReadout.midi).toFixed(2)} Hz`}
+                </span>
+              </>
+            )}
             {hoveredTrack && (
               <strong>{formatTrackHoverReadout(hoveredTrack)}</strong>
             )}
