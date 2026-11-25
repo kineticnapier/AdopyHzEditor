@@ -7,7 +7,6 @@ on:
     paths:
       - "frontend/**"
       - "web_ui.py"
-      - "main.py"
       - "web/**"
       - "core/**"
       - "exporters/**"
@@ -15,7 +14,6 @@ on:
       - "tools/**"
       - "native/**"
       - "third_party/**"
-      - "desktop/**"
       - "tests/**"
       - "scripts/**"
       - "run-webui.ps1"
@@ -40,13 +38,11 @@ jobs:
       - name: Python syntax
         run: >-
           python -m compileall -q
-          main.py
           web_ui.py
           core
           exporters
           importers
           tools
-          desktop
           web
           tests
           scripts
