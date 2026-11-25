@@ -54,4 +54,9 @@ jobs:
           if (-not (Test-Path $zip)) {
             throw "Release ZIP was not created: $zip"
           }
-          gh release create "${{ github.ref_name }}" $zip --title "AdopyHzEditor ${{ github.ref_name }}" --generate-notes
+          # Hand-written notes for this tag go first; GitHub appends the
+          # generated change list below them.
+          $notes = "docs/release-notes/${{ github.ref_name }}.md"
+          $extra = @()
+          if (Test-Path $notes) { $extra = @("--notes-file", $notes) }
+          gh release create "${{ github.ref_name }}" $zip --title "AdopyHzEditor ${{ github.ref_name }}" --generate-notes @extra
