@@ -7,6 +7,8 @@ import {
   defaultKickPitchRegion,
   defaultKickPitchSelection,
   kickPitchRegionFromPick,
+  KICK_PITCH_SHOWN_CANDIDATES,
+  orderedKickPitchCandidates,
   validKickPitchRegion,
   type KickPitchPick,
   type KickPitchRegion,
@@ -61,7 +63,17 @@ export default function KickPitchSection({
   const [method, setMethod] = useState<KickPitchMethod>("harmonic");
   const [running, setRunning] = useState(false);
   const invalid = validKickPitchRegion(region);
-  const candidates = kickPitch?.available ? (kickPitch.candidates ?? []) : [];
+  const [showAllCandidates, setShowAllCandidates] = useState(false);
+  const candidates = orderedKickPitchCandidates(kickPitch);
+  // Fragments past the first few stay folded unless one of them is selected.
+  const shownCandidates = showAllCandidates
+    ? candidates
+    : candidates.filter(
+        (candidate, index) => index < KICK_PITCH_SHOWN_CANDIDATES || selectedIds.includes(candidate.id),
+      );
+  const hiddenCandidates = candidates.length - shownCandidates.length;
+  // A new result starts folded again.
+  useEffect(() => setShowAllCandidates(false), [kickPitch]);
 
   const field = (key: keyof KickPitchRegion, label: string, step: number) => (
     <label className="kick-pitch-field">
@@ -175,8 +187,14 @@ export default function KickPitchSection({
         <select value={method} onChange={(event) => setMethod(event.target.value as KickPitchMethod)}>
           <option value="harmonic">倍音解析（標準・音高が安定した音向け）</option>
           <option value="cycle">1周期ごと（音高が上下するZaag向け）</option>
+          <option value="multiwindow">一番明るい線（高い音・シンセ向け）</option>
         </select>
       </label>
+      {method === "multiwindow" && (
+        <p className="inspector-help">
+          範囲の中で一番強く見える線をそのままたどります。倍音のまとめ方を気にせず、見えている線を追いたいとき向けです。
+        </p>
+      )}
       {method === "cycle" && (
         <p className="inspector-help">
           波形の1周期ごとに音高を測ります。速く上下する動きも追えます。
@@ -204,7 +222,7 @@ export default function KickPitchSection({
       {kickPitch?.available && (
         <>
           <ul className="kick-pitch-candidates" aria-label="キック音高の候補">
-            {candidates.map((candidate) => (
+            {shownCandidates.map((candidate) => (
               <li key={candidate.id}>
                 <label className="inline-check">
                   <input
@@ -229,6 +247,11 @@ export default function KickPitchSection({
             ))}
             {!candidates.length && <li>信頼できる音高が見つかりませんでした</li>}
           </ul>
+          {(hiddenCandidates > 0 || showAllCandidates) && (
+            <button className="quiet-button" onClick={() => setShowAllCandidates(!showAllCandidates)}>
+              {showAllCandidates ? "短い候補をたたむ" : `ほかの短い候補 ${hiddenCandidates}件を表示`}
+            </button>
+          )}
           <label className="kick-pitch-field kick-pitch-method">
             <span>作り方</span>
             <select

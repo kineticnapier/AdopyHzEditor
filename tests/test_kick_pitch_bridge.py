@@ -103,5 +103,20 @@ class KickPitchBridgeTests(unittest.TestCase):
         self.assertFalse(bridge.analyze_kick_pitch(0.0, 11.0)["available"])
 
 
+class HighSweepTests(unittest.TestCase):
+    def test_brightest_line_follows_a_synth_sweep_above_2000_hz(self):
+        t = np.arange(int(0.6 * SR)) / SR
+        freq = 3200.0 * 2.0 ** (-t / 0.6)  # 3200 -> 1600 Hz
+        tone = np.sin(2 * np.pi * np.cumsum(freq) / SR)
+        rumble = 0.6 * np.sin(2 * np.pi * 330.0 * t)  # a lower part at the same time
+        bridge = _bridge_with_audio((tone + rumble).astype(np.float32))
+        payload = bridge.analyze_kick_pitch(0.0, 0.6, 1000.0, 5000.0, 1.0, "multiwindow")
+        self.assertTrue(payload["available"])
+        primary = payload["candidates"][payload["primaryIndex"]]
+        hz = [h for h, c in zip(primary["hz"], primary["confidence"]) if h is not None and c >= 0.5]
+        self.assertGreater(max(hz), 2500.0)
+        self.assertLess(min(hz), 2000.0)
+
+
 if __name__ == "__main__":
     unittest.main()

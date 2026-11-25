@@ -34,6 +34,8 @@ from web.track_transcription import _minimum_note_span, _smooth_midis, _velocity
 DEFAULT_MAX_ERROR_CENTS = 5.0
 DEFAULT_MIN_CONFIDENCE = 0.5
 MAX_CURVE_SEGMENTS_PER_TRACK = 256
+# Upper analysis limit; high synth sweeps reach a few kHz.
+MAX_ANALYSIS_HZ = 8000.0
 FIT_MODES = ("line", "exact")
 DEFAULT_LINE_ERROR_CENTS = 30.0
 # Holes longer than this still split the line: it is probably another hit.
@@ -243,7 +245,7 @@ class KickPitchMixin:
             defaults,
             method=str(method),
             min_hz=max(10.0, float(min_hz)),
-            max_hz=max(float(min_hz) * 1.5, min(2000.0, float(max_hz))),
+            max_hz=max(float(min_hz) * 1.5, min(MAX_ANALYSIS_HZ, float(max_hz))),
             hop_seconds=min(0.02, max(0.0001, float(hop_ms) / 1000.0)),
         )
         result = analyze_pitch_region(samples, sample_rate, start, end, settings)

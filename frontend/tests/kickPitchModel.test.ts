@@ -8,6 +8,7 @@ import {
   defaultKickPitchSelection,
   kickPitchPolylines,
   kickPitchRegionFromPick,
+  orderedKickPitchCandidates,
   validKickPitchRegion,
 } from "../src/settings/kickPitchModel.ts";
 
@@ -63,7 +64,7 @@ test("region validation rejects empty, too long and inverted ranges", () => {
 });
 
 test("labels describe the role and the sweep", () => {
-  assert.equal(candidateRoleLabel(candidate()), "主（基本周波数）");
+  assert.equal(candidateRoleLabel(candidate()), "主な線");
   assert.equal(candidateRoleLabel(candidate({ role: "harmonic", harmonicNumber: 12 })), "倍音 ×12");
   assert.equal(candidateRoleLabel(candidate({ role: "independent" })), "独立成分");
   assert.equal(candidateSummary(candidate()), "150.0→110.0 Hz · 0.004 s · 信頼度 75%");
@@ -105,4 +106,19 @@ test("a box longer than the limit is cut to the limit", () => {
   const region = kickPitchRegionFromPick({ startTime: 0, endTime: 30, minMidi: 30, maxMidi: 50 });
   assert.equal(validKickPitchRegion(region), null);
   assert.ok(region.end - region.start <= 10);
+});
+
+test("the primary track is listed first, then the longest tracks", () => {
+  const payload: KickPitchPayload = {
+    available: true,
+    primaryIndex: 3,
+    candidates: [
+      candidate({ id: 0, role: "independent", duration: 0.05, meanConfidence: 0.9 }),
+      candidate({ id: 1, role: "independent", duration: 0.4, meanConfidence: 0.5 }),
+      candidate({ id: 2, role: "independent", duration: 0.4, meanConfidence: 0.8 }),
+      candidate({ id: 3, role: "primary", duration: 0.2, meanConfidence: 0.6 }),
+    ],
+  };
+  assert.deepEqual(orderedKickPitchCandidates(payload).map((c) => c.id), [3, 2, 1, 0]);
+  assert.deepEqual(orderedKickPitchCandidates(null), []);
 });
