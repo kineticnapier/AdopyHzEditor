@@ -3,6 +3,7 @@ import { beatSyncedOutputBpm } from "./beatSync";
 import type {
   AdoFAIDebugPreview,
   AdoFAIExportOptions,
+  AdoFAIKpsReport,
   AdoFAITilePreview,
   BackendApi,
 } from "./bridge";
@@ -12,7 +13,7 @@ import { isDialogCompositionKey, isPlainDialogEscape } from "./dialogFocus";
 import { commitNumericEdit } from "../settings/numericInputModel";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { exportDefaultsContextIsCurrent } from "./previewFreshness";
-import { exportFailureMessage, exportStatusMessage } from "./exportResult";
+import { exportFailureMessage, exportStatusMessage, kpsRangeLines } from "./exportResult";
 import { exportScopeOffset } from "./exportScopeOffset";
 import { isXModeAvailable, xModeForCompression } from "./angleCompressionXMode";
 
@@ -59,7 +60,9 @@ export default function AdoFAIExportDialogJa({
     [error, setError] = useState<{ message: string; context: ExportContext } | null>(null),
     [tile, setTile] = useState<AdoFAITilePreview | null>(null),
     [debug, setDebug] = useState<AdoFAIDebugPreview | null>(null),
-    [previewMode, setPreviewMode] = useState<"none" | "tile" | "debug">("none");
+    [previewMode, setPreviewMode] = useState<"none" | "tile" | "debug">("none"),
+    // Set after an export that has stretches too fast to hit by hand.
+    [kpsNotice, setKpsNotice] = useState<{ status: string; report: AdoFAIKpsReport } | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const previewRequests = useRef(new LatestRequestGate());
   const actionOnce = useRef(createExclusiveAsyncAction());
@@ -184,6 +187,11 @@ export default function AdoFAIExportDialogJa({
     if (status !== null) onStatus(status);
     const failure = exportFailureMessage(r);
     if (failure) setError({ message: failure, context });
+    if (r.ok && r.kps && r.kps.ranges.length) {
+      // The chart is written; stay open so the warning is not missed.
+      setKpsNotice({ status: r.status, report: r.kps });
+      return;
+    }
     if (r.ok) onClose();
   }
   async function tilePreview() {
@@ -257,6 +265,32 @@ export default function AdoFAIExportDialogJa({
         ) : (
           <div className="dialog-loading" role="status">{working ? "出力処理中…" : "設定を読み込んでいます…"}</div>
         )}
+      </Modal>
+    );
+  if (kpsNotice)
+    return (
+      <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
+        <div className="export-dialog-body">
+          <p>書き出しました。</p>
+          <div className="dialog-warning" role="alert">
+            <b>
+              KPSが{kpsNotice.report.limit}を超える所が{kpsNotice.report.ranges.length}か所あります（最大{" "}
+              {Math.round(kpsNotice.report.maxKps)} KPS）
+            </b>
+            <p>人の手では叩けない可能性があります。タイル番号は ADOFAI のエディタで探せます。</p>
+            <ul>
+              {kpsRangeLines(kpsNotice.report).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+        <div className="dialog-footer">
+          <span />
+          <button className="primary" onClick={onClose}>
+            閉じる
+          </button>
+        </div>
       </Modal>
     );
   const isHarmony = options.method === "harmony",

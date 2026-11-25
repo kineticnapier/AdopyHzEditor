@@ -23,6 +23,7 @@ from exporters.adofai import (
 )
 from web.gap_bridge import build_adofai_level_with_gap_bridges as build_adofai_level
 from exporters.adofai_append import AppendError, append_level, load_adofai_text
+from exporters.adofai_kps import kps_report, kps_warning
 from app_metadata import APP_VERSION, GITHUB_RELEASES_URL
 from i18n import tr
 
@@ -450,14 +451,21 @@ class AdoFAIMixin:
             encoding="utf-8",
         )
 
+        kps = kps_report(level)
+        status = f"Exported {Path(path).name} ({stats.get('tiles_total', 0)} tiles)"
+        warning = kps_warning(kps)
+        if warning:
+            status += "。" + warning
         with self._lock:
-            self._status = f"Exported {Path(path).name} ({stats.get('tiles_total', 0)} tiles)"
+            self._status = status
         return {
             "ok": True,
             "path": str(path),
             "copiedSong": copied_song,
             "stats": stats,
-            "status": self._status,
+            "kps": kps,
+            "kpsWarning": warning,
+            "status": status,
         }
 
     def _append_adofai_export(self, options: dict[str, Any], selected_indices: list[int] | None) -> dict[str, Any]:
@@ -503,6 +511,11 @@ class AdoFAIMixin:
         )
         if info["warnings"]:
             status += "。" + " ".join(info["warnings"])
+        # Only the appended part is checked; floors and times are the merged chart's.
+        kps = kps_report(merged, first_floor=info["jointFloor"])
+        warning = kps_warning(kps)
+        if warning:
+            status += "。" + warning
         with self._lock:
             self._status = status
         return {
@@ -512,6 +525,8 @@ class AdoFAIMixin:
             "appended": True,
             "stats": {**stats, "tiles_total": info["addedFloors"]},
             "warnings": info["warnings"],
+            "kps": kps,
+            "kpsWarning": warning,
             "status": status,
         }
 

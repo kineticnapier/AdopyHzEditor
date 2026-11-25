@@ -19,6 +19,9 @@ export type TrackSelectionResult = { trackIds: number[]; status: string };
 export type CursorPeakPayload = { available: boolean; peakAvailable?: boolean; time?: number; cursorMidi?: number; cursorHz?: number; cursorName?: string; cursorCents?: number; peakMidi?: number; peakHz?: number; peakName?: string; peakCents?: number; peakDb?: number };
 export type NoteMutationResult = { notes: NoteDto[]; status: string; index?: number; indices?: number[]; changed?: boolean; dirty?: boolean; trackIds?: number[]; maxErrorCents?: number | null };
 /** "line": one joined line across holes; "exact": confident stretches only. */
+/** Stretches of an exported chart faster than a person can hit (see exporters/adofai_kps.py). */
+export type AdoFAIKpsRange = { startFloor: number; endFloor: number; startSeconds: number; maxKps: number };
+export type AdoFAIKpsReport = { limit: number; maxKps: number; tilesOver: number; ranges: AdoFAIKpsRange[] };
 export type KickPitchFitMode = "line" | "exact";
 export type KickPitchMethod = "harmonic" | "multiwindow" | "phase" | "peak" | "cycle";
 export type KickPitchCandidate = {
@@ -76,7 +79,7 @@ export type BackendApi = {
   choose_adofai_song_source(): Promise<{ ok: boolean; path?: string; name?: string; status: string }>;
   preview_adofai_tiles(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<AdoFAITilePreview>;
   preview_adofai_debug(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<AdoFAIDebugPreview>;
-  export_adofai_advanced(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<{ ok: boolean; path?: string; copiedSong?: string | null; stats?: Record<string, unknown>; status: string }>;
+  export_adofai_advanced(options: AdoFAIExportOptions, selectedIndices?: number[]): Promise<{ ok: boolean; path?: string; copiedSong?: string | null; stats?: Record<string, unknown>; kps?: AdoFAIKpsReport; kpsWarning?: string | null; status: string }>;
   get_help_sections(): Promise<HelpPayload>; open_releases_page(): Promise<{ ok: boolean; url: string }>;
 };
 
