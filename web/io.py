@@ -43,7 +43,7 @@ DEFAULT_EDITOR_SETTINGS: dict[str, Any] = {
     "enhance": True,
     "displayMode": "wavetone",
     "harmonics": "off",
-    "colormap": "wavetone",
+    "colormap": "magma",
     "analysisProfile": "Normal",
     "cqtResolution": "profile default",
     "analysisSource": "cqt",

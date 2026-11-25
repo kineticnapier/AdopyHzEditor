@@ -90,7 +90,7 @@ const defaultSettings: EditorSettings = {
   enhance: true,
   displayMode: "wavetone",
   harmonics: "off",
-  colormap: "wavetone",
+  colormap: "magma",
   analysisProfile: "Normal",
   cqtResolution: "profile default",
   analysisSource: "cqt",
