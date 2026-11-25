@@ -39,8 +39,8 @@ class EditingMixin:
         t = _clamp((float(at_time) - n.start) / max(1e-12, n.duration), 0.0, 1.0)
         if not n.is_curve:
             return (
-                Note(n.start, at_time, n.midi, n.velocity, target_angle=n.target_angle).normalized(),
-                Note(at_time, n.end, n.midi, n.velocity, target_angle=n.target_angle).normalized(),
+                Note(n.start, at_time, n.midi, n.velocity, target_angle=n.target_angle, layer=n.layer).normalized(),
+                Note(at_time, n.end, n.midi, n.velocity, target_angle=n.target_angle, layer=n.layer).normalized(),
             )
 
         mode = (n.interpolation or "bezier_pitch").lower().replace("-", "_").replace(" ", "_")
@@ -71,6 +71,7 @@ class EditingMixin:
             left_vals[2],
             n.interpolation,
             n.target_angle,
+            n.layer,
         ).normalized()
         right = Note(
             at_time,
@@ -83,6 +84,7 @@ class EditingMixin:
             right_vals[2],
             n.interpolation,
             n.target_angle,
+            n.layer,
         ).normalized()
         return left, right
 

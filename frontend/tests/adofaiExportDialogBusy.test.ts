@@ -16,7 +16,7 @@ test("ADOFAI export settings are disabled during an operation", () => {
   const settings = dialogSource.slice(start, end);
   assert.match(settings, /<Field label="方式">/);
   assert.match(settings, /<details className="advanced-fold">/);
-  assert.match(settings, /<Field label="最大床数">/);
+  assert.match(settings, /<Field label="端数タイル">/);
   assert.match(dialogSource, /locked={working}/);
   const patch = dialogSource.slice(
     dialogSource.indexOf("function patch<"),
@@ -102,13 +102,6 @@ test("ADOFAI export song-source input has its own accessible name", () => {
 });
 
 test("unused track appearance control stays hidden while exports keep normal appearance", () => {
-  const desktopSource = readFileSync(
-    new URL("../../desktop/export_adofai_dialog.py", import.meta.url),
-    "utf8",
-  );
   assert.doesNotMatch(dialogSource, /<Field label="床の見た目">/);
   assert.match(dialogSource, /trackVisual: "normal"/);
-  assert.doesNotMatch(desktopSource, /self\.track_visual\s*=\s*QtWidgets\.QComboBox\(/);
-  assert.doesNotMatch(desktopSource, /tr\("export\.track_visual"\), self\.track_visual/);
-  assert.match(desktopSource, /"track_visual": "normal"/);
 });

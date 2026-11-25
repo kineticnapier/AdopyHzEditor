@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, fields
 from typing import Any
 import math
 
@@ -29,6 +29,10 @@ class Note:
     # Optional per-zip/section angle override for ADOFAI Angle Compression export.
     # None = auto angle.
     target_angle: float | None = None
+
+    # Source layer, e.g. the MIDI track the note came from.  Layers can be
+    # switched off as a group after import.  None = no layer.
+    layer: str | None = None
 
     @property
     def duration(self) -> float:
@@ -100,10 +104,11 @@ class Note:
         kind = "curve" if self.kind == "curve" else "note"
         interpolation = (self.interpolation or "bezier_pitch").lower().replace(" ", "_").replace("-", "_")
         target_angle = None if self.target_angle is None else float(self.target_angle)
+        layer = None if self.layer is None else str(self.layer)
         if kind != "curve":
-            return Note(a, b, p0, int(self.velocity), "note", None, None, None, interpolation, target_angle)
+            return Note(a, b, p0, int(self.velocity), "note", None, None, None, interpolation, target_angle, layer)
 
-        return Note(a, b, p0, int(self.velocity), "curve", p3, p1, p2, interpolation, target_angle)
+        return Note(a, b, p0, int(self.velocity), "curve", p3, p1, p2, interpolation, target_angle, layer)
 
     def with_time_offset(self, offset: float) -> "Note":
         n = self.normalized()
@@ -118,6 +123,7 @@ class Note:
             n.ctrl2_midi,
             n.interpolation,
             n.target_angle,
+            n.layer,
         ).normalized()
 
     def with_pitch_offset(self, semitones: float) -> "Note":
@@ -134,6 +140,7 @@ class Note:
             None if n.ctrl2_midi is None else n.ctrl2_midi + s,
             n.interpolation,
             n.target_angle,
+            n.layer,
         ).normalized()
 
     def shifted(self, dx: float = 0.0, dy: float = 0.0) -> "Note":
@@ -153,6 +160,7 @@ class Note:
             n.ctrl2_midi,
             n.interpolation,
             angle,
+            n.layer,
         ).normalized()
 
     def with_interpolation(self, interpolation: str) -> "Note":
@@ -169,10 +177,14 @@ class Note:
             n.ctrl2_midi,
             mode,
             n.target_angle,
+            n.layer,
         ).normalized()
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self.normalized())
+        n = self.normalized()
+        # Every field is a plain value, so a shallow dict equals asdict()
+        # without its recursive copying (this runs for every note per edit).
+        d = {name: getattr(n, name) for name in _NOTE_FIELD_NAMES}
         # Keep old project files readable-ish and avoid noisy nulls.
         if d.get("kind") == "note":
             d.pop("midi_end", None)
@@ -182,6 +194,8 @@ class Note:
             d.pop("interpolation", None)
         if d.get("target_angle") is None:
             d.pop("target_angle", None)
+        if d.get("layer") is None:
+            d.pop("layer", None)
         return d
 
     @staticmethod
@@ -198,6 +212,7 @@ class Note:
             ctrl2_midi=None if d.get("ctrl2_midi") is None else float(d.get("ctrl2_midi")),
             interpolation=str(d.get("interpolation", "bezier_pitch")),
             target_angle=None if d.get("target_angle") is None else float(d.get("target_angle")),
+            layer=None if d.get("layer") in (None, "") else str(d.get("layer")),
         ).normalized()
 
     def sample_fixed_segments(
@@ -237,7 +252,7 @@ class Note:
             um = (u0 + u1) * 0.5
             s = n.start + n.duration * u0
             e = n.start + n.duration * u1
-            out.append(Note(s, e, n.midi_at(um), n.velocity, interpolation=n.interpolation, target_angle=n.target_angle).normalized())
+            out.append(Note(s, e, n.midi_at(um), n.velocity, interpolation=n.interpolation, target_angle=n.target_angle, layer=n.layer).normalized())
         return out
 
 
@@ -266,3 +281,6 @@ def note_name(midi: float) -> str:
     m = int(math.floor(float(midi) + 0.5))
     names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     return f"{names[m % 12]}{m // 12 - 1}"
+
+
+_NOTE_FIELD_NAMES = tuple(f.name for f in fields(Note))

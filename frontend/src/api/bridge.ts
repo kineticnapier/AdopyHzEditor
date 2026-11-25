@@ -1,6 +1,7 @@
 export type EditorSettings = {
   volume: number; speed: number; notePreview: boolean; previewVolume: number; previewOctave: number; previewSound: string;
   exportOctave: number; exportSemitone: number; gridEnabled: boolean; metronomeEnabled: boolean; bpm: number; offsetMs: number;
+  mutedLayers: string[];
   metronomeVolume: number; snapEnabled: boolean; snapDiv: number; contrast: number; gamma: number; enhance: boolean;
   displayMode: string; harmonics: string; colormap: string; analysisProfile: string; cqtResolution: string; analysisSource: "cqt" | "vorbis_direct";
   spectrumThreshold: number; spectrumOpacity: number; spectrumLayerMode: "raw" | "tracks" | "both";
@@ -8,7 +9,7 @@ export type EditorSettings = {
 };
 export type ViewState = { mode: "spec" | "notes" | "both"; start: number; windowSeconds: number; pitchBottom: number; visibleNotes: number };
 export type PlaybackState = { time: number; duration: number; playing: boolean; available: boolean; error: string | null };
-export type NoteDto = { start: number; end: number; midi: number; velocity?: number; kind?: "note" | "curve"; midi_end?: number; ctrl1_midi?: number; ctrl2_midi?: number; interpolation?: string; target_angle?: number };
+export type NoteDto = { start: number; end: number; midi: number; velocity?: number; kind?: "note" | "curve"; midi_end?: number; ctrl1_midi?: number; ctrl2_midi?: number; interpolation?: string; target_angle?: number; layer?: string };
 export type AnalysisState = { available: boolean; duration: number; midiMin: number; midiMax: number; pitchStep: number; source?: string; stats?: Record<string, unknown> };
 export type AppState = { settings: EditorSettings; view: ViewState; playback: PlaybackState; audio: { path: string | null; name: string | null; loaded: boolean }; projectPath: string | null; notes: NoteDto[]; analysis: AnalysisState; busy: boolean; status: string; dirty: boolean };
 export type SpectrogramPayload = { available: boolean; rows?: number; cols?: number; data?: string; duration?: number; start?: number; end?: number; midiMin?: number; midiMax?: number; pitchStep?: number };
@@ -17,6 +18,9 @@ export type FrequencyTrackPayload = { available: boolean; data?: string; trackCo
 export type TrackSelectionResult = { trackIds: number[]; status: string };
 export type CursorPeakPayload = { available: boolean; peakAvailable?: boolean; time?: number; cursorMidi?: number; cursorHz?: number; cursorName?: string; cursorCents?: number; peakMidi?: number; peakHz?: number; peakName?: string; peakCents?: number; peakDb?: number };
 export type NoteMutationResult = { notes: NoteDto[]; status: string; index?: number; indices?: number[]; changed?: boolean; dirty?: boolean; trackIds?: number[]; maxErrorCents?: number | null };
+/** "line": one joined line across holes; "exact": confident stretches only. */
+export type KickPitchFitMode = "line" | "exact";
+export type KickPitchMethod = "harmonic" | "multiwindow" | "phase" | "peak" | "cycle";
 export type KickPitchCandidate = {
   id: number; role: "primary" | "independent" | "harmonic"; harmonicOf: number | null; harmonicNumber: number | null;
   duration: number; medianHz: number | null; meanConfidence: number;
@@ -31,23 +35,27 @@ export type NotePreset = { name: string; note: NoteDto; duration: number; kind: 
 export type NotePresetResult = { presets: NotePreset[]; status: string };
 
 export type AdoFAIExportOptions = {
-  method: "rabbit_zip" | "angle_only" | "harmony"; baseBpm: number; angleOnlyBpm: number; harmonyMode: string; harmonyCustomSemitone: number;
+  method: "rabbit_zip" | "angle_only" | "harmony"; angleOnlyBpm: number; harmonyMode: string; harmonyCustomSemitone: number;
   harmonyEpsilonMs: number; harmonyTuning: "equal temperament"; harmonyRootMode: string; harmonyTimingMode: "setspeed" | "angle-only" | "ratio-polyrhythm";
-  harmonyVisualMode: string; harmonyVisualStep: number; harmonyPolyCycleAngle: number; harmonyPolyMaxDenominator: number; harmonyPolyRatioOctaveMode: "octave-folded" | "absolute";
-  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; angleCompressionMode: "auto" | "fixed"; angleCompressionFixedAngle: number; maxTiles: number; maxTilesPerNote: number;
+  harmonyVisualMode: string; harmonyVisualStep: number; harmonyPolyCycleAngle: number; harmonyPolyCycleMode: "auto" | "fixed"; harmonyPolyChordSource: "overlap" | "preset"; harmonyPolyCycleTiming: "pitch" | "beat" | "manual"; harmonyPolyLegatoMs: number; harmonyPolyMergeOctaves: boolean; harmonyPolyMaxVoices: number; harmonyPolyMaxRootCycles: number; harmonyPolyBeatsPerCycle: number; projectBpm: number; harmonyPolyMaxDenominator: number; harmonyPolyRatioOctaveMode: "octave-folded" | "absolute";
+  xMode: "floor" | "lowest_floor" | "round" | "ceil" | "fixed" | "target_bpm"; fixedX: number; targetBpm: number; angleCompressionMode: "auto" | "fixed"; angleCompressionFixedAngle: number;
   trackVisual: "normal" | "faint" | "very faint" | "hidden"; visualPathMode: "raw" | "upward" | "upward avoid" | "auto route twirl" | "twirl upward"; visualPathAngle: number;
   visualPositionMode: "off" | "note step"; visualPositionX: number; visualPositionY: number; finalAngleMode: "scaled" | "cardinal" | "horizontal" | "custom";
-  finalCustomAngle: number; finalCardinalStep: number; useProjectSong: boolean; copyProjectSong: boolean; songConflictAction: "cancel" | "rename" | "overwrite"; songSourcePath: string; songOffsetAuto: boolean; songOffsetMs: number; fullSongOffsetMs: number; selectedSongOffsetMs: number; selectedOnly: boolean;
+  finalCustomAngle: number; finalCardinalStep: number; chainContiguous: boolean; mergeDuplicateNotes: boolean; useProjectSong: boolean; copyProjectSong: boolean; songConflictAction: "cancel" | "rename" | "overwrite"; songSourcePath: string; songOffsetAuto: boolean; songOffsetMs: number; fullSongOffsetMs: number; selectedSongOffsetMs: number; selectedOnly: boolean;
+  /** Append to the end of an existing chart (picked on export) instead of writing a new one. */
+  appendToChart?: boolean;
 };
 export type AdoFAITilePreview = { points: Array<{ x: number; y: number; angle: number }>; stats: Record<string, unknown>; shownTiles: number; totalTiles: number; limited: boolean };
 export type AdoFAIDebugPreview = { rows: Array<Record<string, unknown>>; summary: { rows: number; estimatedTiles: number; targetAngleUsed: number; targetAngleIgnored: number; finalVisualCorrections: number; warnings: number }; limited: boolean };
+export type MidiTrackSummary = { index: number; name: string; channels: number[]; noteCount: number; lowest: number | null; highest: number | null; drums: boolean };
+export type MidiTrackPick = { cancelled: true } | { cancelled: false; fileName: string; tracks: MidiTrackSummary[] };
 export type HelpPayload = { header: string; sections: Array<{ id: string; title: string; body: string }>; releasesUrl: string };
 
 export type BackendApi = {
   ping(): Promise<{ ok: boolean; app: string; ui: string; capabilities: string[] }>;
   get_state(): Promise<AppState>; get_settings(): Promise<EditorSettings>; update_settings(changes: Partial<EditorSettings>): Promise<EditorSettings>;
   set_view(changes: Partial<ViewState>): Promise<ViewState>; fit_view(): Promise<ViewState>;
-  open_audio(): Promise<AppState>; reanalyze_audio(): Promise<AppState>; get_spectrogram(maxColumns?: number, start?: number, end?: number, minMidi?: number, maxMidi?: number): Promise<SpectrogramPayload>; get_spectrum_region(startTime: number, endTime: number, minMidi: number, maxMidi: number, pixelWidth: number, pixelHeight: number, threshold?: number): Promise<DirectSpectrumPayload>; get_frequency_track_region(startTime: number, endTime: number, minMidi: number, maxMidi: number, pixelWidth: number, pixelHeight: number): Promise<FrequencyTrackPayload>; find_frequency_tracks(startTime: number, endTime: number, minMidi: number, maxMidi: number): Promise<TrackSelectionResult>; create_notes_from_tracks(trackIds: number[], mode?: "fixed" | "curve", startTime?: number | null, endTime?: number | null): Promise<NoteMutationResult>; get_cursor_peak(seconds: number, midi: number, searchRange?: number): Promise<CursorPeakPayload>; analyze_kick_pitch(startTime: number, endTime: number, minHz?: number, maxHz?: number, hopMs?: number, method?: "harmonic" | "multiwindow" | "phase" | "peak"): Promise<KickPitchPayload>; create_notes_from_kick_pitch(candidateIds: number[], minConfidence?: number, maxErrorCents?: number): Promise<NoteMutationResult>; clear_kick_pitch(): Promise<{ available: boolean }>;
+  open_audio(): Promise<AppState>; reanalyze_audio(): Promise<AppState>; get_spectrogram(maxColumns?: number, start?: number, end?: number, minMidi?: number, maxMidi?: number): Promise<SpectrogramPayload>; get_spectrum_region(startTime: number, endTime: number, minMidi: number, maxMidi: number, pixelWidth: number, pixelHeight: number, threshold?: number): Promise<DirectSpectrumPayload>; get_frequency_track_region(startTime: number, endTime: number, minMidi: number, maxMidi: number, pixelWidth: number, pixelHeight: number): Promise<FrequencyTrackPayload>; find_frequency_tracks(startTime: number, endTime: number, minMidi: number, maxMidi: number): Promise<TrackSelectionResult>; create_notes_from_tracks(trackIds: number[], mode?: "fixed" | "curve", startTime?: number | null, endTime?: number | null): Promise<NoteMutationResult>; get_cursor_peak(seconds: number, midi: number, searchRange?: number): Promise<CursorPeakPayload>; analyze_kick_pitch(startTime: number, endTime: number, minHz?: number, maxHz?: number, hopMs?: number, method?: KickPitchMethod): Promise<KickPitchPayload>; create_notes_from_kick_pitch(candidateIds: number[], minConfidence?: number, maxErrorCents?: number, fitMode?: KickPitchFitMode, maxNotes?: number): Promise<NoteMutationResult>; clear_kick_pitch(): Promise<{ available: boolean }>;
   get_playback_state(): Promise<PlaybackState>; toggle_playback(): Promise<PlaybackState>; stop_playback(): Promise<PlaybackState>; seek_to(seconds: number): Promise<PlaybackState>; seek_relative(seconds: number): Promise<PlaybackState>;
   add_note(start: number, end: number, midi: number, kind?: string, endMidi?: number | null): Promise<NoteMutationResult>;
   delete_notes(indices: number[]): Promise<NoteMutationResult>; move_notes(indices: number[], dx: number, dy: number): Promise<NoteMutationResult>;
@@ -61,6 +69,7 @@ export type BackendApi = {
   undo(): Promise<NoteMutationResult>; redo(): Promise<NoteMutationResult>; copy_notes(indices: number[]): Promise<{ status: string }>;
   cut_notes(indices: number[]): Promise<NoteMutationResult>; paste_notes(atTime: number): Promise<NoteMutationResult>;
   save_project_dialog(): Promise<AppState>; save_project_as_dialog(): Promise<AppState>; load_project_dialog(): Promise<AppState>; relink_project_audio_dialog(): Promise<AppState>; import_midi_dialog(): Promise<AppState>;
+  pick_midi_tracks_dialog(): Promise<MidiTrackPick>; import_midi_tracks(trackIndices: number[], mergeDuplicates?: boolean): Promise<AppState>;
   cancel_window_close(): Promise<{ ok: boolean }>; close_window(): Promise<{ ok: boolean }>;
   export_midi_dialog(): Promise<{ ok: boolean; path?: string; status: string }>; export_adofai_dialog(): Promise<{ ok: boolean; path?: string; stats?: Record<string, unknown>; status: string }>;
   get_adofai_export_defaults(selectedIndices?: number[], selectedOnly?: boolean): Promise<AdoFAIExportOptions>;

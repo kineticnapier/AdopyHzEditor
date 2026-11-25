@@ -94,6 +94,26 @@ class IssueCorrectnessBoundaryTests(unittest.TestCase):
         self.assertEqual(note.ctrl1_midi, 127.0)
         self.assertTrue(all(0 <= value <= 127 for value in (note.midi, note.midi_end, note.ctrl1_midi, note.ctrl2_midi)))
 
+    def test_octave_move_shifts_every_pitch_by_twelve(self):
+        bridge = self.bridge()
+        bridge.notes = [Note(0, 1, 80, kind="curve", midi_end=78, ctrl1_midi=81, ctrl2_midi=79), Note(1, 2, 68)]
+        result = bridge.move_notes([0, 1], 0.0, -12.0)
+        self.assertTrue(result["changed"])
+        moved = [Note.from_dict(n) for n in result["notes"]]
+        self.assertEqual((moved[0].midi, moved[0].midi_end, moved[0].ctrl1_midi, moved[0].ctrl2_midi), (68, 66, 69, 67))
+        self.assertEqual(moved[1].midi, 56)
+
+    def test_octave_move_past_midi_bounds_is_refused_not_cut_short(self):
+        bridge = self.bridge()
+        bridge.notes = [Note(0, 1, 8), Note(1, 2, 60)]
+        result = bridge.move_notes([0, 1], 0.0, -12.0)
+        self.assertFalse(result["changed"])
+        self.assertIn("オクターブ", result["status"])
+        self.assertEqual([n["midi"] for n in result["notes"]], [8, 60])
+        # A semitone move still clamps as before.
+        result = bridge.move_notes([0], 0.0, -10.0)
+        self.assertEqual(result["notes"][0]["midi"], 0)
+
     def test_snap_group_move_is_reclamped_after_snapping(self):
         bridge = self.bridge()
         bridge.settings.update(snapEnabled=True, bpm=120.0, snapDiv=1)

@@ -48,7 +48,8 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (ctrl && event.altKey && (key !== "a" || event.shiftKey)) return;
   if (ctrl && event.shiftKey && key !== "s" && key !== "z" &&
       key !== "arrowleft" && key !== "arrowright" &&
-      key !== "arrowup" && key !== "arrowdown") return;
+      key !== "arrowup" && key !== "arrowdown" &&
+      key !== "pageup" && key !== "pagedown") return;
 
   // Held file shortcuts must not queue duplicate saves or native dialogs.
   // Consume repeats to avoid falling through to the browser shortcut.
@@ -99,6 +100,10 @@ export function dispatchEditorShortcut(event: ShortcutEvent, a: ShortcutActions)
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowright") return handled(() => a.move(a.selected, a.nudgeSeconds, 0));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowup") return handled(() => a.move(a.selected, 0, 1));
   if (ctrl && event.shiftKey && !event.altKey && key === "arrowdown") return handled(() => a.move(a.selected, 0, -1));
+  // Whole octaves keep the pitch class: lowering a note this way halves the
+  // tile rate it needs while it still sounds like the same note name.
+  if (ctrl && event.shiftKey && !event.altKey && key === "pageup") return handled(() => a.move(a.selected, 0, 12));
+  if (ctrl && event.shiftKey && !event.altKey && key === "pagedown") return handled(() => a.move(a.selected, 0, -12));
   if (ctrl && !event.altKey && key === " ") return handled(a.stop);
   if (unmodified && key === " ") return handled(a.play);
   // Shift+Delete/Backspace are native modified chords, not editor deletion.

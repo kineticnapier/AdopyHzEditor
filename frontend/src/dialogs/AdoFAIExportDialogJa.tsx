@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { beatSyncedOutputBpm } from "./beatSync";
 import type {
   AdoFAIDebugPreview,
   AdoFAIExportOptions,
@@ -35,6 +36,14 @@ type Props = {
   onStatus(text: string): void;
   onHelp(section?: string): void;
 };
+function formatBpm(bpm: number): string {
+  return Number.isFinite(bpm) ? `${Math.round(bpm * 1000) / 1000}` : "-";
+}
+function formatCycleSeconds(cycleAngle: number, bpm: number): string {
+  if (!(cycleAngle > 0) || !(bpm > 0)) return "-";
+  const seconds = (cycleAngle * 60) / (180 * bpm);
+  return `${seconds.toFixed(4)}秒`;
+}
 export default function AdoFAIExportDialogJa({
   api,
   selected,
@@ -252,7 +261,15 @@ export default function AdoFAIExportDialogJa({
     );
   const isHarmony = options.method === "harmony",
     isAngle = options.method === "angle_only",
-    isZip = options.method === "rabbit_zip";
+    isZip = options.method === "rabbit_zip",
+    isRatioPoly = options.harmonyTimingMode === "ratio-polyrhythm",
+    cycleTiming = options.harmonyPolyCycleTiming ?? "pitch",
+    beatSync = cycleTiming === "beat",
+    syncedBpm = beatSyncedOutputBpm(
+      options.projectBpm,
+      options.harmonyPolyCycleAngle,
+      options.harmonyPolyBeatsPerCycle ?? 1,
+    );
   return (
     <Modal
       title="ADOFAI出力"
@@ -266,6 +283,23 @@ export default function AdoFAIExportDialogJa({
           aria-label="ADOFAI出力設定"
           style={{ display: "grid", gap: 8, border: 0, margin: 0, padding: 0, minWidth: 0 }}
         >
+        <Field label="出力先">
+          <Select
+            value={options.appendToChart ? "append" : "new"}
+            options={[
+              ["new", "新しい譜面を作る"],
+              ["append", "既存の譜面の最後に追記"],
+            ]}
+            onChange={(v) => patch("appendToChart", v === "append")}
+          />
+        </Field>
+        {options.appendToChart && (
+          <div className="info-card">
+            「出力」を押すと譜面を選ぶ画面が出ます。選んだ譜面の最後のタイルの後ろにタイルを足します。
+            曲・オフセット・BPMなど元の設定とイベントはそのままで、曲の時間には合わせません。
+            元のファイルは「名前.adofai.bak」に保存してから上書きします。
+          </div>
+        )}
         <Field label="方式">
           <Select
             value={options.method}
@@ -279,18 +313,37 @@ export default function AdoFAIExportDialogJa({
             }
           />
         </Field>
-        {!isAngle && (
-          <Field label="基準BPM">
-            <Num
-              value={options.baseBpm}
-              min={1}
-              max={999999}
-              step="any"
-              onChange={(v) => patch("baseBpm", v)}
+        {isHarmony && isRatioPoly && (
+          <Field label="周期の長さ">
+            <Select
+              value={cycleTiming}
+              options={[
+                ["pitch", "音の高さ（Hz）"],
+                ["beat", `曲の拍（${formatBpm(options.projectBpm)} BPM）`],
+                ["manual", "出力BPMで指定"],
+              ]}
+              onChange={(v) =>
+                patch(
+                  "harmonyPolyCycleTiming",
+                  v as AdoFAIExportOptions["harmonyPolyCycleTiming"],
+                )
+              }
             />
           </Field>
         )}
-        {isAngle && (
+        {isHarmony && isRatioPoly && beatSync && (
+          <Field label="1周期の拍数">
+            <Num
+              value={options.harmonyPolyBeatsPerCycle ?? 1}
+              min={1 / 64}
+              max={64}
+              step="any"
+              suffix="拍"
+              onChange={(v) => patch("harmonyPolyBeatsPerCycle", v)}
+            />
+          </Field>
+        )}
+        {(isAngle || isHarmony) && !(isHarmony && isRatioPoly && cycleTiming !== "manual") && (
           <Field label="出力BPM">
             <Num
               value={options.angleOnlyBpm}
@@ -300,6 +353,15 @@ export default function AdoFAIExportDialogJa({
               onChange={(v) => patch("angleOnlyBpm", v)}
             />
           </Field>
+        )}
+        {isHarmony && isRatioPoly && (
+          <div className="info-card">
+            {cycleTiming === "pitch"
+              ? "1周期 = 根音（一番低い音）の周期 × 比の根音の数。各声部が自分の音の高さで鳴ります（A#5なら毎秒932回）。和音や音程が変わるたびに速さが切り替わります。"
+              : beatSync
+                ? `出力BPM = ${formatBpm(syncedBpm)}（自動）、1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, syncedBpm)}。周期は曲の拍の位置から始まり、音符のないところは休みになります。音の高さは再現しません。`
+                : `1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, options.angleOnlyBpm)}（周期角 ÷ (3 × 出力BPM)）。音の高さは再現しません。`}
+          </div>
         )}
         {isHarmony && (
           <>
@@ -349,9 +411,84 @@ export default function AdoFAIExportDialogJa({
                 }
               />
             </Field>
-            <div className="info-card">音律は平均律に固定されています。</div>
+            {options.harmonyTimingMode === "ratio-polyrhythm" && (
+              <Field label="和音の決め方">
+                <Select
+                  value={options.harmonyPolyChordSource ?? "overlap"}
+                  options={[
+                    ["overlap", "重なったノーツから"],
+                    ["preset", "和音設定のみ"],
+                  ]}
+                  onChange={(v) =>
+                    patch(
+                      "harmonyPolyChordSource",
+                      v as AdoFAIExportOptions["harmonyPolyChordSource"],
+                    )
+                  }
+                />
+              </Field>
+            )}
+            {options.harmonyTimingMode === "ratio-polyrhythm" &&
+              (options.harmonyPolyChordSource ?? "overlap") === "overlap" && (
+                <details className="advanced-fold">
+                  <summary>和音の詳細</summary>
+                  <div className="advanced-grid">
+                  <Field label="短い重なりを無視">
+                    <Num
+                      value={options.harmonyPolyLegatoMs ?? 50}
+                      min={0}
+                      max={1000}
+                      step="any"
+                      suffix=" ms"
+                      onChange={(v) => patch("harmonyPolyLegatoMs", v)}
+                    />
+                  </Field>
+                  <Field label="和音の最大音数">
+                    <Num
+                      value={options.harmonyPolyMaxVoices ?? 3}
+                      min={0}
+                      max={16}
+                      step={1}
+                      suffix="音（0で無制限）"
+                      onChange={(v) => patch("harmonyPolyMaxVoices", Math.round(v))}
+                    />
+                  </Field>
+                  <Field label="和音の細かさ上限">
+                    <Num
+                      value={options.harmonyPolyMaxRootCycles ?? 12}
+                      min={0}
+                      max={1024}
+                      step={1}
+                      suffix="（0で無制限）"
+                      onChange={(v) => patch("harmonyPolyMaxRootCycles", Math.round(v))}
+                    />
+                  </Field>
+                  <div className="info-card">
+                    音が多い和音は濁り、打点も詰まりすぎます。一番高い音（メロディー）は必ず残し、ほかは一番低い音と響きの単純な音から残します。細かさ上限は「1周期が根音の何周期分か」で、長三和音(4:5:6)は4、短三和音(10:12:15)は10です。
+                  </div>
+                  <Field label="オクターブ重複" group>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={options.harmonyPolyMergeOctaves ?? true}
+                        onChange={(e) => patch("harmonyPolyMergeOctaves", e.target.checked)}
+                      />
+                      オクターブ違いの重なりは高い方（メロディー側）にまとめる
+                    </label>
+                  </Field>
+                  </div>
+                </details>
+              )}
+            <div className="info-card">
+              {options.harmonyTimingMode === "ratio-polyrhythm"
+                ? (options.harmonyPolyChordSource ?? "overlap") === "overlap"
+                  ? "同時に鳴っているノーツの音程を純正比（ドミソなら4:5:6）にしてリズムを作ります。単音の区間は「和音」の設定を使い、和音の切り替えは周期の区切りで行います。"
+                  : "比率ポリリズムは純正比（長三和音なら4:5:6）でリズムを作ります。"
+                : "音律は平均律に固定されています。"}
+            </div>
           </>
         )}
+        {!options.appendToChart && (<>
         <Field label="音声" group>
           <label className="inline-check">
             <input
@@ -382,6 +519,7 @@ export default function AdoFAIExportDialogJa({
             </div>
           </Field>
         )}
+        </>)}
         {selected.length > 0 && (
           <Field label="出力範囲" group>
             <label className="inline-check">
@@ -397,6 +535,28 @@ export default function AdoFAIExportDialogJa({
         <details className="advanced-fold">
           <summary>詳細設定</summary>
           <div className="advanced-grid">
+            <Field label="同じ音の重なり" group>
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={options.mergeDuplicateNotes ?? true}
+                  onChange={(e) => patch("mergeDuplicateNotes", e.target.checked)}
+                />
+                別のレイヤーで同じ音が同時に鳴るところは1つにまとめる
+              </label>
+            </Field>
+            {!isHarmony && (
+              <Field label="ノート連結" group>
+                <label className="inline-check">
+                  <input
+                    type="checkbox"
+                    checked={options.chainContiguous ?? true}
+                    onChange={(e) => patch("chainContiguous", e.target.checked)}
+                  />
+                  隙間なく続くノートを1本につなげる（境目で切らない）
+                </label>
+              </Field>
+            )}
             {isZip && (
               <>
                 <Field label="圧縮角度">
@@ -608,7 +768,28 @@ export default function AdoFAIExportDialogJa({
                 )}
                 {options.harmonyTimingMode === "ratio-polyrhythm" && (
                   <>
-                    <Field label="周期角度">
+                    <Field label="周期角">
+                      <Select
+                        value={options.harmonyPolyCycleMode}
+                        options={[
+                          ["auto", "自動（形を整える）"],
+                          ["fixed", "固定"],
+                        ]}
+                        onChange={(v) =>
+                          patch(
+                            "harmonyPolyCycleMode",
+                            v as AdoFAIExportOptions["harmonyPolyCycleMode"],
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field
+                      label={
+                        options.harmonyPolyCycleMode === "auto"
+                          ? "周期の長さ"
+                          : "周期角度"
+                      }
+                    >
                       <Num
                         value={options.harmonyPolyCycleAngle}
                         min={1}
@@ -618,6 +799,11 @@ export default function AdoFAIExportDialogJa({
                         onChange={(v) => patch("harmonyPolyCycleAngle", v)}
                       />
                     </Field>
+                    {options.harmonyPolyCycleMode === "auto" && (
+                      <div className="info-card">
+                        1周期の長さは「周期の長さ」とBPMで決まります。角度は1枚平均180°になるよう自動で決め、BPMも同じ比率で合わせるので、リズムは変わりません。
+                      </div>
+                    )}
                     <Field label="最大分母">
                       <Num
                         value={options.harmonyPolyMaxDenominator}
@@ -648,7 +834,7 @@ export default function AdoFAIExportDialogJa({
                 )}
               </>
             )}
-            {options.useProjectSong && (
+            {options.useProjectSong && !options.appendToChart && (
               <>
                 <Field label="音声コピー" group>
                   <label className="inline-check">
@@ -704,24 +890,6 @@ export default function AdoFAIExportDialogJa({
                 )}
               </>
             )}
-            <Field label="最大床数">
-              <Num
-                value={options.maxTiles}
-                min={0}
-                max={10000000}
-                step={1}
-                onChange={(v) => patch("maxTiles", Math.round(v))}
-              />
-            </Field>
-            <Field label="1ノート上限">
-              <Num
-                value={options.maxTilesPerNote}
-                min={0}
-                max={1000000}
-                step={1}
-                onChange={(v) => patch("maxTilesPerNote", Math.round(v))}
-              />
-            </Field>
           </div>
         </details>
         </fieldset>
@@ -748,7 +916,7 @@ export default function AdoFAIExportDialogJa({
           onClick={() => void exportLevel()}
           disabled={working}
         >
-          {working ? "処理中…" : "出力"}
+          {working ? "処理中…" : options?.appendToChart ? "譜面を選んで追記" : "出力"}
         </button>
       </div>
     </Modal>

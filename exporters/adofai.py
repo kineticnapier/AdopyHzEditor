@@ -3,12 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from fractions import Fraction
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import wraps
+import bisect
 import json
+import functools
 import math
 from typing import Any
-from core.note_model import Note, note_name
+from core.note_model import Note, midi_to_hz, note_name
 from exporters.adofai_angles import (
     abs_angle_diff,
     clean_angle,
@@ -671,9 +673,15 @@ def shape_visual_relative(
     *,
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
+    final_tile_mode: str | None = None,
 ) -> tuple[float, bool, bool]:
     """
     Convert a timing/pitch relative angle into a visual-path relative angle.
+
+    final_tile_mode:
+      pass the note's final-tile mode for a note's final tile.  A mode other
+      than "scaled" (horizontal, cardinal, custom) is an explicit per-note
+      marker, so Upward / Upward avoid keep that tile's angle as given.
 
     Returns:
       relative_angle, changed_or_twirled, twirled_for_this_tile
@@ -701,6 +709,12 @@ def shape_visual_relative(
         # Planning is deliberately deferred until the complete relative-angle
         # sequence is known.  This keeps generation identical to raw mode and
         # prevents a one-tile local decision from changing timing data.
+        return base_rel, False, current_twirl
+
+    final_key = (final_tile_mode or "").lower().replace(" ", "_").replace("-", "_")
+    # A relative of 360 points straight back over the previous tile; that
+    # marker would hide the path, so the path keeps such a tile instead.
+    if final_key and final_key != "scaled" and 1e-6 < base_rel < 360.0 - 1e-6:
         return base_rel, False, current_twirl
 
     if visual_path_avoid_enabled(visual_path_mode):
@@ -903,11 +917,12 @@ def build_adofai_debug_rows(
     rabbit_x_mode: str = "floor",
     rabbit_fixed_x: float = 8.0,
     rabbit_target_bpm: float = 1600.0,
-    max_tiles: int = 200000,
-    max_tiles_per_note: int = 5000,
+    max_tiles: int = 0,
+    max_tiles_per_note: int = 0,
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
+    chain_contiguous: bool = False,
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
@@ -928,6 +943,8 @@ def build_adofai_debug_rows(
         prepared_notes = flatten_curve_notes(notes, curve_step_sec=curve_step_sec, curve_pitch_step=curve_pitch_step)
 
     sorted_notes, first_note_offset = normalize_notes_to_first(prepared_notes)
+    if chain_contiguous and use_phase_continuous_glide and method_key not in ("harmony", "harmony_polyrhythm"):
+        sorted_notes = chain_contiguous_notes(sorted_notes)
 
     play_bpm = max(1e-6, float(angle_only_bpm if method_key == "angle_only" else base_bpm))
 
@@ -968,6 +985,7 @@ def build_adofai_debug_rows(
             "pause_before_s": round(pause_seconds_before, 6),
             "overlap": bool(overlap),
             "kind": n.kind,
+            "chained_notes": len(n.segments) if isinstance(n, ChainedNote) else 1,
             "interpolation": "" if n.interpolation == "bezier_pitch" and not n.is_curve else n.interpolation,
             "note": note_name(n.midi),
             "midi": round(float(n.midi), 6),
@@ -1390,6 +1408,38 @@ def curve_phase_samples(
     if dur <= 0:
         return [0.0], [0.0], 0.0
 
+    if isinstance(n, ChainedNote):
+        # Integrate each segment on its own so pitch jumps at boundaries are
+        # exact instead of smeared across one sample interval.
+        all_times: list[float] = [0.0]
+        all_phases: list[float] = [0.0]
+        total = 0.0
+        for seg in n.segments:
+            base_t = seg.start - n.start
+            if not seg.is_curve:
+                # Fixed pitch: phase is exactly linear, so one sample at the
+                # segment end is exact (and avoids thousands of freq_at calls).
+                seg_total = float(seg.freq) * seg.duration
+                all_times.append(max(all_times[-1], base_t + seg.duration))
+                all_phases.append(total + seg_total)
+                total += seg_total
+                continue
+            seg_times, seg_phases, seg_total = curve_phase_samples(
+                seg,
+                samples_per_second=samples_per_second,
+                min_samples=min_samples,
+                max_samples=max_samples,
+            )
+            for t, p in zip(seg_times[1:], seg_phases[1:]):
+                # Clamp so a tiny overlap inside the tolerance keeps time monotonic.
+                all_times.append(max(all_times[-1], base_t + t))
+                all_phases.append(total + p)
+            total += seg_total
+        if all_times[-1] < dur:
+            all_times.append(dur)
+            all_phases.append(total)
+        return all_times, all_phases, total
+
     # More samples for longer notes and large pitch movement, but keep bounded.
     probe = [n.freq_at(i / 16.0) for i in range(17)]
     f_min = max(1e-9, min(probe))
@@ -1557,6 +1607,7 @@ def emit_angle_only_curve_continuous(
             final_rel,
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
+            final_tile_mode=final_angle_mode if is_final else None,
         )
         consume_pending_visual_twirl(actions, floor)
 
@@ -1633,6 +1684,7 @@ def emit_direct_curve_continuous(
             rel,
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
+            final_tile_mode=final_angle_mode if is_final else None,
         )
         consume_pending_visual_twirl(actions, floor)
 
@@ -1732,6 +1784,7 @@ def emit_angle_compression_curve_continuous(
             rel,
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
+            final_tile_mode=effective_final_angle_mode if is_final and frac > 1e-6 else None,
         )
         consume_pending_visual_twirl(actions, floor)
         if shaped:
@@ -1951,6 +2004,7 @@ def emit_angle_only(
                 final_angle,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
+                final_tile_mode=final_angle_mode,
             )
             consume_pending_visual_twirl(actions, floor)
             final_visual_used = final_visual_used or twirled
@@ -2006,6 +2060,7 @@ def emit_angle_only(
                 final_angle,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
+                final_tile_mode=final_angle_mode,
             )
             consume_pending_visual_twirl(actions, floor)
             final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
@@ -2174,6 +2229,7 @@ def emit_angle_compression(
                 final_angle,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
+                final_tile_mode=effective_final_angle_mode,
             )
             consume_pending_visual_twirl(actions, floor)
             final_visual_used = final_visual_used or twirled
@@ -2224,6 +2280,7 @@ def emit_angle_compression(
                 final_angle,
                 visual_path_mode=visual_path_mode,
                 visual_path_angle=visual_path_angle,
+                final_tile_mode=effective_final_angle_mode,
             )
             consume_pending_visual_twirl(actions, floor)
             final_bpm = (freq * 60.0) * (rel / max(EPS, 180.0 * frac))
@@ -2319,6 +2376,105 @@ def normalize_notes_to_first(notes: list[Note]) -> tuple[list[Note], float]:
         for n in sorted_notes
     ]
     return normalized, first_start
+
+
+CHAIN_GAP_TOLERANCE_SEC = 1e-4
+
+
+class ChainedNote(Note):
+    """Export-only note made of back-to-back segments with one continuous phase.
+
+    The exporter treats it as a curve: tiles follow the cumulative phase across
+    every segment, so a segment boundary no longer forces a partial tile.
+    """
+
+    def __init__(self, segments: list[Note]) -> None:
+        segs = [s.normalized() for s in segments if s.duration > 0]
+        if not segs:
+            raise ValueError("ChainedNote needs at least one segment")
+        first, last = segs[0], segs[-1]
+        super().__init__(
+            first.start,
+            last.end,
+            first.midi,
+            first.velocity,
+            "curve",
+            last.midi_at(1.0),
+            None,
+            None,
+            "chain",
+            first.target_angle,
+        )
+        self.segments = segs
+        self._ends = [s.end for s in segs]
+
+    @property
+    def pitch_bounds(self) -> tuple[float, float]:
+        bounds = [s.pitch_bounds for s in self.segments]
+        return min(b[0] for b in bounds), max(b[1] for b in bounds)
+
+    def _segment_at(self, t: float) -> Note:
+        i = bisect.bisect_left(self._ends, t)
+        return self.segments[min(i, len(self.segments) - 1)]
+
+    def midi_at(self, u: float) -> float:
+        u = max(0.0, min(1.0, float(u)))
+        t = self.start + self.duration * u
+        seg = self._segment_at(t)
+        if t <= seg.start or seg.duration <= 0:
+            return seg.midi_at(0.0)
+        return seg.midi_at((t - seg.start) / seg.duration)
+
+    def normalized(self) -> "ChainedNote":
+        return self
+
+    def with_time_offset(self, offset: float) -> "ChainedNote":
+        return ChainedNote([s.with_time_offset(offset) for s in self.segments])
+
+    def with_pitch_offset(self, semitones: float) -> "ChainedNote":
+        return ChainedNote([s.with_pitch_offset(semitones) for s in self.segments])
+
+    def with_target_angle(self, target_angle: float | None) -> "ChainedNote":
+        return ChainedNote([s.with_target_angle(target_angle) for s in self.segments])
+
+    def with_interpolation(self, interpolation: str) -> "ChainedNote":
+        return self
+
+    def sample_fixed_segments(self, **kwargs: Any) -> list[Note]:
+        out: list[Note] = []
+        for s in self.segments:
+            out.extend(s.sample_fixed_segments(**kwargs))
+        return out
+
+
+def chain_contiguous_notes(notes: list[Note], *, gap_tolerance: float = CHAIN_GAP_TOLERANCE_SEC) -> list[Note]:
+    """Merge runs of back-to-back notes into ChainedNote objects.
+
+    ``notes`` must be sorted by start. A note joins the current run when it
+    starts within ``gap_tolerance`` of the run's end and has the same target
+    angle; anything else (gaps, overlaps/chords) starts a new run.
+    """
+    out: list[Note] = []
+    run: list[Note] = []
+
+    def flush() -> None:
+        if len(run) == 1:
+            out.append(run[0])
+        elif run:
+            out.append(ChainedNote(run))
+        run.clear()
+
+    for n in notes:
+        if n.duration <= 0:
+            continue
+        if run:
+            prev = run[-1]
+            joins = abs(n.start - prev.end) <= gap_tolerance and n.target_angle == prev.target_angle
+            if not joins:
+                flush()
+        run.append(n)
+    flush()
+    return out
 
 
 def _harmony_key(value: str) -> str:
@@ -2640,6 +2796,445 @@ def build_harmony_ratio_polyrhythm_pattern(
     }
 
 
+_AUTO_CYCLE_PREVIEW_CYCLES = 12
+_AUTO_CYCLE_SEARCH_STEP = 5.0
+_AUTO_CYCLE_NEAR_RADIUS = 0.25
+# The overlap search simulates the path for every candidate angle, so its cost
+# grows with tiles x candidates (and candidates grow with tiles too).  Chords
+# taken from overlapping notes can have hundreds of hits per cycle, which made
+# a single shape take minutes.  Above this many tiles per cycle the path is a
+# dense scribble at any angle, so the search is skipped.  Every preset chord
+# (largest: minor triad, 28 tiles) stays below the limit.
+_AUTO_CYCLE_SEARCH_MAX_TILES = 32
+
+
+def _ratio_path_near_overlaps(
+    gaps: tuple[float, ...],
+    cycle_angle: float,
+    *,
+    cycles: int,
+    twirl_each_cycle: bool,
+    radius: float = _AUTO_CYCLE_NEAR_RADIUS,
+    stop_at: int | None = None,
+) -> int:
+    """Count non-adjacent tile pairs closer than radius for a repeated cycle.
+
+    With ``stop_at``, counting stops once that many pairs are found; callers use
+    it when any count at or above the limit is already known to lose.
+    """
+    heading = 0.0
+    x = y = 0.0
+    twirled = False
+    points: list[tuple[float, float]] = []
+    count = len(gaps)
+    for index in range(count * max(1, int(cycles))):
+        if twirl_each_cycle and index and index % count == 0:
+            twirled = not twirled
+        rel = gaps[index % count] * cycle_angle
+        heading = heading - 180.0 + rel if twirled else heading + 180.0 - rel
+        x += math.cos(math.radians(heading))
+        y += math.sin(math.radians(heading))
+        points.append((x, y))
+
+    cells: dict[tuple[int, int], list[int]] = {}
+    r2 = radius * radius
+    overlaps = 0
+    for i, (px, py) in enumerate(points):
+        cx, cy = math.floor(px / radius), math.floor(py / radius)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for j in cells.get((cx + dx, cy + dy), ()):
+                    if i - j > 2:
+                        qx, qy = points[j]
+                        if (px - qx) ** 2 + (py - qy) ** 2 < r2:
+                            overlaps += 1
+                            if stop_at is not None and overlaps >= stop_at:
+                                return overlaps
+        cells.setdefault((cx, cy), []).append(i)
+    return overlaps
+
+
+@functools.lru_cache(maxsize=1024)
+def _harmony_poly_auto_cycle_angle(gaps: tuple[float, ...], twirl_each_cycle: bool) -> float:
+    """
+    Choose the emitted angle per cycle for a ratio-polyrhythm grid.
+
+    180 degrees per tile on average means zero net turn per cycle, so cycles
+    advance along a line.  The angle is capped so no single gap exceeds one
+    tile's 360 degrees.  If that line still overlaps itself (the cap was hit,
+    or the cycle folds onto itself), search the allowed range for the angle
+    with the fewest near-overlaps, preferring wider minimum angles.
+    """
+    tiles = max(1, len(gaps))
+    widest = max(gaps) if gaps else 1.0
+    cap = 360.0 / max(EPS, widest)
+    preferred = min(180.0 * tiles, cap)
+
+    if tiles > _AUTO_CYCLE_SEARCH_MAX_TILES:
+        return preferred
+
+    def score(angle: float, stop_at: int | None = None) -> int:
+        return _ratio_path_near_overlaps(
+            gaps, angle, cycles=_AUTO_CYCLE_PREVIEW_CYCLES, twirl_each_cycle=twirl_each_cycle,
+            stop_at=stop_at,
+        )
+
+    if score(preferred, stop_at=1) == 0:
+        return preferred
+    # Same 5 degree grid as always.  The winner is the fewest overlaps, then
+    # the widest angle (wider minimum tile angle), so scanning from the widest
+    # angle down and keeping only strict improvements picks the same angle.
+    # That order lets a zero-overlap angle end the scan, and lets each score
+    # stop as soon as it can no longer beat the best so far.
+    candidates: list[float] = []
+    angle = 180.0
+    while angle <= cap + 1e-9:
+        candidates.append(angle)
+        angle += _AUTO_CYCLE_SEARCH_STEP
+    best = preferred
+    best_score: int | None = None
+    for angle in reversed(candidates):
+        value = score(angle, stop_at=best_score)
+        if best_score is None or value < best_score:
+            best_score, best = value, angle
+            if value == 0:
+                break
+    return best
+
+
+def _harmony_poly_emitted_cycle_angle(
+    pattern: dict[str, Any],
+    timing_cycle_angle: float,
+    cycle_mode: str,
+    twirl_each_cycle: bool = False,
+) -> tuple[float, str]:
+    """Return the angle emitted per cycle and the normalised mode name."""
+    key = (cycle_mode or "fixed").lower().replace(" ", "_").replace("-", "_")
+    if key not in ("auto", "automatic", "auto_180", "line"):
+        return float(timing_cycle_angle), "fixed"
+    gaps = tuple(float(g) for g in (pattern.get("position_gaps") or []) if float(g) > 0) or (1.0,)
+    return _harmony_poly_auto_cycle_angle(gaps, bool(twirl_each_cycle)), "auto"
+
+
+# Just-intonation ratios by pitch class, used to turn overlapping notes into a
+# small-integer chord grid.  Equal-tempered intervals are irrational, and
+# approximating them directly gives grids such as 46:58:69 for a major triad.
+_JUST_RATIO_BY_SEMITONE: tuple[Fraction, ...] = (
+    Fraction(1, 1),
+    Fraction(16, 15),
+    Fraction(9, 8),
+    Fraction(6, 5),
+    Fraction(5, 4),
+    Fraction(4, 3),
+    Fraction(7, 5),
+    Fraction(3, 2),
+    Fraction(8, 5),
+    Fraction(5, 3),
+    Fraction(9, 5),
+    Fraction(15, 8),
+)
+_JUST_RATIO_SNAP_SEMITONES = 0.3
+
+
+def just_ratio_for_semitones(semitones: float) -> float:
+    """Map an interval in semitones to its just-intonation ratio.
+
+    Intervals within 30 cents of an equal-tempered step use the table above
+    (plus octaves); anything further off keeps its exact frequency ratio.
+    """
+    s = float(semitones)
+    step = round(s)
+    if abs(s - step) > _JUST_RATIO_SNAP_SEMITONES:
+        return 2.0 ** (s / 12.0)
+    octave, pitch_class = divmod(int(step), 12)
+    return float(_JUST_RATIO_BY_SEMITONE[pitch_class]) * (2.0 ** octave)
+
+
+def _just_fraction(semitones: float) -> Fraction:
+    return Fraction(just_ratio_for_semitones(semitones)).limit_denominator(1024)
+
+
+def _chord_root_cycles(midis: list[float]) -> int:
+    """Root periods per cycle of a just-ratio grid for these pitches."""
+    root = min(midis)
+    cycles = 1
+    for midi in midis:
+        cycles = math.lcm(cycles, _just_fraction(midi - root).denominator)
+    return cycles
+
+
+def _limit_chord_voices(midis: list[float], max_voices: int, max_root_cycles: int) -> list[float]:
+    """Thin out a chord so it stays clean and its grid stays coarse.
+
+    The highest note (usually the melody) is always kept.  Above max_voices,
+    the lowest note and the simplest intervals over it stay.  Above
+    max_root_cycles, voices are dropped one at a time, each time the one
+    whose removal makes the grid coarsest.
+    """
+    kept = sorted(set(midis))
+    if len(kept) <= 1:
+        return kept
+    top = kept[-1]
+
+    def height(midi: float, root: float) -> int:
+        frac = _just_fraction(midi - root)
+        return frac.numerator * frac.denominator
+
+    if max_voices > 0 and len(kept) > max_voices:
+        if max_voices == 1:
+            kept = [top]
+        else:
+            root = kept[0]
+            others = sorted((m for m in kept[1:-1]), key=lambda m: (height(m, root), m))
+            kept = sorted([root, top, *others[: max_voices - 2]])
+    while max_root_cycles > 0 and len(kept) > 1 and _chord_root_cycles(kept) > max_root_cycles:
+        candidates = [m for m in kept if m != top]
+        drop = min(
+            candidates,
+            key=lambda m: (_chord_root_cycles([x for x in kept if x != m]), -height(m, min(kept)), m),
+        )
+        kept.remove(drop)
+    return kept
+
+
+def _unique_chord_voices(midis: list[float]) -> list[float]:
+    """Pitches with unisons removed (same just ratio over the lowest note)."""
+    root = min(midis)
+    kept: list[float] = []
+    seen: set[float] = set()
+    for midi in sorted(midis):
+        key = round(just_ratio_for_semitones(float(midi) - root), 9)
+        if key not in seen:
+            seen.add(key)
+            kept.append(float(midi))
+    return kept
+
+
+def _fold_chord_octaves(voices: list[float]) -> list[float]:
+    """Drop voices whole octaves below a higher voice; the higher one stays.
+
+    A lead doubled an octave down (or up) adds hits but no pitch class.
+    Keeping the higher voice keeps the melody at its own pitch.
+    """
+    root = min(voices)
+    kept: list[float] = []
+    for midi in sorted(voices, reverse=True):
+        ratio = just_ratio_for_semitones(midi - root)
+        if any(
+            abs(octaves - round(octaves)) < 1e-9
+            for octaves in (math.log2(just_ratio_for_semitones(k - root) / ratio) for k in kept)
+        ):
+            continue
+        kept.append(midi)
+    return sorted(kept)
+
+
+def _overlap_voice_specs(
+    midis: list[float],
+    *,
+    merge_octaves: bool = False,
+    max_voices: int = 0,
+    max_root_cycles: int = 0,
+) -> list[dict[str, Any]]:
+    """Voice specs for a chord of overlapping notes, rooted on the lowest one.
+
+    Unisons always collapse into one voice.  With ``merge_octaves`` octave
+    doublings collapse into the higher voice.  ``max_voices`` /
+    ``max_root_cycles`` (0 = no limit) then thin the chord out with
+    _limit_chord_voices.
+    """
+    voices = _overlap_chord_voices(
+        midis, merge_octaves=merge_octaves, max_voices=max_voices, max_root_cycles=max_root_cycles,
+    )
+    return _voice_specs_for(voices)
+
+
+def _overlap_chord_voices(
+    midis: list[float],
+    *,
+    merge_octaves: bool = False,
+    max_voices: int = 0,
+    max_root_cycles: int = 0,
+) -> list[float]:
+    """The pitches that actually sound after unison/octave folding and limits."""
+    voices = _unique_chord_voices(midis)
+    if merge_octaves:
+        voices = _fold_chord_octaves(voices)
+    if max_voices > 0 or max_root_cycles > 0:
+        voices = _limit_chord_voices(voices, int(max_voices), int(max_root_cycles))
+    return voices
+
+
+def _voice_specs_for(voices: list[float]) -> list[dict[str, Any]]:
+    root = min(voices)
+    specs: list[dict[str, Any]] = []
+    for midi in voices:
+        semitones = float(midi) - root
+        specs.append({
+            "voice": len(specs),
+            "label": "root" if not specs else note_name(midi),
+            "semitone": semitones,
+            "ratio": just_ratio_for_semitones(semitones),
+            "tuning": "just intonation",
+        })
+    return specs
+
+
+def _harmony_poly_event_templates(shape: dict[str, Any], fallback_octave_mode: str) -> list[tuple[float, dict[str, Any], float, float, int]]:
+    """Per-position event fields that only depend on the chord shape.
+
+    Building these once per shape instead of once per hit keeps export time
+    proportional to the tile count with a small constant.  Each entry is
+    (position in cycle, fields, midi offset from root, freq factor from root,
+    duplicate hits merged at this position).
+    """
+    pattern = shape["pattern"]
+    specs = shape["specs"]
+    root_ratio = shape["root_ratio"]
+    shared = {
+        "root_factor": float(specs[0].get("root_factor", 1.0)) if specs else 1.0,
+        "poly_cluster_index": 0,
+        "poly_cycle_angle": shape["cycle_angle"],
+        "poly_pseudo_angle": 0.0,
+        "poly_ratio_text": str(pattern.get("ratio_text", "")),
+        "poly_fraction_text": str(pattern.get("fraction_text", "")),
+        "poly_actual_fraction_text": str(pattern.get("actual_fraction_text", "")),
+        "poly_ratio_octave_mode": str(pattern.get("ratio_octave_mode", fallback_octave_mode)),
+        "poly_root_cycles": max(1, int(pattern.get("common_root_cycles", 1))),
+        "poly_timing_source": "global_bpm",
+        "poly_scratch_merge": True,
+    }
+    templates: list[tuple[float, dict[str, Any], float, float, int]] = []
+    for merged in shape["positions"]:
+        pos_float = float(merged.get("pos_float", 0.0))
+        primary = dict(merged.get("primary") or {})
+        voice_index = int(primary.get("voice_index", 0))
+        if not (0 <= voice_index < len(specs)):
+            voice_index = 0
+        pattern_ratio = max(EPS, float(primary.get("pattern_ratio", primary.get("ratio", 1.0))) * root_ratio)
+        actual_ratio = max(EPS, float(primary.get("actual_ratio", primary.get("ratio", 1.0))) * root_ratio)
+        cluster_size = int(merged.get("cluster_size", 1))
+        fields = dict(shared)
+        fields.update({
+            "voice": int(primary.get("voice", 0)),
+            "interval": ratio_to_semitones(pattern_ratio),
+            "ratio": pattern_ratio,
+            "pattern_ratio": pattern_ratio,
+            "actual_ratio": actual_ratio,
+            "actual_interval": ratio_to_semitones(actual_ratio),
+            "voice_label": "+".join(str(x) for x in merged.get("labels", [])) or str(primary.get("label", "root")),
+            "tuning": str(specs[voice_index].get("tuning", "just intonation")) if specs else "",
+            "poly_pos": merged.get("pos", Fraction(0, 1)),
+            "poly_pos_float": pos_float,
+            "poly_cluster_size": cluster_size,
+            "poly_merged_voices": ",".join(str(x) for x in merged.get("voices", [])),
+            "poly_merged_labels": ",".join(str(x) for x in merged.get("labels", [])),
+        })
+        templates.append((
+            pos_float,
+            fields,
+            ratio_to_semitones(pattern_ratio / max(EPS, root_ratio)),
+            pattern_ratio / max(EPS, root_ratio),
+            max(0, cluster_size - 1),
+        ))
+    return templates
+
+
+def _harmony_poly_positions(pattern: dict[str, Any]) -> list[dict[str, Any]]:
+    positions: list[dict[str, Any]] = list(pattern.get("merged_positions", []))
+    if positions:
+        return positions
+    return [{
+        "pos": Fraction(0, 1),
+        "pos_float": 0.0,
+        "pos_index": 0,
+        "cluster": [],
+        "cluster_size": 1,
+        "voices": [0],
+        "labels": ["root"],
+        "counts": [1],
+        "primary": {"voice": 0, "voice_index": 0, "pattern_ratio": 1.0, "actual_ratio": 1.0, "label": "root"},
+    }]
+
+
+def _harmony_poly_u(note: Note, t: float) -> float:
+    if note.duration <= EPS:
+        return 0.0
+    return (min(max(t, note.start), note.end) - note.start) / note.duration
+
+
+def _trim_legato_overlaps(notes: list[Note], max_overlap_seconds: float) -> list[Note]:
+    """Cut a note's tail when another note starts at most max_overlap before it ends.
+
+    MIDI legato often lets one note ring a few milliseconds into the next.
+    Treated as harmony, that blip becomes a momentary two-note chord with its
+    own grid and speed change.  Glides are left alone so their shape stays.
+    """
+    if max_overlap_seconds <= 0:
+        return list(notes)
+    items = sorted((n.normalized() for n in notes if n.duration > EPS), key=lambda n: (n.start, n.end, n.midi))
+    starts = [n.start for n in items]
+    out: list[Note] = []
+    for n in items:
+        if not n.is_curve:
+            i = bisect.bisect_left(starts, max(n.start + EPS, n.end - max_overlap_seconds))
+            if i < len(starts) and starts[i] < n.end - EPS:
+                n = replace(n, end=starts[i])
+        out.append(n)
+    return out
+
+
+def _harmony_poly_overlap_units(
+    notes: list[Note],
+    *,
+    gap_tolerance: float = CHAIN_GAP_TOLERANCE_SEC,
+) -> list[dict[str, Any]]:
+    """Group notes that overlap or touch, and split each group by active set.
+
+    Returns one unit per connected group: ``{"note": span, "segments": [...]}``
+    where each segment is ``(start, end, active_notes)`` with a constant set of
+    sounding notes.  The span note carries the group's time range, its lowest
+    starting pitch, and a target angle only when every note shares it.
+    """
+    items = sorted((n.normalized() for n in notes if n.duration > EPS), key=lambda n: (n.start, n.end, n.midi))
+    groups: list[dict[str, Any]] = []
+    for n in items:
+        if groups and n.start <= groups[-1]["end"] + gap_tolerance:
+            groups[-1]["notes"].append(n)
+            groups[-1]["end"] = max(groups[-1]["end"], n.end)
+        else:
+            groups.append({"notes": [n], "end": n.end})
+
+    units: list[dict[str, Any]] = []
+    for group in groups:
+        members: list[Note] = group["notes"]
+        start = members[0].start
+        end = float(group["end"])
+        cuts = sorted({start, end, *(n.start for n in members), *(n.end for n in members)})
+        segments: list[tuple[float, float, list[Note]]] = []
+        for a, b in zip(cuts, cuts[1:]):
+            if b - a <= EPS:
+                continue
+            mid = (a + b) * 0.5
+            active = [n for n in members if n.start <= mid < n.end]
+            if not active:
+                # A gap inside the tolerance holds the previous chord.
+                if segments:
+                    segments[-1] = (segments[-1][0], b, segments[-1][2])
+                continue
+            if segments and [id(n) for n in segments[-1][2]] == [id(n) for n in active]:
+                segments[-1] = (segments[-1][0], b, active)
+            else:
+                segments.append((a, b, active))
+        if not segments:
+            continue
+        targets = {n.target_angle for n in members}
+        target = next(iter(targets)) if len(targets) == 1 else None
+        span = Note(start, end, min(n.midi for n in segments[0][2]), target_angle=target)
+        units.append({"note": span, "segments": segments})
+    return units
+
+
 def build_harmony_ratio_polyrhythm_events(
     notes: list[Note],
     *,
@@ -2649,12 +3244,21 @@ def build_harmony_ratio_polyrhythm_events(
     harmony_tuning: str = "equal temperament",
     harmony_root_mode: str = "fixed root",
     play_bpm: float = 120.0,
-    max_tiles: int = 200000,
-    max_tiles_per_note: int = 5000,
+    max_tiles: int = 0,
+    max_tiles_per_note: int = 0,
     harmony_poly_cycle_angle: float = 720.0,
     harmony_poly_pseudo_angle: float = 30.0,
     harmony_poly_max_denominator: int = 24,
     harmony_poly_ratio_octave_mode: str = "octave-folded",
+    harmony_poly_cycle_mode: str = "fixed",
+    harmony_poly_cycle_twirl: bool = False,
+    harmony_poly_chord_source: str = "preset",
+    harmony_poly_grid_origin: float | None = None,
+    harmony_poly_pitch_timing: bool = False,
+    harmony_poly_legato_ms: float = 0.0,
+    harmony_poly_merge_octaves: bool = False,
+    harmony_poly_max_voices: int = 0,
+    harmony_poly_max_root_cycles: int = 0,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]], dict[str, Any]]:
     """
     Build Harmony events by repeating a Scratch-style ratio-derived grid.
@@ -2669,12 +3273,54 @@ def build_harmony_ratio_polyrhythm_events(
     derived from the global Harmony BPM and cycle_angle, so emitted tiles do
     not require per-tile SetSpeed compensation.  Pitch/frequency is retained
     only as metadata for labels/debugging.
+
+    The grid always uses the presets' just-intonation ratios.  Only the ratio
+    shapes the rhythm, and equal-tempered intervals are irrational: limiting
+    them to a small denominator gives arbitrary grids such as 46:58:69 for a
+    major triad (148 tiles, 0.2 degree angles) instead of 4:5:6.  harmony_tuning
+    and harmony_root_mode are accepted for signature compatibility only.
+
+    harmony_poly_cycle_mode:
+        "fixed" emits harmony_poly_cycle_angle per cycle.
+        "auto" keeps the cycle duration given by harmony_poly_cycle_angle at
+        play_bpm, but emits 180 degrees per tile on average (zero net turn
+        per cycle) and scales the BPM to match, so successive cycles advance
+        along a line instead of overlapping.  The effective BPM is returned as
+        pattern_stats["effective_play_bpm"].
+
+    harmony_poly_cycle_twirl:
+        the emitter will mirror every other cycle with a Twirl (auto mode on
+        a raw path); the automatic angle is chosen for that geometry.
+
+    harmony_poly_grid_origin:
+        None restarts the cycle grid at every note (or overlap group).  A time
+        in seconds puts every cycle on one global grid from that origin, e.g.
+        the song's beat grid: hit positions before a note starts or after it
+        ends are skipped, so silence stays a rest.
+
+    harmony_poly_pitch_timing:
+        Derive each cycle's length from the pitch instead of play_bpm: a cycle
+        lasts as many periods of the root (lowest) note as the root's count in
+        the ratio grid.  Every voice then hits at its own frequency, so the
+        chord sounds at pitch (A#5 hits 932 times a second).  Ratios keep their
+        octaves (no folding), each cycle runs at its own BPM, and the global
+        grid origin is ignored because cycles follow the notes.
+
+    harmony_poly_legato_ms / harmony_poly_merge_octaves (overlap chords only):
+        ignore note tails that ring at most this long into the next note, and
+        fold octave doublings into the lower voice.
+
+    harmony_poly_max_voices / harmony_poly_max_root_cycles (overlap chords,
+    0 = no limit): keep at most this many voices, and keep the grid at most
+    this many root periods per cycle.  Big chords sound muddy and their fine
+    grids put hits microseconds apart.
     """
+    del harmony_tuning, harmony_root_mode
     voice_specs = build_harmony_voice_specs(
         harmony_mode,
         harmony_custom_semitone,
-        harmony_tuning=harmony_tuning,
-        harmony_root_mode=harmony_root_mode,
+        harmony_tuning="just intonation",
+        harmony_root_mode="fixed root",
     )
     pattern = build_harmony_ratio_polyrhythm_pattern(
         voice_specs,
@@ -2686,111 +3332,201 @@ def build_harmony_ratio_polyrhythm_events(
     _unused_pseudo_angle = clean_relative_angle(max(0.001, float(harmony_poly_pseudo_angle)))
     merge_epsilon_sec = max(1e-9, float(harmony_epsilon_ms) / 1000.0)
 
-    cycle_angle = max(0.001, float(harmony_poly_cycle_angle))
+    # The cycle duration always follows the requested cycle angle at play_bpm.
+    timing_cycle_angle = max(0.001, float(harmony_poly_cycle_angle))
+    cycle_seconds = timing_cycle_angle * 60.0 / (180.0 * max(EPS, float(play_bpm)))
+    cycle_angle, cycle_mode = _harmony_poly_emitted_cycle_angle(
+        pattern, timing_cycle_angle, harmony_poly_cycle_mode, harmony_poly_cycle_twirl,
+    )
+    cycle_twirl = bool(harmony_poly_cycle_twirl) and cycle_mode == "auto"
+    effective_play_bpm = max(EPS, float(play_bpm)) * cycle_angle / timing_cycle_angle
     common_root_cycles = max(1, int(pattern.get("common_root_cycles", 1)))
-    root_ratio = max(EPS, float(pattern.get("root_ratio", 1.0)))
-    merged_positions: list[dict[str, Any]] = list(pattern.get("merged_positions", []))
-    if not merged_positions:
-        merged_positions = [{
-            "pos": Fraction(0, 1),
-            "pos_float": 0.0,
-            "pos_index": 0,
-            "cluster": [],
-            "cluster_size": 1,
-            "voices": [0],
-            "labels": ["root"],
-            "counts": [1],
-            "primary": {"voice": 0, "voice_index": 0, "pattern_ratio": 1.0, "actual_ratio": 1.0, "label": "root"},
-        }]
+    merged_positions: list[dict[str, Any]] = _harmony_poly_positions(pattern)
+
+    # Every chord shape (preset or derived from overlapping notes) gets its own
+    # grid and emitted cycle angle.  The cycle *duration* is shared, so in auto
+    # mode each shape runs at its own BPM: angle / BPM stays constant.
+    shapes: dict[tuple[float, ...], dict[str, Any]] = {}
+
+    shape_octave_mode = "absolute" if harmony_poly_pitch_timing else harmony_poly_ratio_octave_mode
+    if harmony_poly_pitch_timing:
+        harmony_poly_grid_origin = None
+
+    def chord_shape(specs: list[dict[str, Any]]) -> dict[str, Any]:
+        key = tuple(round(float(s.get("ratio", 1.0)), 9) for s in specs)
+        shape = shapes.get(key)
+        if shape is None:
+            pat = build_harmony_ratio_polyrhythm_pattern(
+                specs,
+                max_denominator=harmony_poly_max_denominator,
+                ratio_octave_mode=shape_octave_mode,
+            )
+            angle, _mode = _harmony_poly_emitted_cycle_angle(
+                pat, timing_cycle_angle, harmony_poly_cycle_mode, harmony_poly_cycle_twirl,
+            )
+            shape = {
+                "pattern": pat,
+                "specs": specs,
+                "positions": _harmony_poly_positions(pat),
+                "cycle_angle": float(angle),
+                "bpm": max(EPS, float(play_bpm)) * float(angle) / timing_cycle_angle,
+                "root_ratio": max(EPS, float(pat.get("root_ratio", 1.0))),
+            }
+            shape["templates"] = _harmony_poly_event_templates(shape, harmony_poly_ratio_octave_mode)
+            shapes[key] = shape
+        return shape
+
+    preset_shape = chord_shape(voice_specs)
+    use_overlap_chords = _harmony_key(harmony_poly_chord_source) in ("overlap", "overlaps", "notes", "auto")
+    if use_overlap_chords:
+        units = _harmony_poly_overlap_units(
+            _trim_legato_overlaps(notes, max(0.0, float(harmony_poly_legato_ms)) / 1000.0)
+        )
+    else:
+        units = []
+        for note in notes:
+            n = note.normalized()
+            units.append({"note": n, "segments": [(n.start, n.end, [n])]})
 
     events: list[dict[str, Any]] = []
     total_emitted = 0
     duplicate_hits_merged_total = 0
+    first_shape: dict[str, Any] | None = None
+    chord_sequence: list[str] = []
+    chord_changes = 0
 
-    for note_id, note in enumerate(notes):
-        n0 = note.normalized()
-        if n0.duration <= EPS:
+    for note_id, unit in enumerate(units):
+        n0 = unit["note"]
+        segments = unit["segments"]
+        if n0.duration <= EPS or not segments:
             continue
-
-        if n0.is_curve:
-            # Ratio-polyrhythm is meant for stable harmony shapes. For glides,
-            # use the start frequency so the visual rhythm remains readable.
-            root_freq = max(EPS, float(n0.freq_at(0.0)) * root_ratio)
-            root_midi = float(n0.midi_at(0.0)) + ratio_to_semitones(root_ratio)
-        else:
-            root_freq = max(EPS, float(n0.freq) * root_ratio)
-            root_midi = float(n0.midi) + ratio_to_semitones(root_ratio)
 
         # In Scratch-style polyrhythm mode, timing is encoded by the generated
         # angles themselves at one global BPM.  Do not derive cycle length from
         # root_freq, otherwise every pitch change needs SetSpeed compensation
         # and the result behaves like Hz Charting again.
-        cycle_seconds = cycle_angle * 60.0 / (180.0 * max(EPS, float(play_bpm)))
         if cycle_seconds <= EPS:
             continue
 
         note_events: list[dict[str, Any]] = []
         per_note_limit = max_tiles_per_note if int(max_tiles_per_note) > 0 else 10**12
-        cycle_index = 0
+        if harmony_poly_grid_origin is None:
+            grid_base = n0.start
+            cycle_index = 0
+        else:
+            # Global grid: start at the cycle that contains the note's start.
+            grid_base = float(harmony_poly_grid_origin)
+            cycle_index = int(math.floor((n0.start - grid_base) / cycle_seconds + 1e-9))
+        def chord_voices_at(at_time: float, seg_i: int) -> list[float]:
+            """Pitches that sound at at_time (segment seg_i), after folding/limits."""
+            if use_overlap_chords:
+                midis = [float(n.midi_at(_harmony_poly_u(n, at_time))) for n in segments[seg_i][2]]
+                return _overlap_chord_voices(
+                    midis,
+                    merge_octaves=bool(harmony_poly_merge_octaves),
+                    max_voices=int(harmony_poly_max_voices),
+                    max_root_cycles=int(harmony_poly_max_root_cycles),
+                )
+            if harmony_poly_pitch_timing:
+                # Follow glides cycle by cycle so the pitch stays right.
+                return [float(n0.midi_at(_harmony_poly_u(n0, at_time)))]
+            # Ratio-polyrhythm is meant for stable harmony shapes. For glides,
+            # use the start frequency so the rhythm stays readable.
+            return [float(n0.midi_at(0.0))]
+
+        seg_index = 0
+        previous_shape: dict[str, Any] | None = None
+        cycle_start = grid_base
         while True:
-            cycle_start = n0.start + cycle_index * cycle_seconds
+            if not harmony_poly_pitch_timing:
+                cycle_start = grid_base + cycle_index * cycle_seconds
             if cycle_start >= n0.end - EPS:
                 break
-            for merged in merged_positions:
+            # Where sound begins inside this cycle (later than the cycle start
+            # when the note starts mid-cycle on a global grid).
+            probe = max(cycle_start, n0.start)
+
+            # A chord change takes effect at the next cycle boundary: the
+            # chord sounding when a cycle's sound begins drives that cycle.
+            # (Pitch timing instead cuts the cycle short at the change below.)
+            while seg_index + 1 < len(segments) and segments[seg_index][1] <= probe + EPS:
+                seg_index += 1
+            voices = chord_voices_at(probe, seg_index)
+            if len(voices) > 1:
+                shape = chord_shape(_voice_specs_for(voices))
+            else:
+                shape = preset_shape
+            if first_shape is None:
+                first_shape = shape
+            if shape is not previous_shape:
+                text = str(shape["pattern"].get("ratio_text", ""))
+                if previous_shape is not None:
+                    chord_changes += 1
+                if not chord_sequence or chord_sequence[-1] != text:
+                    chord_sequence.append(text)
+                previous_shape = shape
+
+            shape_pattern = shape["pattern"]
+            shape_specs = shape["specs"]
+            shape_root_ratio = shape["root_ratio"]
+            shape_cycle_angle = shape["cycle_angle"]
+            # The root is the lowest voice that is kept, not merely the lowest
+            # note sounding: folding or limits may have dropped that one.
+            base_midi = min(voices)
+            root_freq = max(EPS, midi_to_hz(base_midi) * shape_root_ratio)
+            root_midi = base_midi + ratio_to_semitones(shape_root_ratio)
+            if harmony_poly_pitch_timing:
+                # The root voice hits common_root_cycles times per cycle, so
+                # this cycle length makes it hit at root_freq.
+                root_hits = max(1, int(shape_pattern.get("common_root_cycles", 1)))
+                cycle_len = root_hits / root_freq
+                cycle_bpm = shape_cycle_angle * 60.0 / (180.0 * cycle_len)
+            else:
+                cycle_len = cycle_seconds
+                cycle_bpm = shape["bpm"]
+            cycle_end = cycle_start + cycle_len
+            if harmony_poly_pitch_timing and use_overlap_chords:
+                # With pitch timing a cycle can last a dozen bass periods, so
+                # waiting for its end would delay or swallow short melody
+                # notes.  End the cycle where the sounding voices change.
+                key = tuple(round(v, 6) for v in voices)
+                k = seg_index
+                while k + 1 < len(segments) and segments[k][1] < cycle_end - EPS:
+                    boundary = segments[k][1]
+                    if tuple(round(v, 6) for v in chord_voices_at(boundary, k + 1)) != key:
+                        cycle_end = boundary
+                        break
+                    k += 1
+
+            note_start_limit = n0.start - EPS
+            note_end_limit = n0.end - EPS
+            for pos_float, template, midi_offset, freq_factor, merged_hits in shape["templates"]:
                 if len(note_events) >= per_note_limit:
                     break
-                pos_float = float(merged.get("pos_float", 0.0))
-                raw_time = cycle_start + pos_float * cycle_seconds
-                if raw_time >= n0.end - EPS:
+                raw_time = cycle_start + pos_float * cycle_len
+                if raw_time >= note_end_limit or raw_time < note_start_limit or raw_time >= cycle_end - EPS:
+                    # No note sounds here: leave it as a rest.
                     continue
+                duplicate_hits_merged_total += merged_hits
 
-                primary = dict(merged.get("primary") or {})
-                voice_index = int(primary.get("voice_index", 0))
-                if not (0 <= voice_index < len(voice_specs)):
-                    voice_index = 0
-                pattern_ratio = max(EPS, float(primary.get("pattern_ratio", primary.get("ratio", 1.0))) * root_ratio)
-                actual_ratio = max(EPS, float(primary.get("actual_ratio", primary.get("ratio", 1.0))) * root_ratio)
-                cluster_size = int(merged.get("cluster_size", 1))
-                duplicate_hits_merged_total += max(0, cluster_size - 1)
-
-                event = {
-                    "time": raw_time,
-                    "raw_time": raw_time,
-                    "midi": root_midi + ratio_to_semitones(pattern_ratio / max(EPS, root_ratio)),
-                    "freq": root_freq * (pattern_ratio / max(EPS, root_ratio)),
-                    "voice": int(primary.get("voice", 0)),
-                    "interval": ratio_to_semitones(pattern_ratio),
-                    "ratio": pattern_ratio,
-                    "pattern_ratio": pattern_ratio,
-                    "actual_ratio": actual_ratio,
-                    "actual_interval": ratio_to_semitones(actual_ratio),
-                    "voice_label": "+".join(str(x) for x in merged.get("labels", [])) or str(primary.get("label", "root")),
-                    "tuning": str(voice_specs[voice_index].get("tuning", "")) if voice_specs else "",
-                    "root_factor": float(voice_specs[0].get("root_factor", 1.0)) if voice_specs else 1.0,
-                    "note": n0,
-                    "note_id": note_id,
-                    "poly_cycle_index": cycle_index,
-                    "poly_pos": merged.get("pos", Fraction(0, 1)),
-                    "poly_pos_float": pos_float,
-                    "poly_cluster_index": 0,
-                    "poly_cluster_size": cluster_size,
-                    "poly_merged_voices": ",".join(str(x) for x in merged.get("voices", [])),
-                    "poly_merged_labels": ",".join(str(x) for x in merged.get("labels", [])),
-                    "poly_cycle_angle": cycle_angle,
-                    "poly_pseudo_angle": 0.0,
-                    "poly_ratio_text": str(pattern.get("ratio_text", "")),
-                    "poly_fraction_text": str(pattern.get("fraction_text", "")),
-                    "poly_actual_fraction_text": str(pattern.get("actual_fraction_text", "")),
-                    "poly_ratio_octave_mode": str(pattern.get("ratio_octave_mode", harmony_poly_ratio_octave_mode)),
-                    "poly_root_cycles": common_root_cycles,
-                    "poly_cycle_seconds": cycle_seconds,
-                    "poly_timing_source": "global_bpm",
-                    "poly_scratch_merge": True,
-                }
+                # Copy the per-shape fields, then set the per-hit ones.
+                event = dict(template)
+                event["time"] = raw_time
+                event["raw_time"] = raw_time
+                event["midi"] = root_midi + midi_offset
+                event["freq"] = root_freq * freq_factor
+                event["note"] = n0
+                event["note_id"] = note_id
+                event["poly_cycle_index"] = cycle_index
+                event["poly_play_bpm"] = cycle_bpm
+                event["poly_cycle_seconds"] = cycle_len
+                event["poly_cycle_end"] = cycle_end
                 note_events.append(event)
             if len(note_events) >= per_note_limit:
                 break
             cycle_index += 1
+            if harmony_poly_pitch_timing:
+                cycle_start = cycle_end
 
         note_events.sort(key=lambda e: (
             int(e.get("poly_cycle_index", 0)),
@@ -2816,12 +3552,38 @@ def build_harmony_ratio_polyrhythm_events(
                 event["poly_has_next_in_note"] = False
                 next_phase = math.floor(cur_phase) + 1.0
             gap = max(EPS, next_phase - cur_phase)
-            event["poly_rel_to_next"] = clean_relative_angle(gap * cycle_angle)
+            # The unwrapped angle is the timing; it may exceed 360 degrees,
+            # which one tile can only show with SetSpeed compensation.  A gap
+            # never crosses a cycle boundary, so it uses its own cycle's angle.
+            event_cycle_angle = float(event.get("poly_cycle_angle", cycle_angle))
+            timing_rel = gap * event_cycle_angle
+            if harmony_poly_pitch_timing:
+                # Cycles can be cut short at chord changes, so measure the
+                # real time to the next hit (or to this cycle's end).
+                next_time = (
+                    float(note_events[idx + 1]["time"])
+                    if idx + 1 < len(note_events)
+                    else float(event["poly_cycle_end"])
+                )
+                timing_rel = max(EPS, next_time - float(event["time"])) * 3.0 * float(event["poly_play_bpm"])
+            event["poly_timing_rel_to_next"] = timing_rel
+            event["poly_rel_to_next"] = clean_relative_angle(timing_rel)
 
         events.extend(note_events)
         total_emitted += len(note_events)
         if max_tiles > 0 and total_emitted >= max_tiles:
             break
+
+    if first_shape is not None:
+        # The level starts at the first emitted shape's speed; later shapes
+        # switch speed with SetSpeed in the emitter.
+        pattern = first_shape["pattern"]
+        cycle_angle = first_shape["cycle_angle"]
+        effective_play_bpm = first_shape["bpm"]
+        if harmony_poly_pitch_timing and events:
+            effective_play_bpm = float(events[0]["poly_play_bpm"])
+        merged_positions = first_shape["positions"]
+        common_root_cycles = max(1, int(pattern.get("common_root_cycles", 1)))
 
     events.sort(key=lambda e: (float(e["time"]), int(e.get("note_id", 0)), int(e.get("voice", 0)), float(e.get("midi", 0.0))))
 
@@ -2841,7 +3603,7 @@ def build_harmony_ratio_polyrhythm_events(
                 primary.setdefault("poly_global_midis", []).append(float(event.get("midi", 0.0)))
                 global_simultaneous_merged += 1
                 continue
-            event = dict(event)
+            # Events are built fresh above and not shared, so annotate in place.
             event["poly_global_cluster_size"] = 1
             event["poly_global_note_ids"] = {int(event.get("note_id", -1))}
             event["poly_global_voice_labels"] = [str(event.get("voice_label", ""))]
@@ -2863,6 +3625,10 @@ def build_harmony_ratio_polyrhythm_events(
         "fraction_text": str(pattern.get("fraction_text", "")),
         "common_root_cycles": int(pattern.get("common_root_cycles", 1)),
         "cycle_angle": round(cycle_angle, 6),
+        "cycle_angle_mode": cycle_mode,
+        "cycle_twirl": "true" if cycle_twirl else "false",
+        "timing_cycle_angle": round(timing_cycle_angle, 6),
+        "tuning": "just intonation",
         "pseudo_angle": 0.0,
         "max_denominator": int(harmony_poly_max_denominator),
         "ratio_octave_mode": str(pattern.get("ratio_octave_mode", harmony_poly_ratio_octave_mode)),
@@ -2872,8 +3638,16 @@ def build_harmony_ratio_polyrhythm_events(
         "global_simultaneous_merged": int(global_simultaneous_merged),
         "unique_positions": int(len(merged_positions)),
         "timing_source": "global_bpm",
-        "cycle_seconds": round(float(cycle_angle * 60.0 / (180.0 * max(EPS, float(play_bpm)))), 9),
-        "play_bpm": round(float(play_bpm), 6),
+        "cycle_seconds": round(float(cycle_seconds), 9),
+        "play_bpm": round(float(effective_play_bpm), 6),
+        "requested_play_bpm": round(float(play_bpm), 6),
+        "effective_play_bpm": float(effective_play_bpm),
+        "chord_source": "overlap" if use_overlap_chords else "preset",
+        "chord_changes": int(chord_changes),
+        "chord_sequence": " > ".join(chord_sequence),
+        "chord_shapes": len(shapes),
+        "grid": "global" if harmony_poly_grid_origin is not None else "per_note",
+        "timing": "pitch" if harmony_poly_pitch_timing else "bpm",
     }
     return events, duplicate_hits_merged_total, voice_specs, pattern_stats
 
@@ -2961,8 +3735,8 @@ def build_harmony_impulse_events(
     harmony_epsilon_ms: float = 0.001,
     harmony_tuning: str = "equal temperament",
     harmony_root_mode: str = "fixed root",
-    max_tiles: int = 200000,
-    max_tiles_per_note: int = 5000,
+    max_tiles: int = 0,
+    max_tiles_per_note: int = 0,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
     """
     Merge root + harmony impulse trains into one timeline.
@@ -3103,6 +3877,7 @@ def emit_harmony_polyrhythm(
     harmony_visual_step: float = 45.0,
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
+    ratio_cycle_twirl: bool = False,
 ) -> tuple[int, int, float | None, int, int, int, int, int, int, float]:
     """
     Emit a single serial ADOFAI path from merged harmony impulse times.
@@ -3120,7 +3895,9 @@ def emit_harmony_polyrhythm(
 
     Ratio-polyrhythm mode:
         the Scratch-derived relative angles are the timing.  It stays at the
-        global Harmony BPM and does not emit per-tile SetSpeed events.
+        global Harmony BPM; SetSpeed appears only on tiles whose drawn angle
+        differs from the timing angle.  With ratio_cycle_twirl, every cycle
+        start toggles Twirl so successive cycles mirror instead of overlapping.
     """
     if not events:
         return floor, 0, current_bpm, 0, 0, 0, 0, 0, 0, 0.0
@@ -3138,6 +3915,7 @@ def emit_harmony_polyrhythm(
     harmony_pause_events = 0
     harmony_rest_seconds = 0.0
     now = 0.0
+    previous_cycle_key: tuple[Any, int] | None = None
 
     for i, e in enumerate(events):
         if max_tiles > 0 and emitted >= max_tiles:
@@ -3150,6 +3928,9 @@ def emit_harmony_polyrhythm(
 
         source_note = e.get("note")
         rest_after = 0.0
+        # Ratio-polyrhythm events carry their chord shape's speed: in auto
+        # cycle mode each shape has its own emitted angle per cycle.
+        tile_play_bpm = float(e.get("poly_play_bpm", play_bpm)) if ratio_polyrhythm_timing else float(play_bpm)
         if i + 1 < len(events):
             next_t = float(events[i + 1]["time"])
             dt = max(EPS, next_t - t)
@@ -3185,14 +3966,29 @@ def emit_harmony_polyrhythm(
             # Ratio-polyrhythm mode: the Scratch-derived relative angle is the
             # timing.  Keep one global BPM; do not compensate with SetSpeed.
             # The very last event also keeps its final position->cycle-end gap.
-            old_rel = clean_relative_angle(float(poly_rel))
-            base_bpm_for_tile = float(play_bpm)
+            # Use the unwrapped angle: a gap over 360 degrees is drawn wrapped
+            # and its duration is restored with SetSpeed below.
+            old_rel = max(EPS, float(e.get("poly_timing_rel_to_next", poly_rel)))
+            base_bpm_for_tile = tile_play_bpm
         elif ratio_polyrhythm_timing:
-            # If global event sorting inserted another note before this note's
-            # next pattern hit, encode that real gap as an angle at the same
-            # global BPM instead of changing speed.
-            old_rel = harmony_timing_angle(dt, play_bpm)
-            base_bpm_for_tile = float(play_bpm)
+            # The next hit belongs to another phrase.  When this phrase ended
+            # first, end the tile one grid step after the hit, exactly like the
+            # tiles inside the phrase, and leave the rest of the silence to the
+            # Pause.  Ending it at the note end instead could leave a tile of
+            # a few microseconds that needs an absurd SetSpeed.
+            grid_rel = e.get("poly_timing_rel_to_next")
+            if rest_after > 0.0 and grid_rel is not None and float(grid_rel) > EPS:
+                grid_dt = float(grid_rel) * 60.0 / (180.0 * max(EPS, tile_play_bpm))
+                if t + grid_dt <= next_t - 1e-6:
+                    dt = grid_dt
+                    rest_after = next_t - t - grid_dt
+                else:
+                    dt = max(EPS, next_t - t)
+                    rest_after = 0.0
+            # Otherwise encode the real gap as an angle at this tile's BPM
+            # (unwrapped; see above).
+            old_rel = max(EPS, float(dt) * tile_play_bpm * 180.0 / 60.0)
+            base_bpm_for_tile = tile_play_bpm
         elif angle_only_timing:
             # In Harmony Angle-only mode, the raw angle itself represents the
             # exact time until the next merged impulse at the global BPM.
@@ -3211,10 +4007,12 @@ def emit_harmony_polyrhythm(
             # Explicit per-note Target Angle wins over automatic readable remap.
             rel = clean_relative_angle(float(target))
             target_angle_used += 1
-        elif ratio_polyrhythm_timing and poly_rel is not None and poly_rel_matches_next:
+        elif ratio_polyrhythm_timing:
             # Keep the ratio-derived angle sequence exact. Use Visual path / Twirl
-            # for shape control instead of snapping these gaps to another grid.
-            rel = old_rel
+            # for shape control instead of snapping these gaps to another grid:
+            # snapping a short phrase-boundary tile to 45 degrees needed huge
+            # compensating SetSpeeds.
+            rel = clean_relative_angle(old_rel)
         else:
             rel = remap_harmony_visual_angle(
                 old_rel,
@@ -3242,18 +4040,36 @@ def emit_harmony_polyrhythm(
         if abs(rel - old_rel) > 1e-6:
             remapped_angles += 1
 
-        if ratio_polyrhythm_timing:
-            # Polyrhythm uses angle timing: speed remains the global Harmony BPM.
-            need_setspeed = False
-            bpm = float(play_bpm)
-        else:
-            need_setspeed = (not angle_only_timing) or abs(bpm - float(play_bpm)) > 1e-6
-        if need_setspeed:
+        # Angle timing (Angle-only and ratio-polyrhythm) stays at the global
+        # Harmony BPM.  Only a tile whose drawn angle differs from its timing
+        # angle (target angle, upward paths, gaps over 360 degrees, rounded
+        # cross-note gaps) gets a compensating SetSpeed, reset on the next tile.
+        angle_timing = angle_only_timing or ratio_polyrhythm_timing
+        if ratio_polyrhythm_timing and i + 1 >= len(events):
+            # No hit follows the final tile, so its angle carries no timing.
+            bpm = tile_play_bpm
+        if not angle_timing:
             actions.append(set_bpm(floor, bpm))
             setspeed_events += 1
             current_bpm = bpm
         else:
-            current_bpm = float(play_bpm)
+            # Write a SetSpeed only when this tile's speed differs from the
+            # speed already in effect; uncompensated tiles return to play_bpm.
+            tile_bpm = bpm if abs(bpm - tile_play_bpm) > 1e-6 else tile_play_bpm
+            if current_bpm is None or abs(tile_bpm - float(current_bpm)) > 1e-6:
+                actions.append(set_bpm(floor, tile_bpm))
+                setspeed_events += 1
+            current_bpm = tile_bpm
+
+        if ratio_cycle_twirl and ratio_polyrhythm_timing:
+            cycle_key = (e.get("note_id"), int(e.get("poly_cycle_index", 0)))
+            if previous_cycle_key is not None and cycle_key != previous_cycle_key:
+                context = _build_context()
+                context.twirl_active = not context.twirl_active
+                # A Twirl on floor N applies to the tile appended at angleData[N].
+                actions.append(twirl_event(floor + 1))
+            previous_cycle_key = cycle_key
+            twirled_for_this_tile = _build_context().twirl_active
 
         add_relative(angle_data, rel, twirled=twirled_for_this_tile)
 
@@ -3261,12 +4077,6 @@ def emit_harmony_polyrhythm(
             pause_seconds(actions, floor + 1, rest_after, current_bpm)
             harmony_pause_events += 1
             harmony_rest_seconds += rest_after
-
-        if (angle_only_timing and not ratio_polyrhythm_timing) and need_setspeed:
-            # Return to the global Harmony BPM for the next raw Angle-only tile.
-            actions.append(set_bpm(floor + 1, play_bpm))
-            setspeed_events += 1
-            current_bpm = float(play_bpm)
 
         floor += 1
         emitted += 1
@@ -3285,8 +4095,8 @@ def build_adofai_level(
     rabbit_x_mode: str = "floor",
     rabbit_fixed_x: float = 8.0,
     rabbit_target_bpm: float = 1600.0,
-    max_tiles: int = 200000,
-    max_tiles_per_note: int = 5000,
+    max_tiles: int = 0,
+    max_tiles_per_note: int = 0,
     track_visual: str = "normal",
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
@@ -3296,6 +4106,7 @@ def build_adofai_level(
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
+    chain_contiguous: bool = False,
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
@@ -3313,6 +4124,14 @@ def build_adofai_level(
     harmony_poly_pseudo_angle: float = 30.0,
     harmony_poly_max_denominator: int = 24,
     harmony_poly_ratio_octave_mode: str = "octave-folded",
+    harmony_poly_cycle_mode: str = "fixed",
+    harmony_poly_chord_source: str = "preset",
+    harmony_poly_grid_origin_seconds: float | None = None,
+    harmony_poly_pitch_timing: bool = False,
+    harmony_poly_legato_ms: float = 0.0,
+    harmony_poly_merge_octaves: bool = False,
+    harmony_poly_max_voices: int = 0,
+    harmony_poly_max_root_cycles: int = 0,
 ) -> tuple[dict[str, Any], dict[str, int | float | str]]:
     level = new_level()
     if song_filename:
@@ -3347,6 +4166,10 @@ def build_adofai_level(
         prepared_notes = flatten_curve_notes(notes, curve_step_sec=curve_step_sec, curve_pitch_step=curve_pitch_step)
 
     sorted_notes, first_note_offset = normalize_notes_to_first(prepared_notes)
+    notes_before_chain = len(sorted_notes)
+    if chain_contiguous and use_phase_continuous_glide and method_key not in ("harmony", "harmony_polyrhythm"):
+        sorted_notes = chain_contiguous_notes(sorted_notes)
+    chained_runs = sum(1 for n in sorted_notes if isinstance(n, ChainedNote))
 
     global_lowest_floor_x = compute_lowest_floor_x(sorted_notes)
     effective_fixed_x = global_lowest_floor_x if (rabbit_x_mode or "").lower().replace(" ", "_").replace("-", "_") in (
@@ -3385,7 +4208,26 @@ def build_adofai_level(
                 harmony_poly_pseudo_angle=harmony_poly_pseudo_angle,
                 harmony_poly_max_denominator=harmony_poly_max_denominator,
                 harmony_poly_ratio_octave_mode=harmony_poly_ratio_octave_mode,
+                harmony_poly_cycle_mode=harmony_poly_cycle_mode,
+                harmony_poly_chord_source=harmony_poly_chord_source,
+                # Notes were shifted so the first one starts at 0; shift the
+                # song-time grid origin the same way.
+                harmony_poly_grid_origin=(
+                    None
+                    if harmony_poly_grid_origin_seconds is None
+                    else float(harmony_poly_grid_origin_seconds) - first_note_offset
+                ),
+                harmony_poly_pitch_timing=bool(harmony_poly_pitch_timing),
+                harmony_poly_legato_ms=float(harmony_poly_legato_ms),
+                harmony_poly_merge_octaves=bool(harmony_poly_merge_octaves),
+                harmony_poly_max_voices=int(harmony_poly_max_voices),
+                harmony_poly_max_root_cycles=int(harmony_poly_max_root_cycles),
+                harmony_poly_cycle_twirl=visual_path_key(visual_path_mode) == "raw",
             )
+            # Auto cycle angle scales the global BPM to keep cycle durations.
+            play_bpm = max(1e-6, float(harmony_ratio_pattern_stats.get("effective_play_bpm", play_bpm)))
+            level.setdefault("settings", {})["bpm"] = round(play_bpm, 6)
+            current_bpm = play_bpm
         else:
             events, simultaneous_adjusted, voice_specs = build_harmony_impulse_events(
                 sorted_notes,
@@ -3410,6 +4252,7 @@ def build_adofai_level(
             harmony_visual_step=harmony_visual_step,
             visual_path_mode=visual_path_mode,
             visual_path_angle=visual_path_angle,
+            ratio_cycle_twirl=harmony_ratio_pattern_stats.get("cycle_twirl") == "true",
         )
         apply_twirl_angledata_rebuild(
             angle_data,
@@ -3451,6 +4294,14 @@ def build_adofai_level(
             "harmony_visual_mode": harmony_visual_mode,
             "harmony_visual_step": round(float(harmony_visual_step), 6),
             "harmony_poly_cycle_angle": round(float(harmony_poly_cycle_angle), 6),
+            "harmony_poly_cycle_mode": str(harmony_ratio_pattern_stats.get("cycle_angle_mode", "")),
+            "harmony_poly_chord_source": str(harmony_ratio_pattern_stats.get("chord_source", "")),
+            "harmony_poly_chord_changes": int(harmony_ratio_pattern_stats.get("chord_changes", 0) or 0),
+            "harmony_poly_grid": str(harmony_ratio_pattern_stats.get("grid", "")),
+            "harmony_poly_timing": str(harmony_ratio_pattern_stats.get("timing", "")),
+            "harmony_poly_chord_sequence": str(harmony_ratio_pattern_stats.get("chord_sequence", "")),
+            "harmony_poly_emitted_cycle_angle": float(harmony_ratio_pattern_stats.get("cycle_angle", 0.0) or 0.0),
+            "harmony_poly_cycle_twirl": str(harmony_ratio_pattern_stats.get("cycle_twirl", "")),
             "harmony_poly_pseudo_angle": round(float(harmony_poly_pseudo_angle), 6),
             "harmony_poly_max_denominator": int(harmony_poly_max_denominator),
             "harmony_poly_ratio_octave_mode": str(harmony_poly_ratio_octave_mode),
@@ -3676,6 +4527,9 @@ def build_adofai_level(
         "curve_pitch_step": round(float(curve_pitch_step), 6),
         "phase_continuous_glide": bool(use_phase_continuous_glide),
         "phase_continuous_curves": phase_continuous_curves,
+        "chain_contiguous": bool(chain_contiguous),
+        "chained_runs": chained_runs,
+        "notes_merged_by_chain": notes_before_chain - len(sorted_notes),
         "input_notes_total": len(notes),
         "base_bpm": round(float(base_bpm), 6),
         "angle_only_bpm": round(float(angle_only_bpm), 6),
@@ -3747,8 +4601,8 @@ def export_adofai(
     rabbit_x_mode: str = "floor",
     rabbit_fixed_x: float = 8.0,
     rabbit_target_bpm: float = 1600.0,
-    max_tiles: int = 200000,
-    max_tiles_per_note: int = 5000,
+    max_tiles: int = 0,
+    max_tiles_per_note: int = 0,
     track_visual: str = "normal",
     visual_path_mode: str = "raw",
     visual_path_angle: float = 90.0,
@@ -3758,6 +4612,7 @@ def export_adofai(
     curve_step_sec: float = 0.025,
     curve_pitch_step: float = 0.25,
     phase_continuous_glide: bool = True,
+    chain_contiguous: bool = False,
     final_angle_mode: str = "scaled",
     final_custom_angle: float = 180.0,
     final_cardinal_step: float = 90.0,
@@ -3796,6 +4651,7 @@ def export_adofai(
         curve_step_sec=curve_step_sec,
         curve_pitch_step=curve_pitch_step,
         phase_continuous_glide=phase_continuous_glide,
+        chain_contiguous=chain_contiguous,
         final_angle_mode=final_angle_mode,
         final_custom_angle=final_custom_angle,
         final_cardinal_step=final_cardinal_step,

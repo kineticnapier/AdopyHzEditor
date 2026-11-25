@@ -9,6 +9,8 @@ export type KickPitchRegion = {
 };
 
 export const KICK_PITCH_MAX_SECONDS = 10;
+/** Upper analysis limit; high synth sweeps reach a few kHz. */
+export const KICK_PITCH_MAX_HZ = 8000;
 
 function midiToHz(midi: number) {
   return 440 * 2 ** ((midi - 69) / 12);
@@ -24,11 +26,40 @@ export function defaultKickPitchRegion(
       start: range.startTime,
       end: Math.min(range.endTime, range.startTime + KICK_PITCH_MAX_SECONDS),
       minHz: Math.max(10, Math.round(midiToHz(range.minMidi) * 10) / 10),
-      maxHz: Math.min(2000, Math.round(midiToHz(range.maxMidi) * 10) / 10),
+      maxHz: Math.min(KICK_PITCH_MAX_HZ, Math.round(midiToHz(range.maxMidi) * 10) / 10),
     };
   }
   const start = Math.max(0, viewStart);
   return { start, end: start + 0.5, minHz: 25, maxHz: 500 };
+}
+
+/** A box dragged on the canvas, numbered so the same box twice still counts. */
+export type KickPitchPick = { range: TrackSelectionRange; seq: number };
+
+/** Narrowest pitch span the tracker accepts (max Hz must exceed 1.5 x min Hz). */
+const MIN_PICK_RATIO = 1.6;
+
+/**
+ * Region from a box dragged around the kick on the canvas.  A box only a few
+ * semitones tall is widened around its centre so it still passes validation.
+ */
+export function kickPitchRegionFromPick(range: TrackSelectionRange): KickPitchRegion {
+  const start = Math.max(0, range.startTime);
+  const end = Math.min(Math.max(range.endTime, start + 0.01), start + KICK_PITCH_MAX_SECONDS);
+  let low = midiToHz(range.minMidi);
+  let high = midiToHz(range.maxMidi);
+  if (high / low < MIN_PICK_RATIO) {
+    const centre = Math.sqrt(low * high);
+    const half = Math.sqrt(MIN_PICK_RATIO);
+    low = centre / half;
+    high = centre * half;
+  }
+  return {
+    start,
+    end,
+    minHz: Math.max(10, Math.floor(low * 10) / 10),
+    maxHz: Math.min(KICK_PITCH_MAX_HZ, Math.ceil(high * 10) / 10),
+  };
 }
 
 export function validKickPitchRegion(region: KickPitchRegion): string | null {
@@ -43,7 +74,7 @@ export function validKickPitchRegion(region: KickPitchRegion): string | null {
 }
 
 export function candidateRoleLabel(candidate: KickPitchCandidate) {
-  if (candidate.role === "primary") return "主（基本周波数）";
+  if (candidate.role === "primary") return "主な線";
   if (candidate.role === "harmonic")
     return `倍音 ×${candidate.harmonicNumber ?? "?"}`;
   return "独立成分";
@@ -58,6 +89,28 @@ export function candidateSummary(candidate: KickPitchCandidate) {
   const ends = firstLast(candidate.hz);
   const sweep = ends ? `${ends[0].toFixed(1)}→${ends[1].toFixed(1)} Hz` : "—";
   return `${sweep} · ${candidate.duration.toFixed(3)} s · 信頼度 ${Math.round(candidate.meanConfidence * 100)}%`;
+}
+
+/** Candidates shown before the rest are folded away. */
+export const KICK_PITCH_SHOWN_CANDIDATES = 6;
+
+/**
+ * Display order: the primary track first, then the longest tracks (ties by
+ * confidence).  A region with many short fragments otherwise buries the
+ * primary track at its id position.
+ */
+export function orderedKickPitchCandidates(payload: KickPitchPayload | null): KickPitchCandidate[] {
+  if (!payload?.available) return [];
+  const candidates = payload.candidates ?? [];
+  const primary = payload.primaryIndex ?? null;
+  return candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .sort((a, b) => {
+      if ((a.index === primary) !== (b.index === primary)) return a.index === primary ? -1 : 1;
+      if (b.candidate.duration !== a.candidate.duration) return b.candidate.duration - a.candidate.duration;
+      return b.candidate.meanConfidence - a.candidate.meanConfidence;
+    })
+    .map((entry) => entry.candidate);
 }
 
 /** Candidate ids worth pre-selecting: the primary track only. */

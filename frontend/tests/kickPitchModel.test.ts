@@ -7,6 +7,8 @@ import {
   defaultKickPitchRegion,
   defaultKickPitchSelection,
   kickPitchPolylines,
+  kickPitchRegionFromPick,
+  orderedKickPitchCandidates,
   validKickPitchRegion,
 } from "../src/settings/kickPitchModel.ts";
 
@@ -62,7 +64,7 @@ test("region validation rejects empty, too long and inverted ranges", () => {
 });
 
 test("labels describe the role and the sweep", () => {
-  assert.equal(candidateRoleLabel(candidate()), "主（基本周波数）");
+  assert.equal(candidateRoleLabel(candidate()), "主な線");
   assert.equal(candidateRoleLabel(candidate({ role: "harmonic", harmonicNumber: 12 })), "倍音 ×12");
   assert.equal(candidateRoleLabel(candidate({ role: "independent" })), "独立成分");
   assert.equal(candidateSummary(candidate()), "150.0→110.0 Hz · 0.004 s · 信頼度 75%");
@@ -81,4 +83,42 @@ test("low-confidence points split polylines instead of being bridged", () => {
   assert.deepEqual(lines[0].points.map((p) => p.midi), [50, 49]);
   assert.deepEqual(lines[1].points.map((p) => p.midi), [47, 46]);
   assert.equal(kickPitchPolylines(payload([candidate()]), 0.05)[0].points.length, 5);
+});
+
+test("a dragged box becomes the analysis region", () => {
+  // A2 (110 Hz) to A3 (220 Hz), 0.2 s long.
+  const region = kickPitchRegionFromPick({ startTime: 43.3, endTime: 43.5, minMidi: 45, maxMidi: 57 });
+  assert.equal(region.start, 43.3);
+  assert.equal(region.end, 43.5);
+  assert.ok(Math.abs(region.minHz - 110) < 0.2);
+  assert.ok(Math.abs(region.maxHz - 220) < 0.2);
+  assert.equal(validKickPitchRegion(region), null);
+});
+
+test("a flat box is widened around its pitch so it still validates", () => {
+  const region = kickPitchRegionFromPick({ startTime: 1, endTime: 1.3, minMidi: 33, maxMidi: 34 });
+  assert.equal(validKickPitchRegion(region), null);
+  const centre = Math.sqrt(region.minHz * region.maxHz);
+  assert.ok(Math.abs(centre - 440 * 2 ** ((33.5 - 69) / 12)) < 0.5);
+});
+
+test("a box longer than the limit is cut to the limit", () => {
+  const region = kickPitchRegionFromPick({ startTime: 0, endTime: 30, minMidi: 30, maxMidi: 50 });
+  assert.equal(validKickPitchRegion(region), null);
+  assert.ok(region.end - region.start <= 10);
+});
+
+test("the primary track is listed first, then the longest tracks", () => {
+  const payload: KickPitchPayload = {
+    available: true,
+    primaryIndex: 3,
+    candidates: [
+      candidate({ id: 0, role: "independent", duration: 0.05, meanConfidence: 0.9 }),
+      candidate({ id: 1, role: "independent", duration: 0.4, meanConfidence: 0.5 }),
+      candidate({ id: 2, role: "independent", duration: 0.4, meanConfidence: 0.8 }),
+      candidate({ id: 3, role: "primary", duration: 0.2, meanConfidence: 0.6 }),
+    ],
+  };
+  assert.deepEqual(orderedKickPitchCandidates(payload).map((c) => c.id), [3, 2, 1, 0]);
+  assert.deepEqual(orderedKickPitchCandidates(null), []);
 });

@@ -39,6 +39,7 @@ NON_DEFAULT_SETTINGS = {
     "curveShape": "smoothstep",
     "curveInterpolation": "bezier_hz",
     "targetAngle": 137.5,
+    "mutedLayers": ["Drum", ""],
 }
 
 

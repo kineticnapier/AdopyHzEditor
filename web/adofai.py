@@ -16,11 +16,13 @@ from typing import Any
 import webview
 
 from core.atomic_io import atomic_write_text
+from importers.midi import cleanup_imported_midi_notes
 from exporters.adofai import (
     build_adofai_debug_rows,
     build_tile_preview_points,
 )
 from web.gap_bridge import build_adofai_level_with_gap_bridges as build_adofai_level
+from exporters.adofai_append import AppendError, append_level, load_adofai_text
 from app_metadata import APP_VERSION, GITHUB_RELEASES_URL
 from i18n import tr
 
@@ -33,6 +35,7 @@ _HELP_SECTIONS: list[tuple[str, str, str]] = [
     ("adofai_export", "help.adofai_export.title", "help.adofai_export.body"),
     ("pitch_export", "help.pitch_export.title", "help.pitch_export.body"),
     ("curve_glide", "help.curve_glide.title", "help.curve_glide.body"),
+    ("kick_pitch", "help.kick_pitch.title", "help.kick_pitch.body"),
     ("troubleshooting", "help.troubleshooting.title", "help.troubleshooting.body"),
     ("about", "help.about.title", "help.about.body"),
 ]
@@ -153,6 +156,11 @@ def _stabilize_rabbit_zip_cycle_boundaries(notes: list[Any]) -> list[Any]:
     return stabilized
 
 
+def beat_synced_output_bpm(song_bpm: float, cycle_angle: float, beats_per_cycle: float) -> float:
+    """Output BPM that makes one ratio-polyrhythm cycle last beats_per_cycle song beats."""
+    return float(cycle_angle) * float(song_bpm) / (180.0 * max(1e-9, float(beats_per_cycle)))
+
+
 class AdoFAIMixin:
     """Advanced ADOFAI export and help APIs used by the web UI."""
 
@@ -166,6 +174,13 @@ class AdoFAIMixin:
             selected = self._valid_export_indices(selected_indices)
             all_notes = [n.normalized() for n in self.notes]
             selected_notes = [all_notes[i] for i in selected] if selected else all_notes
+            # Offsets follow what will actually be exported: active layers only.
+            muted = set(self.settings.get("mutedLayers") or ())
+            if muted:
+                active_all = [n for n in all_notes if (n.layer or "") not in muted]
+                active_selected = [n for n in selected_notes if (n.layer or "") not in muted]
+                all_notes = active_all or all_notes
+                selected_notes = active_selected or selected_notes
             full_offset = min((n.start for n in all_notes), default=0.0) * 1000.0
             selected_offset = min((n.start for n in selected_notes), default=0.0) * 1000.0
             auto_offset = selected_offset if selected_only and selected else full_offset
@@ -173,7 +188,6 @@ class AdoFAIMixin:
             has_song = bool(self.audio_path)
         return {
             "method": "rabbit_zip",
-            "baseBpm": bpm,
             "angleOnlyBpm": max(1000.0, bpm * 10.0),
             "harmonyMode": "fifth +7",
             "harmonyCustomSemitone": 7.0,
@@ -184,13 +198,21 @@ class AdoFAIMixin:
             "harmonyVisualMode": "round 45°",
             "harmonyVisualStep": 45.0,
             "harmonyPolyCycleAngle": 720.0,
+            "harmonyPolyCycleMode": "auto",
+            "harmonyPolyChordSource": "overlap",
             "harmonyPolyMaxDenominator": 24,
             "harmonyPolyRatioOctaveMode": "octave-folded",
+            "harmonyPolyCycleTiming": "pitch",
+            "mergeDuplicateNotes": True,
+            "harmonyPolyLegatoMs": 50.0,
+            "harmonyPolyMergeOctaves": True,
+            "harmonyPolyMaxVoices": 3,
+            "harmonyPolyMaxRootCycles": 12,
+            "harmonyPolyBeatsPerCycle": 1.0,
+            "projectBpm": bpm,
             "xMode": "floor",
             "fixedX": 8.0,
             "targetBpm": max(1000.0, bpm * 10.0),
-            "maxTiles": 200000,
-            "maxTilesPerNote": 5000,
             "trackVisual": "normal",
             "visualPathMode": "raw",
             "visualPathAngle": 90.0,
@@ -200,6 +222,7 @@ class AdoFAIMixin:
             "finalAngleMode": "scaled",
             "finalCustomAngle": 180.0,
             "finalCardinalStep": 90.0,
+            "chainContiguous": True,
             "useProjectSong": has_song,
             "copyProjectSong": has_song,
             "songConflictAction": "cancel",
@@ -209,6 +232,9 @@ class AdoFAIMixin:
             "fullSongOffsetMs": round(full_offset, 3),
             "selectedSongOffsetMs": round(selected_offset, 3),
             "selectedOnly": bool(selected_only and selected),
+            # Append the tiles to the end of an existing chart (the default)
+            # instead of writing a new one.
+            "appendToChart": True,
         }
 
     def _valid_export_indices(self, indices: list[int] | None) -> list[int]:
@@ -230,11 +256,15 @@ class AdoFAIMixin:
             if selected_only and not selected:
                 # Never turn an explicitly selected-only export into a full export.
                 raise ValueError("選択ノートがありません")
+            muted = set(self.settings.get("mutedLayers") or ())
             source = [self.notes[i] for i in selected] if selected_only else list(self.notes)
+            # Switched-off layers are never exported.
+            source = [n for n in source if (n.layer or "") not in muted]
             semitones = int(self.settings.get("exportOctave", 0)) * 12 + int(self.settings.get("exportSemitone", 0))
             notes = [n.with_pitch_offset(semitones) for n in source]
             audio_path = self.audio_path
             default_bpm = float(self.settings.get("bpm", 175.0))
+            grid_offset_seconds = float(self.settings.get("offsetMs", 0.0)) / 1000.0
 
         if not notes:
             raise ValueError("No notes to export")
@@ -247,7 +277,9 @@ class AdoFAIMixin:
 
         opts = {
             "method": _choice(raw.get("method"), {"rabbit_zip", "angle_only", "harmony"}, "rabbit_zip"),
-            "base_bpm": _as_float(raw.get("baseBpm"), default_bpm, 1.0, 999999.0),
+            # Angle Compression tile counts are freq x duration, so the base BPM
+            # cancels out; the dialog no longer asks for it.
+            "base_bpm": default_bpm,
             "angle_only_bpm": _as_float(raw.get("angleOnlyBpm"), max(1000.0, default_bpm * 10.0), 1.0, 999999.0),
             "harmony_mode": _choice(raw.get("harmonyMode"), {"off", "octave +12", "fifth +7", "major third +4", "minor third +3", "lower octave -12", "major triad", "minor triad", "sus4", "dominant 7", "custom"}, "fifth +7"),
             "harmony_custom_semitone": _as_float(raw.get("harmonyCustomSemitone"), 7.0, -48.0, 48.0),
@@ -258,14 +290,23 @@ class AdoFAIMixin:
             "harmony_visual_mode": _choice(raw.get("harmonyVisualMode"), {"raw", "round 45°", "round 90°", "custom step"}, "round 45°"),
             "harmony_visual_step": _as_float(raw.get("harmonyVisualStep"), 45.0, 1.0, 180.0),
             "harmony_poly_cycle_angle": _as_float(raw.get("harmonyPolyCycleAngle"), 720.0, 1.0, 100000.0),
+            "harmony_poly_cycle_mode": _choice(raw.get("harmonyPolyCycleMode"), {"auto", "fixed"}, "auto"),
+            "harmony_poly_chord_source": _choice(raw.get("harmonyPolyChordSource"), {"overlap", "preset"}, "overlap"),
             "harmony_poly_pseudo_angle": 30.0,
             "harmony_poly_max_denominator": _as_int(raw.get("harmonyPolyMaxDenominator"), 24, 1, 256),
             "harmony_poly_ratio_octave_mode": _choice(raw.get("harmonyPolyRatioOctaveMode"), {"octave-folded", "absolute"}, "octave-folded"),
+            "harmony_poly_grid_origin_seconds": None,
+            "harmony_poly_pitch_timing": False,
+            "harmony_poly_legato_ms": _as_float(raw.get("harmonyPolyLegatoMs"), 50.0, 0.0, 1000.0),
+            "harmony_poly_merge_octaves": bool(raw.get("harmonyPolyMergeOctaves", True)),
+            "harmony_poly_max_voices": _as_int(raw.get("harmonyPolyMaxVoices"), 3, 0, 16),
+            "harmony_poly_max_root_cycles": _as_int(raw.get("harmonyPolyMaxRootCycles"), 12, 0, 1024),
             "rabbit_x_mode": _choice(raw.get("xMode"), {"floor", "lowest_floor", "round", "ceil", "fixed", "target_bpm"}, "floor"),
             "rabbit_fixed_x": _as_float(raw.get("fixedX"), 8.0, 0.000001, 100000.0),
             "rabbit_target_bpm": _as_float(raw.get("targetBpm"), max(1000.0, default_bpm * 10.0), 1.0, 999999.0),
-            "max_tiles": _as_int(raw.get("maxTiles"), 200000, 0, 10000000),
-            "max_tiles_per_note": _as_int(raw.get("maxTilesPerNote"), 5000, 0, 1000000),
+            # Tile counts are not capped (0 = unlimited); only the preview limits drawing.
+            "max_tiles": 0,
+            "max_tiles_per_note": 0,
             "track_visual": _choice(raw.get("trackVisual"), {"normal", "faint", "very faint", "hidden"}, "normal"),
             "visual_path_mode": _choice(
                 raw.get("visualPathMode"),
@@ -277,14 +318,36 @@ class AdoFAIMixin:
             "visual_position_x": _as_float(raw.get("visualPositionX"), 0.0, -100000.0, 100000.0),
             "visual_position_y": _as_float(raw.get("visualPositionY"), 0.0, -100000.0, 100000.0),
             "phase_continuous_glide": True,
+            "chain_contiguous": bool(raw.get("chainContiguous", True)),
             "final_angle_mode": _choice(raw.get("finalAngleMode"), {"scaled", "cardinal", "horizontal", "custom"}, "scaled"),
             "final_custom_angle": _as_float(raw.get("finalCustomAngle"), 180.0, 0.001, 359.999),
             "final_cardinal_step": _as_float(raw.get("finalCardinalStep"), 90.0, 1.0, 180.0),
             "song_filename": Path(audio_path).name if use_song and audio_path else None,
             "song_offset_ms": float(song_offset_ms) if use_song else None,
         }
+        if bool(raw.get("mergeDuplicateNotes", True)):
+            # The same pitch on several active layers at once (a lead and its
+            # doubling layer) would generate that frequency twice.
+            notes, _cleanup = cleanup_imported_midi_notes(
+                notes, same_pitch_overlap_mode="merge", min_duration_seconds=0.0, min_velocity=0,
+            )
         if opts["method"] == "rabbit_zip":
             notes = _stabilize_rabbit_zip_cycle_boundaries(notes)
+        cycle_timing = _choice(raw.get("harmonyPolyCycleTiming"), {"pitch", "beat", "manual"}, "pitch")
+        if opts["method"] == "harmony" and opts["harmony_timing_mode"] == "ratio-polyrhythm":
+            if cycle_timing == "pitch":
+                # Cycle length from the notes' pitch: every voice hits at its
+                # own frequency, so the chord sounds at pitch.
+                opts["harmony_poly_pitch_timing"] = True
+            elif cycle_timing == "beat":
+                # Beat sync: one cycle lasts a set number of song beats and
+                # every cycle sits on the project's beat grid (BPM + offset).
+                # The output BPM follows: cycle seconds = cycle angle / (3 x BPM).
+                beats_per_cycle = _as_float(raw.get("harmonyPolyBeatsPerCycle"), 1.0, 1.0 / 64.0, 64.0)
+                opts["angle_only_bpm"] = beat_synced_output_bpm(
+                    default_bpm, opts["harmony_poly_cycle_angle"], beats_per_cycle
+                )
+                opts["harmony_poly_grid_origin_seconds"] = grid_offset_seconds
 
         workflow = {
             "copySong": copy_song,
@@ -330,6 +393,8 @@ class AdoFAIMixin:
         return {"rows": rows[:max_rows], "summary": summary, "limited": len(rows) > max_rows}
 
     def export_adofai_advanced(self, options: dict[str, Any], selected_indices: list[int] | None = None) -> dict[str, Any]:
+        if bool((options or {}).get("appendToChart", False)):
+            return self._append_adofai_export(options, selected_indices)
         notes, build_opts, workflow = self._prepare_adofai_export(options, selected_indices)
         path = self._dialog(webview.FileDialog.SAVE, file_types=ADOF_FILE_TYPES, save_filename="level.adofai")
         if not path:
@@ -393,6 +458,61 @@ class AdoFAIMixin:
             "copiedSong": copied_song,
             "stats": stats,
             "status": self._status,
+        }
+
+    def _append_adofai_export(self, options: dict[str, Any], selected_indices: list[int] | None) -> dict[str, Any]:
+        """Append the generated tiles to the end of a chart the user picks.
+
+        The chart keeps its settings (song, offset, BPM) and events; a copy of
+        the original is kept as ``<name>.adofai.bak`` before it is replaced.
+        """
+        notes, build_opts, _workflow = self._prepare_adofai_export(options, selected_indices)
+        path = self._dialog(webview.FileDialog.OPEN, file_types=ADOF_FILE_TYPES)
+        if not path:
+            return {"ok": False, "status": "Cancelled"}
+        target = Path(path)
+        try:
+            original = target.read_bytes()
+            base = load_adofai_text(original.decode("utf-8-sig"))
+        except (OSError, UnicodeDecodeError) as exc:
+            return {"ok": False, "status": f"譜面を読み込めません: {exc}"}
+        except AppendError as exc:
+            return {"ok": False, "status": str(exc)}
+        # The existing chart's song and offset stay; the generated part only
+        # contributes tiles and events.
+        build_opts["song_filename"] = None
+        build_opts["song_offset_ms"] = None
+        generated, stats = build_adofai_level(notes, **build_opts)
+        try:
+            merged, info = append_level(base, generated)
+        except AppendError as exc:
+            return {"ok": False, "status": str(exc)}
+        backup = target.with_name(target.name + ".bak")
+        try:
+            backup.write_bytes(original)
+            atomic_write_text(
+                str(target),
+                json.dumps(merged, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            return {"ok": False, "path": str(target), "status": f"追記に失敗しました: {exc}"}
+        status = (
+            f"{target.name} の最後に {info['addedFloors']} タイルを追記しました"
+            f"（元の譜面は {backup.name} に保存）"
+        )
+        if info["warnings"]:
+            status += "。" + " ".join(info["warnings"])
+        with self._lock:
+            self._status = status
+        return {
+            "ok": True,
+            "path": str(target),
+            "backupPath": str(backup),
+            "appended": True,
+            "stats": {**stats, "tiles_total": info["addedFloors"]},
+            "warnings": info["warnings"],
+            "status": status,
         }
 
     def debug_rows_as_text(self, rows: list[dict[str, Any]], fmt: str = "tsv") -> str:

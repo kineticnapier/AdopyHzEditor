@@ -407,6 +407,15 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
             return _clamp(value, -600000.0, 600000.0)
         if key == "snapDiv":
             return _int_clamp(value, 1, 64)
+        if key == "mutedLayers":
+            if not isinstance(value, (list, tuple)):
+                raise ValueError("mutedLayers must be a list of layer names")
+            names: list[str] = []
+            for item in value:
+                name = "" if item is None else str(item)
+                if name not in names:
+                    names.append(name)
+            return names[:1024]
         if key == "contrast":
             return _int_clamp(value, 0, 300)
         if key == "gamma":
@@ -448,7 +457,7 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
         }
 
     def _note_dicts(self) -> list[dict[str, Any]]:
-        return [n.normalized().to_dict() for n in self.notes]
+        return [n.to_dict() for n in self.notes]  # to_dict normalizes
 
     def _analysis_state(self) -> dict[str, Any]:
         direct = self.vorbis_spectrum_store if self.audio_path else None
@@ -521,8 +530,12 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
             # must not mark an otherwise clean project as modified.
             if not any(self.settings[key] != value for key, value in normalized.items()):
                 return dict(self.settings)
+            layers_changed = "mutedLayers" in normalized and normalized["mutedLayers"] != self.settings.get("mutedLayers")
             self.settings.update(normalized)
-            self._apply_player_settings()
+            if layers_changed:
+                self._sync_notes_to_player()
+            else:
+                self._apply_player_settings()
             self._dirty = True
             return dict(self.settings)
 
@@ -772,9 +785,7 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
             "50 cents": 24,
             "25 cents": 48,
             "12.5 cents": 96,
-            "41 EDO": 41,
-            "53 EDO": 53,
-        }.get(resolution)
+        }.get(resolution)  # anything else (also old "41/53 EDO") = profile default
         if bins_per_octave is not None:
             options["cqt_bins_per_octave"] = bins_per_octave
             options["fold_to_semitone"] = False

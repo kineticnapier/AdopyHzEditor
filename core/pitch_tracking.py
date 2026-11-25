@@ -20,6 +20,14 @@ Four estimators are available so they can be compared on the same frames:
     window that still holds ``min_periods`` periods of the estimate (and is not
     contradicted by a longer window) is used, giving short windows for the
     fast high-pitched attack and long windows for the low tail.
+``cycle``
+    Time-domain period of every cycle: rising zero crossings of the
+    low-passed signal (with hysteresis), interpolated to sub-sample
+    precision.  A distorted kick (Zaag) is close to a square wave whose
+    fundamental dominates after the low-pass, so each cycle gives its own
+    pitch: about one value per 15-20 ms instead of one per 50-100 ms window,
+    which follows pitch that goes up and down.  Needs the kick to dominate
+    the low end of the region; other loud low sounds disturb the crossings.
 ``harmonic``
     ``multiwindow`` plus harmonic grouping: phase-refined spectral peaks are
     explained as harmonics of a fundamental, so a strong 12th harmonic of a
@@ -59,7 +67,7 @@ FLAG_NAMES = {
     FLAG_NO_PITCH: "noPitch",
 }
 
-METHODS = ("peak", "phase", "multiwindow", "harmonic")
+METHODS = ("peak", "phase", "multiwindow", "harmonic", "cycle")
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,13 @@ class PitchTrackingSettings:
     min_track_seconds: float = 0.012
     analysis_rate: float = 0.0  # 0 = choose from max_hz
     max_region_seconds: float = 10.0
+    # cycle method: a cycle this far below the loudest one has no confidence;
+    # one 15 dB louder has full confidence.
+    cycle_floor_db: float = -30.0
+    # cycle method: pitch bend (second difference between neighbouring cycles)
+    # at which confidence falls to 1/e.  Zaag bends move several hundred
+    # cents per cycle, so only jumps far beyond that are distrusted.
+    cycle_bend_cents: float = 900.0
 
 
 @dataclass
@@ -685,33 +700,83 @@ def _assign_roles(candidates: list[PitchCandidate]) -> int | None:
     return primary
 
 
+def _chain_primary(
+    candidates: list[PitchCandidate],
+    primary: int | None,
+    settings: PitchTrackingSettings,
+) -> tuple[list[PitchCandidate], int | None]:
+    """Join the kick body's pieces that follow one another in time.
+
+    A pitch step or a fast bend breaks frame linking, so one body becomes
+    several tracks and only one of them was the primary.  The body is a single
+    line, so strong independent tracks that do not overlap it in time are
+    taken into it (strongest first).  Tracks sounding together with the body
+    stay separate (piep tones, other instruments) and harmonics keep their
+    role.  Frames are only concatenated, never bridged: a gap still ends a
+    Curve Note run.
+    """
+    if primary is None or len(candidates) < 2:
+        return candidates, primary
+    top_score = max(c.score for c in candidates)
+    overlap_tolerance = max(settings.hop_seconds * 3.0, 0.003)
+    spans = [(float(candidates[primary].times[0]), float(candidates[primary].times[-1]))]
+    joined = [primary]
+    others = sorted(
+        (i for i, c in enumerate(candidates) if i != primary and c.role == "independent"),
+        key=lambda i: -candidates[i].score,
+    )
+    for i in others:
+        candidate = candidates[i]
+        if candidate.score < 0.1 * top_score or float(np.mean(candidate.confidence)) < settings.link_min_confidence:
+            continue
+        a, b = float(candidate.times[0]), float(candidate.times[-1])
+        if all(min(b, hi) - max(a, lo) <= overlap_tolerance for lo, hi in spans):
+            joined.append(i)
+            spans.append((a, b))
+    if len(joined) == 1:
+        return candidates, primary
+
+    pieces = [candidates[i] for i in joined]
+    times = np.concatenate([c.times for c in pieces])
+    order = np.argsort(times, kind="stable")
+
+    def cat(attr: str) -> np.ndarray:
+        return np.concatenate([getattr(c, attr) for c in pieces])[order]
+
+    times = times[order]
+    keep = np.concatenate(([True], np.diff(times) > 1e-9))  # drop the few shared frames
+    body = PitchCandidate(
+        id=0,
+        role="primary",
+        times=times[keep],
+        hz=cat("hz")[keep],
+        strength=cat("strength")[keep],
+        confidence=cat("confidence")[keep],
+        flags=cat("flags")[keep],
+    )
+    remap = {candidates[primary].id: 0}
+    rest = [c for i, c in enumerate(candidates) if i not in joined]
+    for new_id, candidate in enumerate(rest, start=1):
+        remap[candidate.id] = new_id
+    for candidate in rest:
+        candidate.id = remap[candidate.id]
+        if candidate.harmonic_of is not None:
+            candidate.harmonic_of = remap.get(candidate.harmonic_of, 0)
+    return [body] + rest, 0
+
+
 # --------------------------------------------------------------------------
 # Public entry point
 
 
-def analyze_pitch_region(
-    samples: np.ndarray,
-    sample_rate: int,
+def _spectral_frames(
+    y: np.ndarray,
+    sr: int,
     start: float,
     end: float,
-    settings: PitchTrackingSettings | None = None,
-) -> PitchTrackingResult:
-    """Track kick pitch in ``[start, end]`` seconds of ``samples``."""
-    options = settings or PitchTrackingSettings()
-    if options.method not in METHODS:
-        raise ValueError(f"method must be one of {METHODS}")
-    if options.min_hz <= 0 or options.max_hz <= options.min_hz:
-        raise ValueError("invalid frequency range")
-    if options.hop_seconds <= 0:
-        raise ValueError("hop_seconds must be positive")
-    started = time.perf_counter()
-    sr = int(sample_rate)
-    y = _mono(samples)
-    start = max(0.0, float(start))
-    end = max(start, float(end))
-    if end - start > options.max_region_seconds:
-        raise ValueError(f"region longer than {options.max_region_seconds:g} s")
-
+    options: PitchTrackingSettings,
+):
+    """Frame-wise estimates of the FFT-based methods on the hop grid."""
     factor, rate = _analysis_rate(sr, options)
     if options.method in ("peak", "phase"):
         window_seconds: tuple[float, ...] = (options.single_window_seconds,)
@@ -802,6 +867,283 @@ def analyze_pitch_region(
         out_flags[frame] = flags
         out_window[frame] = ev.seconds
 
+    stats = {
+        "hopSeconds": hop / rate,
+        "analysisRate": rate,
+        "windowSeconds": [s / rate for s in sizes],
+        "phaseLagSamples": lag,
+    }
+    return times, out_hz, out_strength, out_conf, out_flags, out_window, frame_components, stats
+
+
+def _crossing_positions(x: np.ndarray, index: np.ndarray) -> np.ndarray:
+    """Sub-sample positions of the rising zero crossings after ``index``."""
+    if not index.size:
+        return np.zeros(0)
+    return index + (-x[index] / (x[index + 1] - x[index]))
+
+
+def _cycle_shape(x: np.ndarray, a: float, b: float, points: int = 48) -> np.ndarray:
+    """One cycle resampled to ``points`` samples, zero mean, unit norm."""
+    at = a + (b - a) * np.arange(points) / points
+    shape = np.interp(at, np.arange(x.size, dtype=np.float64), x)
+    shape -= shape.mean()
+    norm = float(np.linalg.norm(shape))
+    return shape / norm if norm > 0 else shape
+
+
+def _repair_stray_crossings(x: np.ndarray, positions: np.ndarray, ups: np.ndarray) -> np.ndarray:
+    """Fix the two classic period errors, judged against both neighbours.
+
+    An extra crossing (a strong harmonic dipping through zero) splits one
+    cycle into two short ones whose sum matches the neighbours: the middle
+    crossing is dropped.  A missed crossing (the swing stayed inside the
+    hysteresis band) makes one cycle about twice as long as both neighbours:
+    the plain zero crossing nearest its middle is put back.  Both neighbours
+    must agree.  A real jump up for two cycles has the same timing as an
+    extra crossing, so a merge also needs the merged cycle to look more like
+    its neighbour than the two short cycles do: real Zaag cycles keep their
+    shape, the halves of a split cycle do not.
+    """
+    pos = list(map(float, positions))
+    k = 1
+    while k + 2 < len(pos) - 1:
+        left = pos[k] - pos[k - 1]
+        a = pos[k + 1] - pos[k]
+        b = pos[k + 2] - pos[k + 1]
+        right = pos[k + 3] - pos[k + 2]
+        ref = 0.5 * (left + right)
+        if (
+            abs(left - right) <= 0.3 * ref
+            and max(a, b) < 0.75 * ref
+            and abs(a + b - ref) <= 0.25 * ref
+        ):
+            neighbour = _cycle_shape(x, pos[k - 1], pos[k])
+            merged = float(np.dot(_cycle_shape(x, pos[k], pos[k + 2]), neighbour))
+            split = max(
+                float(np.dot(_cycle_shape(x, pos[k], pos[k + 1]), neighbour)),
+                float(np.dot(_cycle_shape(x, pos[k + 1], pos[k + 2]), neighbour)),
+            )
+            if merged <= split:
+                k += 1
+                continue
+            del pos[k + 1]
+            continue
+        k += 1
+    out = [pos[0]] if pos else []
+    for k in range(1, len(pos)):
+        span = pos[k] - pos[k - 1]
+        before = pos[k - 1] - pos[k - 2] if k >= 2 else None
+        after = pos[k + 1] - pos[k] if k + 1 < len(pos) else None
+        refs = [r for r in (before, after) if r is not None]
+        if (
+            len(refs) == 2
+            and abs(refs[0] - refs[1]) <= 0.3 * (0.5 * sum(refs))
+            and abs(span - sum(refs)) <= 0.2 * sum(refs)
+        ):
+            middle = pos[k - 1] + 0.5 * span
+            inside = ups[(ups > pos[k - 1] + 0.3 * span) & (ups < pos[k - 1] + 0.7 * span)]
+            if inside.size:
+                nearest = inside[np.argmin(np.abs(inside - middle))]
+                out.append(float(_crossing_positions(x, np.array([nearest]))[0]))
+            else:
+                out.append(middle)
+        out.append(pos[k])
+    return np.asarray(out, dtype=np.float64)
+
+
+def _cycle_shape_confidence(x: np.ndarray, positions: np.ndarray, points: int = 48) -> np.ndarray:
+    """How much each cycle looks like a neighbouring cycle (0..1).
+
+    Cycles are resampled to the same length, so a pitch bend does not lower
+    the match; a stray half cycle or noise does.
+    """
+    n = max(0, positions.size - 1)
+    if n == 0:
+        return np.zeros(0)
+    shapes = np.array([_cycle_shape(x, positions[k], positions[k + 1], points) for k in range(n)])
+    match = np.zeros(n)
+    if n > 1:
+        pair = np.sum(shapes[:-1] * shapes[1:], axis=1)
+        match[:-1] = pair
+        match[1:] = np.maximum(match[1:], pair)
+    return np.clip((match - 0.3) / 0.5, 0.0, 1.0)
+
+
+def _cycle_frames(
+    y: np.ndarray,
+    sr: int,
+    start: float,
+    end: float,
+    options: PitchTrackingSettings,
+):
+    """Frame-wise pitch from the period of each cycle (``cycle`` method).
+
+    The low-pass must keep the fundamental above its harmonics.  ``max_hz``
+    is often set well above the kick (the panel default is 500 Hz), which
+    lets a strong 3rd harmonic add crossings, so a first pass finds the
+    typical pitch and a second pass low-passes at six times that: room for
+    bends of more than two octaves up.
+    """
+    margin = 3.0 / options.min_hz + 0.02
+    excerpt, first_sample = _excerpt(y, sr, start, end, margin)
+    wide = min(options.max_hz * 1.2, sr * 0.45)
+    result = _cycle_pass(excerpt, first_sample, sr, start, end, options, wide)
+    out_hz, out_conf = result[1], result[3]
+    confident = np.isfinite(out_hz) & (out_conf >= 0.5)
+    if np.any(confident):
+        narrow = max(6.0 * float(np.median(out_hz[confident])), 2.0 * options.min_hz)
+        if narrow < 0.8 * wide:
+            result = _cycle_pass(excerpt, first_sample, sr, start, end, options, narrow)
+            result[7]["lowPassHz"] = narrow
+            return result
+    result[7]["lowPassHz"] = wide
+    return result
+
+
+def _cycle_pass(
+    excerpt: np.ndarray,
+    first_sample: int,
+    sr: int,
+    start: float,
+    end: float,
+    options: PitchTrackingSettings,
+    low_pass: float,
+):
+    """One cycle-tracking pass over ``excerpt`` low-passed at ``low_pass`` Hz.
+
+    Rising zero crossings of the band-limited signal are taken only when the
+    signal swings past a hysteresis threshold on both sides, so noise near
+    zero adds no crossings.  Each cycle gives one pitch at its midpoint; hop
+    frames between two neighbouring cycles interpolate in log frequency.
+    Confidence comes from the cycle's level, from how much its waveform
+    matches a neighbouring cycle (resampled to the same length, so a bend
+    keeps the match) and, loosely, from how sharply its pitch bends.
+    """
+    from scipy.signal import butter, sosfiltfilt
+
+    x = sosfiltfilt(butter(4, low_pass, btype="low", fs=sr, output="sos"), excerpt)
+    x = sosfiltfilt(butter(2, options.min_hz * 0.5, btype="high", fs=sr, output="sos"), x)
+
+    # Hysteresis threshold from the local RMS over the longest period.
+    span = max(1, int(round(sr / options.min_hz)))
+    cumulative = np.concatenate(([0.0], np.cumsum(x * x)))
+    lo_i = np.clip(np.arange(x.size) - span // 2, 0, x.size)
+    hi_i = np.clip(np.arange(x.size) + span // 2 + 1, 0, x.size)
+    rms = np.sqrt(np.maximum(cumulative[hi_i] - cumulative[lo_i], 0.0) / np.maximum(hi_i - lo_i, 1))
+    threshold = 0.3 * rms
+    state = np.where(x > threshold, 1, np.where(x < -threshold, -1, 0))
+    nonzero = np.flatnonzero(state)
+    positions = np.zeros(0)
+    ups = np.zeros(0, dtype=np.int64)
+    if nonzero.size >= 2:
+        filled = state[nonzero]
+        rises = nonzero[1:][(filled[:-1] == -1) & (filled[1:] == 1)]  # first sample above +threshold
+        ups = np.flatnonzero((x[:-1] < 0.0) & (x[1:] >= 0.0))
+        if ups.size and rises.size:
+            pick = np.searchsorted(ups, rises - 1, side="right") - 1
+            positions = _crossing_positions(x, np.unique(ups[pick[pick >= 0]]))
+    positions = _repair_stray_crossings(x, positions, ups)
+    crossings = (first_sample + positions) / sr
+    crossing_index = np.floor(positions).astype(np.int64)
+
+    hop = options.hop_seconds
+    times = np.arange(start, end + 1e-9, hop)
+    if not times.size:
+        times = np.array([start])
+    frames = times.size
+    out_hz = np.full(frames, np.nan)
+    out_strength = np.zeros(frames)
+    out_conf = np.zeros(frames)
+    out_flags = np.full(frames, FLAG_NO_PITCH, dtype=np.int64)
+    out_window = np.zeros(frames)
+    frame_components: list[list[tuple[float, float, float, int]]] = [[] for _ in range(frames)]
+    stats = {"hopSeconds": hop, "analysisRate": float(sr), "windowSeconds": [], "phaseLagSamples": 0, "cycleCount": 0}
+    if crossings.size < 2:
+        return times, out_hz, out_strength, out_conf, out_flags, out_window, frame_components, stats
+
+    period = np.diff(crossings)
+    hz = 1.0 / period
+    valid = (hz >= options.min_hz) & (hz <= options.max_hz)
+    amp = np.maximum.reduceat(np.abs(x), crossing_index)[:-1] if crossing_index.size > 1 else np.zeros(0)
+    peak = float(amp[valid].max()) if np.any(valid) else 0.0
+    with np.errstate(divide="ignore"):
+        level_db = 20.0 * np.log10(np.maximum(amp, 1e-30) / max(peak, 1e-30))
+    level_conf = np.clip((level_db - options.cycle_floor_db) / 15.0, 0.0, 1.0)
+
+    shape_conf = _cycle_shape_confidence(x, positions)
+    log_hz = np.log2(hz) * 1200.0
+    n = hz.size
+    bend = np.full(n, np.nan)
+    for k in range(n):
+        if not valid[k]:
+            continue
+        left = log_hz[k - 1] if k > 0 and valid[k - 1] else None
+        right = log_hz[k + 1] if k + 1 < n and valid[k + 1] else None
+        if left is not None and right is not None:
+            bend[k] = abs(log_hz[k] - 0.5 * (left + right))
+        elif left is not None or right is not None:
+            bend[k] = 0.5 * abs(log_hz[k] - (left if left is not None else right))
+    bend_conf = np.where(np.isfinite(bend), np.exp(-((np.nan_to_num(bend) / options.cycle_bend_cents) ** 2)), 0.5)
+    cycle_conf = np.where(valid, level_conf * shape_conf * bend_conf, 0.0)
+    cycle_flags = np.zeros(n, dtype=np.int64)
+    cycle_flags[level_db < options.cycle_floor_db] |= FLAG_LOW_ENERGY
+    cycle_flags[np.nan_to_num(bend) > options.cycle_bend_cents] |= FLAG_PITCH_JUMP
+    centres = 0.5 * (crossings[:-1] + crossings[1:])
+    strength = amp / peak if peak > 0 else np.zeros(n)
+
+    k_of = np.searchsorted(crossings, times, side="right") - 1
+    for frame, t in enumerate(times):
+        k = int(k_of[frame])
+        if k < 0 or k >= n or not valid[k]:
+            continue
+        other = k - 1 if t < centres[k] else k + 1
+        value, conf, level = log_hz[k], cycle_conf[k], strength[k]
+        if 0 <= other < n and valid[other]:
+            w = (t - centres[k]) / (centres[other] - centres[k])
+            value = log_hz[k] + w * (log_hz[other] - log_hz[k])
+            conf = (1.0 - w) * cycle_conf[k] + w * cycle_conf[other]
+            level = (1.0 - w) * strength[k] + w * strength[other]
+        out_hz[frame] = 2.0 ** (value / 1200.0)
+        out_strength[frame] = level
+        out_conf[frame] = conf
+        out_flags[frame] = int(cycle_flags[k])
+        out_window[frame] = period[k]
+        frame_components[frame] = [(float(out_hz[frame]), float(level), float(conf), int(cycle_flags[k]))]
+    stats["cycleCount"] = int(np.sum(valid))
+    return times, out_hz, out_strength, out_conf, out_flags, out_window, frame_components, stats
+
+
+def analyze_pitch_region(
+    samples: np.ndarray,
+    sample_rate: int,
+    start: float,
+    end: float,
+    settings: PitchTrackingSettings | None = None,
+) -> PitchTrackingResult:
+    """Track kick pitch in ``[start, end]`` seconds of ``samples``."""
+    options = settings or PitchTrackingSettings()
+    if options.method not in METHODS:
+        raise ValueError(f"method must be one of {METHODS}")
+    if options.min_hz <= 0 or options.max_hz <= options.min_hz:
+        raise ValueError("invalid frequency range")
+    if options.hop_seconds <= 0:
+        raise ValueError("hop_seconds must be positive")
+    started = time.perf_counter()
+    sr = int(sample_rate)
+    y = _mono(samples)
+    start = max(0.0, float(start))
+    end = max(start, float(end))
+    if end - start > options.max_region_seconds:
+        raise ValueError(f"region longer than {options.max_region_seconds:g} s")
+
+    if options.method == "cycle":
+        frame_data = _cycle_frames(y, sr, start, end, options)
+    else:
+        frame_data = _spectral_frames(y, sr, start, end, options)
+    times, out_hz, out_strength, out_conf, out_flags, out_window, frame_components, frame_stats = frame_data
+    frames = times.size
+
     # Isolated octave / harmonic errors: compare each estimate with the median
     # of its confident neighbours.  Outliers are kept but distrusted, never
     # replaced by an invented value.
@@ -847,6 +1189,7 @@ def analyze_pitch_region(
         for i, track in enumerate(linked)
     ]
     primary = _assign_roles(candidates)
+    candidates, primary = _chain_primary(candidates, primary, options)
 
     elapsed = time.perf_counter() - started
     return PitchTrackingResult(
@@ -859,10 +1202,7 @@ def analyze_pitch_region(
         stats={
             "analysisSeconds": elapsed,
             "frameCount": int(frames),
-            "hopSeconds": hop / rate,
-            "analysisRate": rate,
-            "windowSeconds": [s / rate for s in sizes],
-            "phaseLagSamples": lag,
+            **frame_stats,
             "candidateCount": len(candidates),
         },
     )

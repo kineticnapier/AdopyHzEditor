@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 try:
@@ -256,7 +258,52 @@ def _webview_gui() -> str | None:
     return None
 
 
+# After the main window has closed, the process must end even if something is
+# stuck: pywebview runs each JS API call on a non-daemon thread and, on Qt,
+# returns its result with an evaluate_js that waits without a timeout, so a
+# call caught by the close can keep Python alive with no window.
+EXIT_GRACE_SECONDS = 5.0
+_exit_watchdog_started = threading.Event()
+
+
+def _start_exit_watchdog(grace: float = EXIT_GRACE_SECONDS, exit_fn=os._exit, stop=None) -> threading.Thread | None:
+    """End the process ``grace`` seconds from now unless it ends first."""
+    if _exit_watchdog_started.is_set():
+        return None
+    _exit_watchdog_started.set()
+
+    def watchdog() -> None:
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            if stop is not None and stop.is_set():
+                return
+            time.sleep(0.05)
+        if stop is not None and stop.is_set():
+            return
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            exit_fn(0)
+
+    thread = threading.Thread(target=watchdog, name="adopyhz-exit-watchdog", daemon=True)
+    thread.start()
+    return thread
+
+
+def _quiet_qt_environment() -> None:
+    """Turn off Qt's DXGI vblank thread before the QApplication exists.
+
+    Qt starts a QDxgiVSyncService on Windows for Qt Quick frame pacing; this
+    app draws through WebEngine, so it is not needed, and at shutdown it
+    prints "QDxgiVSyncService not destroyed in time" into the console.
+    A value the user set is kept.
+    """
+    os.environ.setdefault("QT_D3D_NO_VBLANK_THREAD", "1")
+
+
 def main() -> int:
+    _quiet_qt_environment()
     # The React/TypeScript shell is currently Japanese-only. Help text and other
     # Python-side translated strings should match it as well.
     set_language("ja", save=False)
@@ -272,10 +319,17 @@ def main() -> int:
     )
     bridge.attach_window(window)
     window.events.closing += bridge.on_window_closing
+    window.events.closed += lambda *_args: _start_exit_watchdog()
     webview.start(
         gui=_webview_gui(),
         debug=os.environ.get("ADOPY_WEB_UI_DEBUG") == "1",
     )
+    # Also covers a loop that ends without a closed event.
+    _start_exit_watchdog()
+    try:
+        bridge.player.stop()
+    except Exception:
+        pass
     return 0
 
 

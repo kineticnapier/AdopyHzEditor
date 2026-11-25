@@ -9,7 +9,7 @@ import webview
 
 from exporters.adofai import build_adofai_level
 from exporters.midi import export_midi
-from importers.midi import import_midi
+from importers.midi import cleanup_imported_midi_notes, import_midi
 from core.note_model import Note
 from core.project_io import load_project, save_project
 
@@ -53,6 +53,9 @@ DEFAULT_EDITOR_SETTINGS: dict[str, Any] = {
     "curveShape": "ease",
     "curveInterpolation": "bezier_pitch",
     "targetAngle": 165.0,
+    # Layers switched off: excluded from playback and export.  "" = notes
+    # without a layer.
+    "mutedLayers": [],
 }
 
 
@@ -89,10 +92,25 @@ PROJECT_SETTING_FIELDS: tuple[tuple[str, str, type], ...] = (
     ("curve_shape", "curveShape", str),
     ("curve_interpolation", "curveInterpolation", str),
     ("target_angle", "targetAngle", float),
+    ("muted_layers", "mutedLayers", list),
 )
 
 # Older desktop projects used this name before preview_octave was introduced.
 PROJECT_SETTING_ALIASES = {"note_octave": "previewOctave"}
+
+
+def _midi_tempo_bpm(result: Any) -> float | None:
+    """The MIDI file's starting tempo, or None when it has no tempo event."""
+    try:
+        if int(getattr(result, "explicit_tempo_event_count", 0)) <= 0:
+            return None
+        bpm = float(result.initial_bpm)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not (math.isfinite(bpm) and bpm > 0):
+        return None
+    # MIDI stores whole microseconds per beat, so 190 BPM reads as 190.000285.
+    return round(bpm, 3)
 
 
 class IOMixin:
@@ -278,13 +296,79 @@ class IOMixin:
         return self.get_state()
 
     def _shifted_export_notes(self) -> list[Note]:
-        semitones=int(self.settings["exportOctave"])*12+int(self.settings["exportSemitone"]);return[n.with_pitch_offset(semitones) for n in self.notes]
+        semitones=int(self.settings["exportOctave"])*12+int(self.settings["exportSemitone"]);return[n.with_pitch_offset(semitones) for n in self._active_notes()]
 
     def import_midi_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.OPEN,file_types=MIDI_FILE_TYPES)
         if not path:return self.get_state()
         result = import_midi(path)
-        imported = result.notes
+        return self._apply_imported_midi_notes(result.notes, _midi_tempo_bpm(result))
+
+    def pick_midi_tracks_dialog(self) -> dict[str, Any]:
+        """Choose a MIDI file and describe its tracks without importing yet.
+
+        The chosen path stays in the backend; ``import_midi_tracks`` imports
+        from it, so the UI never passes a file path back.
+        """
+        path = self._dialog(webview.FileDialog.OPEN, file_types=MIDI_FILE_TYPES)
+        if not path:
+            return {"cancelled": True}
+        result = import_midi(path)
+        self._pending_midi_path = str(path)
+        tracks = [
+            {
+                "index": int(info.index),
+                "name": info.label or info.name or f"Track {info.index + 1}",
+                "channels": [int(c) + 1 for c in info.channels],
+                "noteCount": int(info.note_count),
+                "lowest": info.lowest,
+                "highest": info.highest,
+                "drums": bool(info.looks_like_drums),
+            }
+            for info in result.tracks
+            if info.note_count > 0
+        ]
+        return {"cancelled": False, "fileName": Path(path).name, "tracks": tracks}
+
+    def import_midi_tracks(self, track_indices: list[int], merge_duplicates: bool = False) -> dict[str, Any]:
+        """Import only the chosen tracks of the file picked by ``pick_midi_tracks_dialog``.
+
+        Every note keeps its track name as its layer, so layers can be switched
+        on and off later.  ``merge_duplicates`` instead merges the same pitch
+        sounding on several layers at once into one note right away (the merged
+        note keeps the first note's layer); export merges duplicates among the
+        active layers anyway.
+        """
+        path = getattr(self, "_pending_midi_path", None)
+        if not path:
+            raise ValueError("MIDIファイルが選択されていません")
+        indices: set[int] = set()
+        for value in track_indices or []:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) != int(value):
+                raise ValueError("トラック番号が不正です")
+            indices.add(int(value))
+        if not indices:
+            with self._lock:
+                self._status = "読み込むトラックが選ばれていません"
+                return self._state_dict()
+        result = import_midi(path, track_indices=indices)
+        self._pending_midi_path = None
+        notes = result.notes
+        merged = 0
+        if merge_duplicates:
+            # Only merge same-pitch overlaps; keep short and quiet notes.
+            notes, cleanup = cleanup_imported_midi_notes(
+                notes, same_pitch_overlap_mode="merge", min_duration_seconds=0.0, min_velocity=0,
+            )
+            merged = int(cleanup.merged_notes)
+        state = self._apply_imported_midi_notes(notes, _midi_tempo_bpm(result))
+        if merged:
+            with self._lock:
+                self._status += f"（重なった同じ音{merged}個を1つにまとめました）"
+                state["status"] = self._status
+        return state
+
+    def _apply_imported_midi_notes(self, imported: list[Any], tempo_bpm: float | None = None) -> dict[str, Any]:
         with self._lock:
             # An empty MIDI import must not create an Undo step, erase Redo,
             # or mark an otherwise unchanged project as modified.
@@ -315,6 +399,13 @@ class IOMixin:
             self._dirty = True
             self._sync_notes_to_player()
             self._status = f"MIDIから{len(prepared)}個のノートを読み込みました"
+            if tempo_bpm is not None:
+                # MIDI time 0 is the start of bar 1, so the grid offset is 0.
+                tempo = {"bpm": self._normalize_setting("bpm", tempo_bpm), "offsetMs": 0.0}
+                if any(self.settings.get(k) != v for k, v in tempo.items()):
+                    self.settings.update(tempo)
+                    self._apply_player_settings()
+                    self._status += f"（BPMを{tempo['bpm']:g}に設定）"
             return self._state_dict()
 
     def export_midi_dialog(self) -> dict[str, Any]:

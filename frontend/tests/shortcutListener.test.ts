@@ -112,7 +112,7 @@ test("repeated Ctrl+X in a focused native input is not intercepted", () => {
   assert.deepEqual(calls, []);
 });
 
-test("repeated Ctrl/Meta+Shift+Arrow nudges are consumed without moving notes twice", () => {
+test("repeated Ctrl/Meta+Shift+Arrow/PageUp/PageDown moves are consumed without moving notes twice", () => {
   const calls: string[] = [];
   const current = {
     api: {}, disabled: false, selected: [2], nudgeSeconds: 0.25,
@@ -125,6 +125,8 @@ test("repeated Ctrl/Meta+Shift+Arrow nudges are consumed without moving notes tw
     ["ArrowRight", "0.25,0"],
     ["ArrowUp", "0,1"],
     ["ArrowDown", "0,-1"],
+    ["PageUp", "0,12"],
+    ["PageDown", "0,-12"],
   ] as const;
   for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
     for (const [key] of keys) {

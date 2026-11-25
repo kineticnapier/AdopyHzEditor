@@ -89,6 +89,8 @@ class RabbitZipFractionBoundaryTests(unittest.TestCase):
                 "angleCompressionMode": "fixed",
                 "angleCompressionFixedAngle": 165.0,
                 "finalAngleMode": "scaled",
+                # This regression covers per-note fractional tiles, so keep notes split.
+                "chainContiguous": False,
             },
             None,
         )
