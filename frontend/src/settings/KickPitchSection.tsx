@@ -157,10 +157,10 @@ export default function KickPitchSection({
     <details className="kick-pitch-section">
       <summary>キック音高解析</summary>
       <p className="inspector-help">
-        短い区間の基本周波数を追跡します。倍音（Piepの高い成分）は基本周波数へまとめ、
+        短い区間の基本周波数を追跡します。倍音は基本周波数へまとめ、
         独立した成分は別候補として表示します。
       </p>
-      <div className="track-actions">
+      <div className="kick-pitch-pick">
         <button
           className={picking ? "primary-soft active" : "primary-soft"}
           aria-pressed={picking}
@@ -186,7 +186,7 @@ export default function KickPitchSection({
         <span>方式</span>
         <select value={method} onChange={(event) => setMethod(event.target.value as KickPitchMethod)}>
           <option value="harmonic">倍音解析（標準・音高が安定した音向け）</option>
-          <option value="cycle">1周期ごと（音高が上下するZaag向け）</option>
+          <option value="cycle">1周期ごと（音高が速く上下する音向け）</option>
           <option value="multiwindow">一番明るい線（高い音・シンセ向け）</option>
         </select>
       </label>
@@ -210,7 +210,6 @@ export default function KickPitchSection({
           {trackRange ? "Track矩形から" : "表示位置から"}
         </button>
         <button
-          className="primary-soft"
           disabled={!api || !audioLoaded || busy || running || Boolean(invalid)}
           title={invalid ?? undefined}
           onClick={() => void analyze()}

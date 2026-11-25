@@ -311,7 +311,7 @@ export default function AdoFAIExportDialogJa({
       locked={working}
       wide={previewMode !== "none"}
     >
-      <div className="dialog-body export-dialog-body compact-export">
+      <div className={previewMode !== "none" ? "dialog-body export-dialog-body compact-export with-preview" : "dialog-body export-dialog-body compact-export"}>
         <fieldset
           disabled={working}
           aria-label="ADOFAI出力設定"
@@ -328,10 +328,8 @@ export default function AdoFAIExportDialogJa({
           />
         </Field>
         {options.appendToChart && (
-          <div className="info-card">
-            「出力」を押すと譜面を選ぶ画面が出ます。選んだ譜面の最後のタイルの後ろにタイルを足します。
-            曲・オフセット・BPMなど元の設定とイベントはそのままで、曲の時間には合わせません。
-            元のファイルは「名前.adofai.bak」に保存してから上書きします。
+          <div className="info-card compact">
+            選んだ譜面の最後にタイルを足します。元の設定・イベントはそのままで、曲の時間には合わせません。元ファイルは「名前.adofai.bak」に残ります。
           </div>
         )}
         <Field label="方式">
@@ -932,19 +930,20 @@ export default function AdoFAIExportDialogJa({
         {previewMode === "debug" && debug && <DebugPreview preview={debug} />}
       </div>
       <div className="dialog-footer">
+        {/* Side tools on the left; the decision (cancel / export) together on the right. */}
+        <button className="quiet" onClick={() => onHelp("adofai_export")} disabled={working}>
+          ヘルプ
+        </button>
+        <button className="quiet" onClick={() => void tilePreview()} disabled={working}>
+          タイルプレビュー
+        </button>
+        <button className="quiet" onClick={() => void debugPreview()} disabled={working}>
+          デバッグ
+        </button>
+        <span />
         <button onClick={onClose} disabled={working}>
           キャンセル
         </button>
-        <button onClick={() => void tilePreview()} disabled={working}>
-          タイルプレビュー
-        </button>
-        <button onClick={() => void debugPreview()} disabled={working}>
-          デバッグ
-        </button>
-        <button onClick={() => onHelp("adofai_export")} disabled={working}>
-          ヘルプ
-        </button>
-        <span />
         <button
           className="primary"
           onClick={() => void exportLevel()}
