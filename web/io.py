@@ -153,7 +153,9 @@ class IOMixin:
             # Keep an unresolved project audio reference until the user relinks
             # or explicitly creates a derived audio-less workspace.
             audio_reference = self.audio_path or self.project_audio_reference
-            save_project(path,audio_path=audio_reference,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._saved_checkpoint=self._document_checkpoint();self._dirty=False;self._status=f"{Path(path).name} を保存しました";return self._state_dict()
+            save_project(path,audio_path=audio_reference,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._saved_checkpoint=self._document_checkpoint();self._dirty=False;self._status=f"{Path(path).name} を保存しました";state=self._state_dict()
+        self._remember_last_project(path)
+        return state
 
     def save_project_dialog(self) -> dict[str, Any]:
         """Save in place when possible; ask for a path only for new projects."""
@@ -173,6 +175,12 @@ class IOMixin:
     def load_project_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.OPEN,file_types=PROJECT_FILE_TYPES)
         if not path:return self.get_state()
+        return self._load_project_path(path)
+
+    def _remember_last_project(self, path: str) -> None:
+        """環境設定 keeps the last project to reopen it; the core bridge does not."""
+
+    def _load_project_path(self, path: str) -> dict[str, Any]:
         audio_path,notes,settings=load_project(path)
         prepared_notes=[n.normalized() for n in notes]
         # Reject non-finite values before replacing the document or clearing
@@ -267,6 +275,7 @@ class IOMixin:
                 else:
                     self._status=f"{Path(path).name} のノートを読み込みました"
             self._saved_checkpoint=self._document_checkpoint();self._dirty=False
+        self._remember_last_project(path)
         return self.get_state()
 
     def relink_project_audio_dialog(self) -> dict[str, Any]:

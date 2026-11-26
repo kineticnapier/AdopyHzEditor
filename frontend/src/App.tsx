@@ -13,6 +13,7 @@ import {
   BlankWorkspaceDialog,
   MidiTrackDialog,
   UpdateDialog,
+  PreferencesDialog,
 } from "./dialogs/ToolDialogs";
 import { useDialogAccessibility } from "./dialogs/useDialogAccessibility";
 import Timeline from "./editor/Timeline";
@@ -115,7 +116,7 @@ const defaultPlayback: PlaybackState = {
   available: false,
   error: null,
 };
-type ToolDialog = "blank" | "update" | null;
+type ToolDialog = "blank" | "update" | "preferences" | null;
 type PendingDestructiveAction = {
   label: string;
   run(): void | Promise<void>;
@@ -373,6 +374,24 @@ export default function App() {
     }
   }
 
+  /** 環境設定: new-project defaults, reopening the last project, update check. */
+  async function applyStartupPreferences(backend: ToolBackendApi, isActive: () => boolean) {
+    if (typeof backend.apply_startup_preferences !== "function") return;
+    try {
+      const startup = await backend.apply_startup_preferences();
+      if (!isActive()) return;
+      applyState(startup.state);
+      if (startup.reopened && shouldFetchCqtSpectrum(startup.state.analysis.available, startup.state.analysis.source, startup.state.view.mode))
+        await refreshSpectrum(backend, startup.state.view);
+      if (startup.checkUpdates) {
+        const update = await backend.check_for_update();
+        if (isActive() && update.ok && update.newer) setToolDialog("update");
+      }
+    } catch (e) {
+      if (isActive()) setStatus(`環境設定の適用に失敗しました: ${String(e)}`);
+    }
+  }
+
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -396,6 +415,7 @@ export default function App() {
           setConnected(ping.ok);
           if (shouldFetchCqtSpectrum(state.analysis.available, state.analysis.source, state.view.mode))
             await refreshSpectrum(backend, state.view);
+          void applyStartupPreferences(backend as ToolBackendApi, () => active);
           return;
         } catch (e) {
           if (!active) return;
@@ -1400,6 +1420,7 @@ export default function App() {
       onSplit={() => void splitSelected()}
       onReanalyze={() => stateAction(() => toolsApi.reanalyze_audio())}
       onUpdates={() => setToolDialog("update")}
+      onPreferences={() => setToolDialog("preferences")}
       onHelp={() => setHelpSection("quick_start")}
     />
   ) : null;
@@ -1573,6 +1594,14 @@ export default function App() {
           }}
         />
       )}{" "}
+      {toolDialog === "preferences" && toolsApi && (
+        <PreferencesDialog
+          api={toolsApi}
+          settings={settings}
+          onClose={() => setToolDialog(null)}
+          onStatus={setStatus}
+        />
+      )}
       {toolDialog === "update" && toolsApi && (
         <UpdateDialog
           api={toolsApi}

@@ -23,7 +23,7 @@ from exporters.adofai import (
 )
 from web.gap_bridge import build_adofai_level_with_gap_bridges as build_adofai_level
 from exporters.adofai_append import AppendError, append_level, load_adofai_text
-from exporters.adofai_kps import kps_report, kps_warning
+from exporters.adofai_kps import HUMAN_KPS_LIMIT, kps_report, kps_warning
 from app_metadata import APP_VERSION, GITHUB_RELEASES_URL
 from i18n import tr
 
@@ -451,7 +451,7 @@ class AdoFAIMixin:
             encoding="utf-8",
         )
 
-        kps = kps_report(level)
+        kps = kps_report(level, limit=self._kps_limit())
         status = f"Exported {Path(path).name} ({stats.get('tiles_total', 0)} tiles)"
         warning = kps_warning(kps)
         if warning:
@@ -512,7 +512,7 @@ class AdoFAIMixin:
         if info["warnings"]:
             status += "。" + " ".join(info["warnings"])
         # Only the appended part is checked; floors and times are the merged chart's.
-        kps = kps_report(merged, first_floor=info["jointFloor"])
+        kps = kps_report(merged, limit=self._kps_limit(), first_floor=info["jointFloor"])
         warning = kps_warning(kps)
         if warning:
             status += "。" + warning
@@ -544,6 +544,10 @@ class AdoFAIMixin:
         lines = ["\t".join(columns)]
         lines.extend("\t".join(str(row.get(key, "")) for key in columns) for row in rows)
         return "\n".join(lines)
+
+    def _kps_limit(self) -> float:
+        """KPS above which the export warns; 環境設定 overrides it."""
+        return HUMAN_KPS_LIMIT
 
     def get_help_sections(self) -> dict[str, Any]:
         sections = []

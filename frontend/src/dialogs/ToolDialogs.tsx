@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { MidiTrackSummary, NoteMutationResult } from "./bridge";
+import type { EditorSettings, MidiTrackSummary, NoteMutationResult } from "./bridge";
 import { midiLabel } from "../editor/musicMath";
 import type {
   BlankWorkspaceOptions,
+  Preferences,
   ToolBackendApi,
+  UpdateCheck,
 } from "./toolsBridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
 import { isDialogCompositionKey, isPlainDialogEscape } from "./dialogFocus";
@@ -12,6 +14,7 @@ import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { blankWorkspaceDefaultsContextIsCurrent, blankWorkspaceMidiRangeIsValid } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
+import { changedNewProject, effectiveNewProject, updateCheckMessage, type NewProjectValues } from "./preferencesModel";
 type Common = {
   api: ToolBackendApi;
   onClose(): void;
@@ -395,7 +398,7 @@ export function LanguageDialog({ onClose }: Common) {
   );
 }
 export function UpdateDialog({ api, onClose, onStatus }: Common) {
-  type UpdateInfo = { version: string; text: string; info: string };
+  type UpdateInfo = UpdateCheck;
   type RequestContext = { api: ToolBackendApi; attempt: number };
   const [info, setInfo] = useState<(RequestContext & { value: UpdateInfo }) | null>(null);
   const [error, setError] = useState<(RequestContext & { message: string }) | null>(null);
@@ -416,7 +419,7 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
     setInfo(null);
     setError(null);
     setOpenError(null);
-    void api.get_update_info()
+    void api.check_for_update()
       .then(value => {
         if (alive) setInfo({ api, attempt, value });
       })
@@ -455,9 +458,8 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
           <LoadFailure error={currentError} onRetry={() => setAttempt(value => value + 1)} disabled={opening} />
         ) : currentInfo ? (
           <>
-            <div className="info-card">現在のバージョン: {currentInfo.version}</div>
-            <div className="info-card">{currentInfo.text}</div>
-            <div className="info-card">{currentInfo.info}</div>
+            <div className="info-card">現在のバージョン: {currentInfo.current}</div>
+            <div className="info-card">{updateCheckMessage(currentInfo)}</div>
           </>
         ) : (
           <div className="dialog-loading" role="status">確認中…</div>
@@ -470,6 +472,198 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
         <button className="primary" disabled={opening} onClick={() => void open()}>
           リリースページを開く
         </button>
+      </div>
+    </Modal>
+  );
+}
+
+const LANGUAGE_LABELS: Record<string, string> = { ja: "日本語", en: "English" };
+const PREVIEW_SOUND_OPTIONS: Array<[string, string]> = [
+  ["sine", "サイン波"],
+  ["piano", "ピアノ"],
+  ["organ", "オルガン"],
+  ["square", "矩形波"],
+  ["triangle", "三角波"],
+  ["adofai_kick", "ADOFAI Kick"],
+];
+const COLORMAP_OPTIONS: Array<[string, string]> = [
+  ["wavetone", "WaveTone"],
+  ["viridis", "Viridis"],
+  ["magma", "Magma"],
+  ["inferno", "Inferno"],
+  ["plasma", "Plasma"],
+  ["gray", "グレー"],
+];
+export function PreferencesDialog({
+  api,
+  settings,
+  onClose,
+  onStatus,
+}: Common & { settings: EditorSettings }) {
+  const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [language, setLanguage] = useState("ja");
+  const [values, setValues] = useState<NewProjectValues | null>(null);
+  const [kpsLimit, setKpsLimit] = useState(200);
+  const [checkUpdates, setCheckUpdates] = useState(false);
+  const [reopenLastProject, setReopenLastProject] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setError("");
+    void api.get_preferences()
+      .then(value => {
+        if (!alive) return;
+        setPrefs(value);
+        setLanguage(value.language);
+        setValues(effectiveNewProject(value));
+        setKpsLimit(value.kpsLimit);
+        setCheckUpdates(value.checkUpdates);
+        setReopenLastProject(value.reopenLastProject);
+      })
+      .catch(reason => {
+        if (alive) setError(String(reason));
+      });
+    return () => { alive = false; };
+  }, [api, attempt]);
+
+  if (!prefs || !values) {
+    return (
+      <Modal title="環境設定" onClose={onClose}>
+        {error ? (
+          <LoadFailure error={error} onRetry={() => setAttempt(v => v + 1)} />
+        ) : (
+          <div className="dialog-loading" role="status">読み込んでいます…</div>
+        )}
+      </Modal>
+    );
+  }
+  const loaded = prefs;
+  const set = <K extends keyof NewProjectValues>(key: K, value: NewProjectValues[K]) =>
+    setValues(current => (current ? { ...current, [key]: value } : current));
+
+  function takeCurrentSettings() {
+    const next = { ...values! };
+    for (const key of Object.keys(loaded.newProjectBuiltin) as Array<keyof NewProjectValues>) {
+      (next as Record<string, unknown>)[key] = (settings as unknown as Record<string, unknown>)[key];
+    }
+    setValues(next);
+  }
+  async function clearExportDefaults() {
+    setSaving(true);
+    try {
+      setPrefs(await api.clear_adofai_export_defaults());
+      onStatus("ADOFAI書き出しの既定値を元に戻しました");
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      await api.set_preferences({
+        language,
+        newProject: changedNewProject(values!, loaded.newProjectBuiltin),
+        kpsLimit,
+        checkUpdates,
+        reopenLastProject,
+      });
+      onStatus(language !== loaded.language ? "環境設定を保存しました（言語はヘルプとメッセージに反映されます）" : "環境設定を保存しました");
+      onClose();
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="環境設定" onClose={onClose} locked={saving}>
+      <div className="dialog-body export-dialog-body preferences-body">
+        <section className="preferences-section">
+          <h3>言語</h3>
+          <Field label="言語">
+            <select value={language} disabled={saving} onChange={e => setLanguage(e.target.value)}>
+              {loaded.languages.map(code => (
+                <option key={code} value={code}>{LANGUAGE_LABELS[code] ?? code}</option>
+              ))}
+            </select>
+          </Field>
+          <p className="dialog-note">ヘルプとメッセージの言語です。画面の文字は今のところ日本語だけです。</p>
+        </section>
+
+        <section className="preferences-section">
+          <h3>新しいプロジェクトの初期値</h3>
+          <p className="dialog-note">アプリを起動したときの最初の状態に使います。保存済みのプロジェクトを開いたときは、そのプロジェクトの設定が優先されます。</p>
+          <Field label="BPM">
+            <Num label="BPM" value={Number(values.bpm)} min={1} max={10000} step="any" disabled={saving} onChange={v => set("bpm", v)} />
+          </Field>
+          <Field label="グリッド">
+            <input type="checkbox" checked={Boolean(values.gridEnabled)} disabled={saving} onChange={e => set("gridEnabled", e.target.checked)} />
+          </Field>
+          <Field label="スナップ">
+            <input type="checkbox" checked={Boolean(values.snapEnabled)} disabled={saving} onChange={e => set("snapEnabled", e.target.checked)} />
+          </Field>
+          <Field label="分割数">
+            <Num label="分割数" value={Number(values.snapDiv)} min={1} max={64} disabled={saving} onChange={v => set("snapDiv", v)} />
+          </Field>
+          <Field label="出力オクターブ">
+            <Num label="出力オクターブ" value={Number(values.exportOctave)} min={-4} max={4} disabled={saving} onChange={v => set("exportOctave", v)} />
+          </Field>
+          <Field label="試聴音色">
+            <select value={String(values.previewSound)} disabled={saving} onChange={e => set("previewSound", e.target.value)}>
+              {PREVIEW_SOUND_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </Field>
+          <Field label="試聴音量">
+            <Num label="試聴音量" value={Number(values.previewVolume)} min={0} max={100} disabled={saving} onChange={v => set("previewVolume", v)} />
+          </Field>
+          <Field label="配色">
+            <select value={String(values.colormap)} disabled={saving} onChange={e => set("colormap", e.target.value)}>
+              {COLORMAP_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </Field>
+          <div className="preferences-actions">
+            <button className="quiet" disabled={saving} onClick={takeCurrentSettings}>今のプロジェクトの値を入れる</button>
+            <button className="quiet" disabled={saving} onClick={() => setValues({ ...loaded.newProjectBuiltin })}>初期値に戻す</button>
+          </div>
+        </section>
+
+        <section className="preferences-section">
+          <h3>ADOFAI書き出し</h3>
+          <Field label="KPS警告のしきい値">
+            <Num label="KPS警告のしきい値" value={kpsLimit} min={1} max={100000} step="any" disabled={saving} onChange={setKpsLimit} />
+          </Field>
+          <Field label="書き出し設定の既定値" group>
+            <span>{loaded.hasExportDefaults ? "保存した値を使っています" : "最初からの値を使っています"}</span>
+            <button className="quiet" disabled={saving || !loaded.hasExportDefaults} onClick={() => void clearExportDefaults()}>元に戻す</button>
+          </Field>
+          <p className="dialog-note">書き出しダイアログの「既定にする」で、その時の設定を次から最初に入る値にできます。</p>
+        </section>
+
+        <section className="preferences-section">
+          <h3>起動時</h3>
+          <label className="preferences-check">
+            <input type="checkbox" checked={checkUpdates} disabled={saving} onChange={e => setCheckUpdates(e.target.checked)} />
+            新しいバージョンを確認する（GitHub に問い合わせます）
+          </label>
+          <label className="preferences-check">
+            <input type="checkbox" checked={reopenLastProject} disabled={saving} onChange={e => setReopenLastProject(e.target.checked)} />
+            前回のプロジェクトを開く
+          </label>
+          {loaded.lastProject && <p className="dialog-note">前回: {loaded.lastProject}</p>}
+        </section>
+        {error && <div className="dialog-error" role="alert">{error}</div>}
+      </div>
+      <div className="dialog-footer">
+        <span />
+        <button onClick={onClose} disabled={saving}>キャンセル</button>
+        <button className="primary" onClick={() => void save()} disabled={saving}>保存</button>
       </div>
     </Modal>
   );

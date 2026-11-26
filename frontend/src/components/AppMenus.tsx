@@ -26,6 +26,7 @@ type Props = {
   onSplit():void;
   onReanalyze():void;
   onUpdates():void;
+  onPreferences():void;
   onHelp():void;
 };
 
@@ -131,6 +132,7 @@ export default function AppMenus(p:Props){
       <Action close={close} onClick={p.onReanalyze}>音声を再解析</Action>
     </Menu>
     <Menu id="options" label="オプション" active={active} setActive={setActive}>
+      <Action close={close} onClick={p.onPreferences}>環境設定…</Action>
       <Action close={close} onClick={p.onUpdates}>更新を確認…</Action>
     </Menu>
     <Menu id="help" label="ヘルプ" active={active} setActive={setActive}>

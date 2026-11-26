@@ -224,6 +224,12 @@ export default function AdoFAIExportDialogJa({
       setPreviewMode("debug");
     }
   }
+  async function saveAsDefaults() {
+    if (!fixed) return;
+    const snapshot = { ...fixed };
+    const r = await run(() => api.save_adofai_export_defaults(snapshot));
+    if (r?.ok) onStatus("今の書き出し設定を既定にしました（環境設定で元に戻せます）");
+  }
   async function chooseSongSource() {
     const context = loadedContext;
     if (!fixed || !context) return;
@@ -939,6 +945,9 @@ export default function AdoFAIExportDialogJa({
         </button>
         <button className="quiet" onClick={() => void debugPreview()} disabled={working}>
           デバッグ
+        </button>
+        <button className="quiet" onClick={() => void saveAsDefaults()} disabled={working} title="曲ごとに決まる値（BPM・音源・オフセット）以外を、次から最初に入る値にします">
+          既定にする
         </button>
         <span />
         <button onClick={onClose} disabled={working}>

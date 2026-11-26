@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import sys
@@ -16,16 +17,17 @@ except ImportError as exc:
     ) from exc
 
 from core.note_model import Note
-from i18n import set_language
+from i18n import language_config_path, set_language
 import web.backend as web_backend_module
 
 from web.backend import Bridge as CoreBridge
 from web.adofai import AdoFAIMixin
+from web.preferences import PreferencesMixin
 from web.presets import PresetMixin
 from web.tools import ToolsMixin
 
 
-class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
+class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
     """Web UI backend with export, workspace and utility APIs layered on the core editor bridge."""
 
     def __init__(self) -> None:
@@ -123,7 +125,7 @@ class Bridge(PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge):
         defaults["angleCompressionMode"] = "auto"
         defaults["angleCompressionFixedAngle"] = 165.0
         defaults["songSourcePath"] = str(self.audio_path or "")
-        return defaults
+        return self._saved_adofai_export_defaults(defaults)
 
     def choose_adofai_song_source(self):
         path = self._dialog(webview.FileDialog.OPEN, file_types=web_backend_module.AUDIO_FILE_TYPES)
@@ -302,12 +304,22 @@ def _quiet_qt_environment() -> None:
     os.environ.setdefault("QT_D3D_NO_VBLANK_THREAD", "1")
 
 
+def _saved_language() -> str | None:
+    try:
+        data = json.loads(language_config_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    language = data.get("language") if isinstance(data, dict) else None
+    return str(language) if language else None
+
+
 def main() -> int:
     _quiet_qt_environment()
-    # The React/TypeScript shell is currently Japanese-only. Help text and other
-    # Python-side translated strings should match it as well.
-    set_language("ja", save=False)
+    # Japanese unless the user picked another language in 環境設定.  The
+    # React screens are Japanese; help and backend messages follow this.
+    set_language(_saved_language() or "ja", save=False)
     bridge = Bridge()
+    bridge._preferences_file = language_config_path()
     window = webview.create_window(
         "AdopyHzEditor",
         _ui_url(),
