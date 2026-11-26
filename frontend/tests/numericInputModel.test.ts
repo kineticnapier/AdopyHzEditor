@@ -52,16 +52,19 @@ test("settings numeric input ignores IME keys and disabled blur", () => {
     "cancelled numeric Escape must not bubble to editor shortcuts");
 });
 
+/** Translated rows read ``label={t("key")}``; BPM and MIDI stay literal. */
+const rowTag = (label: string) => /^[a-z]+\./.test(label) ? `<Row label={t("${label}")}>` : `<Row label="${label}">`;
+
 test("fractional playback and timing settings are valid in the HTML inputs", () => {
   const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8")
     .replace(/\r\n/g, "\n");
   for (const [label, example, min, max] of [
-    ["再生速度", "1.03", 0.1, 4],
+    ["panel.speed", "1.03", 0.1, 4],
     ["BPM", "123.45", 1, 10000],
-    ["オフセット", "0.5", -600000, 600000],
-    ["目標角度", "123.4567", 0.001, 359.999],
+    ["panel.offset", "0.5", -600000, 600000],
+    ["panel.target_angle", "123.4567", 0.001, 359.999],
   ] as const) {
-    const start = source.indexOf(`<Row label="${label}">`);
+    const start = source.indexOf(rowTag(label));
     assert.ok(start >= 0, `${label} row exists`);
     const end = source.indexOf("</Row>", start);
     assert.ok(end > start, `${label} row is complete`);
@@ -80,19 +83,19 @@ test("fractional inspector note and bulk edits are not rejected by HTML step con
 
   for (const [section, cases] of [
     [source.slice(0, bulkStart), [
-      ["開始", "0.0005", 0, 36000],
-      ["終了", "1.00025", 0, 36000],
-      ["長さ", "0.0015", 0.001, 36000],
+      ["panel.start", "0.0005", 0, 36000],
+      ["panel.end", "1.00025", 0, 36000],
+      ["panel.length", "0.0015", 0.001, 36000],
       ["MIDI", "60.125", 0, 127],
     ]],
     [source.slice(bulkStart, bulkEnd), [
-      ["時間移動", "0.0005", -36000, 36000],
-      ["音高移動", "0.125", -127, 127],
-      ["長さ", "0.0015", 0.001, 36000],
+      ["panel.time_shift", "0.0005", -36000, 36000],
+      ["panel.pitch_shift", "0.125", -127, 127],
+      ["panel.length", "0.0015", 0.001, 36000],
     ]],
   ] as const) {
     for (const [label, example, min, max] of cases) {
-      const start = section.indexOf(`<Row label="${label}">`);
+      const start = section.indexOf(rowTag(label));
       assert.ok(start >= 0, `${label} row exists`);
       const end = section.indexOf("</Row>", start);
       assert.ok(end > start, `${label} row is complete`);

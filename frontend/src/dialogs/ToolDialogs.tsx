@@ -14,6 +14,7 @@ import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { blankWorkspaceDefaultsContextIsCurrent, blankWorkspaceMidiRangeIsValid } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
+import { setLanguage } from "../i18n/index.ts";
 import { changedNewProject, effectiveNewProject, updateCheckMessage, type NewProjectValues } from "./preferencesModel";
 type Common = {
   api: ToolBackendApi;
@@ -573,7 +574,8 @@ export function PreferencesDialog({
         checkUpdates,
         reopenLastProject,
       });
-      onStatus(language !== loaded.language ? "環境設定を保存しました（言語はヘルプとメッセージに反映されます）" : "環境設定を保存しました");
+      setLanguage(language);
+      onStatus("環境設定を保存しました");
       onClose();
     } catch (reason) {
       setError(String(reason));
@@ -594,7 +596,7 @@ export function PreferencesDialog({
               ))}
             </select>
           </Field>
-          <p className="dialog-note">ヘルプとメッセージの言語です。画面の文字は今のところ日本語だけです。</p>
+          <p className="dialog-note">メニュー、ツールバー、右パネル、ヘルプが切り替わります。ダイアログとメッセージは日本語のままです（順に対応します）。</p>
         </section>
 
         <section className="preferences-section">

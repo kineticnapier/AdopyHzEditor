@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { consumeMenuEscape } from "./menuEscape";
+import { t, useLanguage } from "../i18n/index.ts";
 import { canTransferDeferredMenuFocus, focusAdjacentMenu, focusOpenedMenuEdgeItem, isPlainMenuNavigationEvent, menuHoverFocusOrigin, nextMenuId, restoreMenuTriggerFocus } from "./menuNavigation";
 
 type Props = {
@@ -72,6 +73,7 @@ function Action({children,shortcut,disabled,onClick,close}:{children:string;shor
 }
 
 export default function AppMenus(p:Props){
+  useLanguage();
   const[active,setActive]=useState<MenuId|null>(null);
   const rootRef=useRef<HTMLElement>(null);
   const focusTrigger=(id:MenuId)=>window.requestAnimationFrame(()=>restoreMenuTriggerFocus(rootRef.current,id,document.activeElement,document.body,document.documentElement));
@@ -99,44 +101,44 @@ export default function AppMenus(p:Props){
         focusAdjacentMenu(rootRef.current,next,Boolean(active && fromPopup),Boolean(active));
     });
   }
-  return <nav className="app-menus" aria-label="アプリケーションメニュー" ref={rootRef} onKeyDown={traverseMenus} onBlur={event=>{if(active&&!event.currentTarget.contains(event.relatedTarget as Node|null))setActive(null)}}>
-    <Menu id="file" label="ファイル" active={active} setActive={setActive}>
-      <Action close={close} shortcut="Ctrl+O" onClick={p.onOpenAudio}>音声を開く…</Action>
-      <Action close={close} shortcut="Ctrl+L" onClick={p.onLoadProject}>プロジェクトを開く…</Action>
-      <Action close={close} shortcut="Ctrl+S" onClick={p.onSaveProject}>保存</Action>
-      <Action close={close} shortcut="Ctrl+Shift+S" onClick={p.onSaveProjectAs}>名前を付けて保存…</Action>
+  return <nav className="app-menus" aria-label={t("menu.app")} ref={rootRef} onKeyDown={traverseMenus} onBlur={event=>{if(active&&!event.currentTarget.contains(event.relatedTarget as Node|null))setActive(null)}}>
+    <Menu id="file" label={t("menu.file")} active={active} setActive={setActive}>
+      <Action close={close} shortcut="Ctrl+O" onClick={p.onOpenAudio}>{t("menu.open_audio")}</Action>
+      <Action close={close} shortcut="Ctrl+L" onClick={p.onLoadProject}>{t("menu.open_project")}</Action>
+      <Action close={close} shortcut="Ctrl+S" onClick={p.onSaveProject}>{t("menu.save")}</Action>
+      <Action close={close} shortcut="Ctrl+Shift+S" onClick={p.onSaveProjectAs}>{t("menu.save_as")}</Action>
       <hr/>
-      <Action close={close} shortcut="Ctrl+I" onClick={p.onImportMidi}>MIDIを読み込む…</Action>
-      <Action close={close} shortcut="Ctrl+M" onClick={p.onExportMidi}>MIDIを書き出す…</Action>
-      <Action close={close} shortcut="Ctrl+E" onClick={p.onExportAdo}>ADOFAIを書き出す…</Action>
+      <Action close={close} shortcut="Ctrl+I" onClick={p.onImportMidi}>{t("menu.import_midi")}</Action>
+      <Action close={close} shortcut="Ctrl+M" onClick={p.onExportMidi}>{t("menu.export_midi")}</Action>
+      <Action close={close} shortcut="Ctrl+E" onClick={p.onExportAdo}>{t("menu.export_adofai")}</Action>
       <hr/>
-      <Action close={close} onClick={p.onBlankWorkspace}>空のワークスペース…</Action>
-      <Action close={close} onClick={p.onLoadNotesOnly}>ノートだけ読み込む…</Action>
-      <Action close={close} onClick={p.onMergeProject}>プロジェクトのノートを結合…</Action>
-      <Action close={close} disabled={!p.hasProject} onClick={p.onRelinkProjectAudio}>プロジェクト音源を再指定…</Action>
+      <Action close={close} onClick={p.onBlankWorkspace}>{t("menu.blank_workspace")}</Action>
+      <Action close={close} onClick={p.onLoadNotesOnly}>{t("menu.load_notes_only")}</Action>
+      <Action close={close} onClick={p.onMergeProject}>{t("menu.merge_project")}</Action>
+      <Action close={close} disabled={!p.hasProject} onClick={p.onRelinkProjectAudio}>{t("menu.relink_audio")}</Action>
       <hr/>
-      <Action close={close} disabled={!p.hasSelection} onClick={p.onExportSelectedMidi}>選択ノートをMIDI出力…</Action>
-      <Action close={close} disabled={!p.hasSelection} onClick={p.onExportSelectedAdo}>選択ノートをADOFAI出力…</Action>
+      <Action close={close} disabled={!p.hasSelection} onClick={p.onExportSelectedMidi}>{t("menu.export_selected_midi")}</Action>
+      <Action close={close} disabled={!p.hasSelection} onClick={p.onExportSelectedAdo}>{t("menu.export_selected_adofai")}</Action>
     </Menu>
-    <Menu id="edit" label="編集" active={active} setActive={setActive}>
-      <Action close={close} shortcut="Ctrl+Z" onClick={p.onUndo}>元に戻す</Action>
-      <Action close={close} shortcut="Ctrl+Y" onClick={p.onRedo}>やり直す</Action>
+    <Menu id="edit" label={t("menu.edit")} active={active} setActive={setActive}>
+      <Action close={close} shortcut="Ctrl+Z" onClick={p.onUndo}>{t("menu.undo")}</Action>
+      <Action close={close} shortcut="Ctrl+Y" onClick={p.onRedo}>{t("menu.redo")}</Action>
       <hr/>
-      <Action close={close} shortcut="Ctrl+D" disabled={!p.hasSelection} onClick={p.onDuplicate}>選択ノートを複製</Action>
-      <Action close={close} shortcut="Q" disabled={!p.hasSelection} onClick={p.onQuantize}>選択ノートをクオンタイズ</Action>
-      <Action close={close} shortcut="Ctrl+Shift+PageUp" disabled={!p.hasSelection} onClick={()=>p.onMoveOctave(12)}>選択ノートを1オクターブ上げる</Action>
-      <Action close={close} shortcut="Ctrl+Shift+PageDown" disabled={!p.hasSelection} onClick={()=>p.onMoveOctave(-12)}>選択ノートを1オクターブ下げる</Action>
-      <Action close={close} disabled={!p.hasSelection} onClick={p.onSplit}>再生位置で分割</Action>
+      <Action close={close} shortcut="Ctrl+D" disabled={!p.hasSelection} onClick={p.onDuplicate}>{t("menu.duplicate")}</Action>
+      <Action close={close} shortcut="Q" disabled={!p.hasSelection} onClick={p.onQuantize}>{t("menu.quantize")}</Action>
+      <Action close={close} shortcut="Ctrl+Shift+PageUp" disabled={!p.hasSelection} onClick={()=>p.onMoveOctave(12)}>{t("menu.octave_up")}</Action>
+      <Action close={close} shortcut="Ctrl+Shift+PageDown" disabled={!p.hasSelection} onClick={()=>p.onMoveOctave(-12)}>{t("menu.octave_down")}</Action>
+      <Action close={close} disabled={!p.hasSelection} onClick={p.onSplit}>{t("menu.split")}</Action>
     </Menu>
-    <Menu id="analyze" label="解析" active={active} setActive={setActive}>
-      <Action close={close} onClick={p.onReanalyze}>音声を再解析</Action>
+    <Menu id="analyze" label={t("menu.analyze")} active={active} setActive={setActive}>
+      <Action close={close} onClick={p.onReanalyze}>{t("menu.reanalyze")}</Action>
     </Menu>
-    <Menu id="options" label="オプション" active={active} setActive={setActive}>
-      <Action close={close} onClick={p.onPreferences}>環境設定…</Action>
-      <Action close={close} onClick={p.onUpdates}>更新を確認…</Action>
+    <Menu id="options" label={t("menu.options")} active={active} setActive={setActive}>
+      <Action close={close} onClick={p.onPreferences}>{t("menu.preferences")}</Action>
+      <Action close={close} onClick={p.onUpdates}>{t("menu.check_updates")}</Action>
     </Menu>
-    <Menu id="help" label="ヘルプ" active={active} setActive={setActive}>
-      <Action close={close} shortcut="F1" onClick={p.onHelp}>クイックスタート</Action>
+    <Menu id="help" label={t("menu.help")} active={active} setActive={setActive}>
+      <Action close={close} shortcut="F1" onClick={p.onHelp}>{t("menu.quick_start")}</Action>
     </Menu>
   </nav>;
 }

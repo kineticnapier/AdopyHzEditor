@@ -315,8 +315,8 @@ def _saved_language() -> str | None:
 
 def main() -> int:
     _quiet_qt_environment()
-    # Japanese unless the user picked another language in 環境設定.  The
-    # React screens are Japanese; help and backend messages follow this.
+    # Japanese unless the user picked another language in 環境設定; the
+    # screens get the same language from apply_startup_preferences.
     set_language(_saved_language() or "ja", save=False)
     bridge = Bridge()
     bridge._preferences_file = language_config_path()

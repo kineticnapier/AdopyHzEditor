@@ -54,10 +54,10 @@ test("a workspace with notes or audio still reports unavailable playback", () =>
 test("disconnected preview disables no-op Play and Stop buttons", () => {
   const toolbar = readFileSync(new URL("../src/components/TopToolbar.tsx", import.meta.url), "utf8");
   // Without a Python bridge, App.togglePlayback and App.stopPlayback have no effect.
-  assert.match(toolbar, /aria-label="停止"[^>]*disabled=\{!p\.connected\}[^>]*onClick=\{p\.onStop\}/);
+  assert.match(toolbar, /aria-label=\{t\("toolbar\.stop"\)\}[^>]*disabled=\{!p\.connected\}[^>]*onClick=\{p\.onStop\}/);
   assert.match(toolbar, /aria-pressed=\{p\.playback\.playing\}[^>]*disabled=\{!playbackToggleEnabled\(p\.connected, p\.playback\)\}[^>]*onClick=\{p\.onPlay\}/);
   // Keep the locally functional seek-to-start action available in preview.
-  assert.match(toolbar, /aria-label="先頭へ移動"[^>]*onClick=\{\(\)=>p\.onSeek\(0\)\}/);
+  assert.match(toolbar, /aria-label=\{t\("toolbar\.to_start"\)\}[^>]*onClick=\{\(\)=>p\.onSeek\(0\)\}/);
 });
 
 
@@ -71,6 +71,6 @@ test("Play is disabled for unavailable audio while Stop and Pause remain usable"
   const toolbar = readFileSync(new URL("../src/components/TopToolbar.tsx", import.meta.url), "utf8");
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(toolbar, /disabled=\{!playbackToggleEnabled\(p\.connected, p\.playback\)\}/);
-  assert.match(toolbar, /aria-label="停止"[^>]*disabled=\{!p\.connected\}/);
+  assert.match(toolbar, /aria-label=\{t\("toolbar\.stop"\)\}[^>]*disabled=\{!p\.connected\}/);
   assert.match(app, /if \(api && playbackToggleEnabled\(connected, playback\)\)/);
 });

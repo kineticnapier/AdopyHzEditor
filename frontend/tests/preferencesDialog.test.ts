@@ -27,7 +27,7 @@ test("update check results read as one line", () => {
 
 test("the options menu opens 環境設定 and startup applies it", () => {
   const menus = readFileSync(new URL("../src/components/AppMenus.tsx", import.meta.url), "utf8");
-  assert.match(menus, /onClick=\{p\.onPreferences\}>環境設定…/);
+  assert.match(menus, /onClick=\{p\.onPreferences\}>\{t\("menu\.preferences"\)\}/);
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /void applyStartupPreferences\(backend as ToolBackendApi, \(\) => active\)/);
   assert.match(app, /update\.ok && update\.newer\) setToolDialog\("update"\)/);

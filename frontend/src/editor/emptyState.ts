@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.ts";
+
 /** Show the start hint only before either audio or editable notes exist. */
 export function shouldShowCanvasEmptyHint(
   audioName: string | null,
@@ -9,5 +11,5 @@ export function shouldShowCanvasEmptyHint(
 /** Distinguish notes-only editing from a genuinely empty workspace in the title bar. */
 export function workspaceTitle(audioName: string | null, hasPlayableContent: boolean): string {
   if (audioName !== null) return audioName;
-  return hasPlayableContent ? "ノートのみのワークスペース" : "空のワークスペース";
+  return hasPlayableContent ? t("workspace.notes_only") : t("workspace.empty");
 }

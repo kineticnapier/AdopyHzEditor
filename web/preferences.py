@@ -275,6 +275,7 @@ class PreferencesMixin:
         return {
             "state": self.get_state(),
             "checkUpdates": prefs["checkUpdates"] and first,
+            "language": current_language(),
             "reopened": reopened,
         }
 

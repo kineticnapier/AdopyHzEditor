@@ -1,4 +1,5 @@
 import type { PlaybackState } from "./bridge";
+import { t } from "../i18n/index.ts";
 
 /** Explain why playback is unavailable instead of silently ignoring Play. */
 export function playbackStatusMessage(
@@ -6,8 +7,8 @@ export function playbackStatusMessage(
   hasPlayableContent = true,
 ): string | null {
   const error = playback.error?.trim();
-  if (error) return `再生エラー: ${error}`;
-  return playback.available || !hasPlayableContent ? null : "再生できません";
+  if (error) return t("playback.error", { error });
+  return playback.available || !hasPlayableContent ? null : t("playback.unavailable");
 }
 
 /** Disable no-op Play, but keep Pause available for an already playing stream. */

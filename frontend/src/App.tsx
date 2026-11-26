@@ -68,6 +68,7 @@ import {
   runWithErrorFeedback,
 } from "./api/requestCoordinator";
 import type { ToolBackendApi } from "./api/toolsBridge";
+import { setLanguage } from "./i18n/index.ts";
 
 const defaultSettings: EditorSettings = {
   volume: 85,
@@ -380,6 +381,7 @@ export default function App() {
     try {
       const startup = await backend.apply_startup_preferences();
       if (!isActive()) return;
+      setLanguage(startup.language);
       applyState(startup.state);
       if (startup.reopened && shouldFetchCqtSpectrum(startup.state.analysis.available, startup.state.analysis.source, startup.state.view.mode))
         await refreshSpectrum(backend, startup.state.view);

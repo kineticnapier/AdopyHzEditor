@@ -30,5 +30,5 @@ export type ToolBackendApi = BackendApi & {
   get_preferences(): Promise<Preferences>;
   set_preferences(changes: PreferenceChanges): Promise<Preferences>;
   clear_adofai_export_defaults(): Promise<Preferences>;
-  apply_startup_preferences(): Promise<{ state: AppState; checkUpdates: boolean; reopened: string | null }>;
+  apply_startup_preferences(): Promise<{ state: AppState; checkUpdates: boolean; reopened: string | null; language: string }>;
 };
