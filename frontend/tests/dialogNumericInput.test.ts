@@ -67,13 +67,13 @@ test("tool dialog load failures are announced as alerts", () => {
   const end = source.indexOf("\nexport function BlankWorkspaceDialog(", start);
   assert.ok(start >= 0 && end > start, "shared load failure component exists");
   const component = source.slice(start, end);
-  assert.match(component, /<div className="dialog-error" role="alert">読込に失敗しました: \{error\}<\/div>/);
+  assert.match(component, /<div className="dialog-error" role="alert">\{t\("dialog\.load_failed", \{ error \}\)\}<\/div>/);
   assert.ok((source.match(/<LoadFailure\b/g) ?? []).length >= 2, "the shared error component is reused");
 });
 
 test("ADOFAI export defaults failure is announced and busy dialog state is exposed", () => {
   const source = readFileSync(new URL("../src/dialogs/AdoFAIExportDialogJa.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-  assert.match(source, /<div className="dialog-error" role="alert">\s*設定の読込に失敗しました: \{currentError\}/);
+  assert.match(source, /<div className="dialog-error" role="alert">\s*\{t\("export\.defaults_failed", \{ error: currentError \}\)\}/);
   const modalStart = source.indexOf("function Modal({");
   assert.ok(modalStart >= 0, "ADOFAI export modal exists");
   const modal = source.slice(modalStart);

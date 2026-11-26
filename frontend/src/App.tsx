@@ -68,7 +68,7 @@ import {
   runWithErrorFeedback,
 } from "./api/requestCoordinator";
 import type { ToolBackendApi } from "./api/toolsBridge";
-import { setLanguage } from "./i18n/index.ts";
+import { setLanguage, t, useLanguage } from "./i18n/index.ts";
 
 const defaultSettings: EditorSettings = {
   volume: 85,
@@ -149,20 +149,20 @@ function UnsavedChangesDialog({
         aria-labelledby={titleId}
       >
         <header className="modal-title">
-          <strong id={titleId}>未保存の変更</strong>
+          <strong id={titleId}>{t("unsaved.title")}</strong>
         </header>
         <div className="dialog-body export-dialog-body">
-          <div className="info-card">「{label}」の前に変更を保存しますか？</div>
+          <div className="info-card">{t("unsaved.question", { label })}</div>
         </div>
         <div className="dialog-footer">
           <button className="primary" disabled={saving} onClick={onSave}>
-            {saving ? "保存中…" : "保存"}
+            {saving ? t("unsaved.saving") : t("dialog.save")}
           </button>
           <button disabled={saving} onClick={onDiscard}>
-            保存せず続行
+            {t("unsaved.discard")}
           </button>
           <button disabled={saving} onClick={onCancel}>
-            キャンセル
+            {t("dialog.cancel")}
           </button>
         </div>
       </section>
@@ -171,6 +171,7 @@ function UnsavedChangesDialog({
 }
 
 export default function App() {
+  useLanguage();
   const [api, setApi] = useState<BackendApi | null>(null),
     [connected, setConnected] = useState(false),
     [settings, setSettings] = useState(defaultSettings),
@@ -191,7 +192,7 @@ export default function App() {
     [projectPath, setProjectPath] = useState<string | null>(null),
     [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(false),
-    [status, setStatus] = useState("準備完了");
+    [status, setStatus] = useState("");
   const [adoExportOpen, setAdoExportOpen] = useState(false),
     [adoExportSelectedOnly,setAdoExportSelectedOnly]=useState(false),
     [helpSection, setHelpSection] = useState<string | null>(null),
@@ -338,7 +339,7 @@ export default function App() {
     setProjectPath(state.projectPath);
     setDirty(state.dirty);
     setBusy(state.busy);
-    setStatus(state.status || "準備完了");
+    setStatus(state.status || "");
   }
   async function refreshSpectrum(
     backend = api,
@@ -1317,19 +1318,19 @@ export default function App() {
       : 0.01;
   const openAudioSafely = () =>
     api &&
-    requestDestructive("音声を開く", () =>
+    requestDestructive(t("unsaved.open_audio"), () =>
       runStateAction(() => api.open_audio()),
     );
   const loadProjectSafely = () =>
     api &&
-    requestDestructive("プロジェクトを読み込む", () =>
+    requestDestructive(t("unsaved.load_project"), () =>
       runStateAction(() => api.load_project_dialog(), true),
     );
   useEffect(() => {
     if (!api) return;
     const requested = () =>
       setPendingDestructive({
-        label: "ウィンドウを閉じる",
+        label: t("unsaved.close_window"),
         run: async () => {
           await api.close_window();
         },
@@ -1394,12 +1395,12 @@ export default function App() {
       onExportMidi={() => exportMidi()}
       onExportAdo={() => {setAdoExportSelectedOnly(false);setAdoExportOpen(true)}}
       onBlankWorkspace={() =>
-        requestDestructive("空のワークスペースへ切り替える", () =>
+        requestDestructive(t("unsaved.blank_workspace"), () =>
           setToolDialog("blank"),
         )
       }
       onLoadNotesOnly={() =>
-        requestDestructive("ノートだけ読み込む", () =>
+        requestDestructive(t("unsaved.load_notes_only"), () =>
           runStateAction(() => toolsApi.load_project_notes_only_dialog(), true),
         )
       }
@@ -1479,12 +1480,12 @@ export default function App() {
             />
             {shouldShowCanvasEmptyHint(audioName, notes.length) && (
               <div className="canvas-empty" aria-hidden="true">
-                <strong>ノートを追加するか、音源を開く</strong>
+                <strong>{t("frame.empty_title")}</strong>
                 <span>
-                  ドラッグでノート作成 / ファイル → 音声を開く…{" "}
+                  {t("frame.empty_drag")}{" "}
                   <kbd>Ctrl+O</kbd>
                 </span>
-                <small>音源がない空のワークスペースでも採譜できます。</small>
+                <small>{t("frame.empty_blank")}</small>
               </div>
             )}
           </div>
@@ -1548,10 +1549,10 @@ export default function App() {
         )}
       </main>
       <footer className="statusbar" role="status" aria-live="polite">
-        <span>{busy ? "処理中…" : status}</span>
+        <span>{busy ? t("dialog.processing") : status || t("frame.ready")}</span>
         <span>
-          {projectPath ? projectPath.split(/[\\/]/).pop() : "プロジェクトなし"}{" "}
-          · Note {notes.length}個
+          {projectPath ? projectPath.split(/[\\/]/).pop() : t("frame.no_project")}{" "}
+          · {t("frame.note_count", { count: notes.length })}
         </span>
       </footer>
       {adoExportOpen && api && (

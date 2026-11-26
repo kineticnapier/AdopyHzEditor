@@ -23,7 +23,7 @@ test("update information and errors are scoped to the API and retry", () => {
   assert.match(update, /\[api, attempt\]/);
   assert.match(update, /currentError \?/);
   assert.match(update, /currentInfo \?/);
-  assert.match(update, /role="status">確認中/);
+  assert.match(update, /role="status">\{t\("update\.checking"\)\}/);
 });
 
 test("stale release launch completion cannot close the current update dialog", async () => {

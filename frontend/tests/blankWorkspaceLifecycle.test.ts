@@ -74,6 +74,6 @@ test("blank workspace prevents silent normalization of invalid MIDI bounds", () 
     assert.equal(blankWorkspaceMidiRangeIsValid(invalid), false);
   }
   assert.match(blank, /const midiRangeValid = blankWorkspaceMidiRangeIsValid\(value\)/);
-  assert.match(blank, /role="alert">\s*最低MIDIは最高MIDIより小さくしてください。/);
+  assert.match(blank, /role="alert">\s*\{t\("blank\.midi_order"\)\}/);
   assert.match(blank, /disabled=\{!value \|\| !defaultsCurrent \|\| applying \|\| !midiRangeValid\}/);
 });

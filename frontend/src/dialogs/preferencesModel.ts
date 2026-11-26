@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import type { NewProjectDefaults, Preferences, UpdateCheck } from "./toolsBridge";
 
 export type NewProjectValues = Required<NewProjectDefaults>;
@@ -18,7 +19,7 @@ export function changedNewProject(values: NewProjectValues, builtin: NewProjectV
 
 /** One line for the result of asking GitHub for the latest release. */
 export function updateCheckMessage(check: UpdateCheck): string {
-  if (!check.ok) return `最新版を確認できませんでした（${check.error ?? "不明なエラー"}）。リリースページで確認できます。`;
-  if (check.newer) return `新しいバージョン ${check.latest} があります。`;
-  return `最新のバージョンです（${check.latest}）。`;
+  if (!check.ok) return t("update.failed", { error: check.error ?? t("update.unknown_error") });
+  if (check.newer) return t("update.newer", { version: check.latest ?? "" });
+  return t("update.latest", { version: check.latest ?? "" });
 }

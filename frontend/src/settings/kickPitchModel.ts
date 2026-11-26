@@ -1,4 +1,5 @@
 import type { KickPitchCandidate, KickPitchPayload } from "../api/bridge";
+import { t } from "../i18n/index.ts";
 import type { TrackSelectionRange } from "../editor/trackSelection";
 
 export type KickPitchRegion = {
@@ -64,20 +65,20 @@ export function kickPitchRegionFromPick(range: TrackSelectionRange): KickPitchRe
 
 export function validKickPitchRegion(region: KickPitchRegion): string | null {
   const values = [region.start, region.end, region.minHz, region.maxHz];
-  if (!values.every(Number.isFinite)) return "数値を入力してください";
-  if (region.end - region.start < 0.01) return "解析範囲は10ms以上にしてください";
+  if (!values.every(Number.isFinite)) return t("kick.need_numbers");
+  if (region.end - region.start < 0.01) return t("kick.min_span");
   if (region.end - region.start > KICK_PITCH_MAX_SECONDS)
-    return `解析範囲は${KICK_PITCH_MAX_SECONDS}秒以内にしてください`;
+    return t("kick.max_span", { seconds: KICK_PITCH_MAX_SECONDS });
   if (region.minHz <= 0 || region.maxHz <= region.minHz * 1.5)
-    return "最高Hzは最低Hzの1.5倍より大きくしてください";
+    return t("kick.hz_ratio");
   return null;
 }
 
 export function candidateRoleLabel(candidate: KickPitchCandidate) {
-  if (candidate.role === "primary") return "主な線";
+  if (candidate.role === "primary") return t("kick.role_primary");
   if (candidate.role === "harmonic")
-    return `倍音 ×${candidate.harmonicNumber ?? "?"}`;
-  return "独立成分";
+    return t("kick.role_harmonic", { n: candidate.harmonicNumber ?? "?" });
+  return t("kick.role_independent");
 }
 
 function firstLast(values: Array<number | null>): [number, number] | null {
@@ -88,7 +89,7 @@ function firstLast(values: Array<number | null>): [number, number] | null {
 export function candidateSummary(candidate: KickPitchCandidate) {
   const ends = firstLast(candidate.hz);
   const sweep = ends ? `${ends[0].toFixed(1)}→${ends[1].toFixed(1)} Hz` : "—";
-  return `${sweep} · ${candidate.duration.toFixed(3)} s · 信頼度 ${Math.round(candidate.meanConfidence * 100)}%`;
+  return `${sweep} · ${candidate.duration.toFixed(3)} s · ${t("kick.confidence", { percent: Math.round(candidate.meanConfidence * 100) })}`;
 }
 
 /** Candidates shown before the rest are folded away. */

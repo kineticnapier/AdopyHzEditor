@@ -37,11 +37,11 @@ test("selection refresh cannot unlock a still-running export", () => {
   assert.ok(loadingStart >= 0 && loadedStart > loadingStart);
   const loading = source.slice(loadingStart, loadedStart);
   // The loading branch must preserve the same lock as the normal export form.
-  assert.match(loading, /<Modal title="ADOFAI出力" onClose=\{onClose\} locked=\{working\}>/);
-  assert.match(loading, /<button onClick=\{onClose\} disabled=\{working\}>閉じる<\/button>/);
+  assert.match(loading, /<Modal title=\{t\("export\.title"\)\} onClose=\{onClose\} locked=\{working\}>/);
+  assert.match(loading, /<button onClick=\{onClose\} disabled=\{working\}>\{t\("dialog\.close"\)\}<\/button>/);
   assert.match(loading, /className="primary"\s+disabled=\{working\}\s+onClick=\{\(\) => setLoadAttempt/);
   assert.match(loading, /className="dialog-loading" role="status"/);
-  assert.match(loading, /working \? "出力処理中…"/);
+  assert.match(loading, /working \? t\("export\.exporting"\)/);
 });
 
 test("defaults are invalid during render after selection, API, or retry changes", () => {
@@ -159,9 +159,9 @@ test("changing export scope updates automatic manual-offset seed without rewriti
 test("ADOFAI debug preview clearly marks rows omitted by the UI and backend", () => {
   const preview = source.slice(source.indexOf("function DebugPreview("));
   assert.match(preview, /rows = preview\.rows\.slice\(0, 300\)/);
-  assert.match(preview, /表示 \{rows\.length\} \/ 全 \{preview\.summary\.rows\} 行/);
+  assert.match(preview, /t\("export\.rows_shown", \{ shown: rows\.length, total: preview\.summary\.rows \}\)/);
   assert.match(preview, /preview\.summary\.rows > rows\.length \|\| preview\.limited/);
-  assert.match(preview, /一部のみ/);
+  assert.match(preview, /t\("export\.partial"\)/);
   const backend = readFileSync(new URL("../../web/adofai.py", import.meta.url), "utf8");
   assert.match(backend, /max_rows = 5000/);
   assert.match(backend, /"limited": len\(rows\) > max_rows/);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { BackendApi, HelpPayload } from "./bridge";
 import { useDialogAccessibility } from "./useDialogAccessibility";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
@@ -70,18 +71,18 @@ export default function HelpDialog({
         aria-busy={opening}
       >
         <header className="modal-title">
-          <strong id={titleId}>ヘルプ</strong>
-          <button aria-label="閉じる" disabled={opening} onClick={close}>
+          <strong id={titleId}>{t("help.title")}</strong>
+          <button aria-label={t("dialog.close")} disabled={opening} onClick={close}>
             ×
           </button>
         </header>
-        {currentError ? <><div className="dialog-error" role="alert">ヘルプの読込に失敗しました: {currentError}</div><div className="dialog-footer"><button onClick={close} disabled={opening}>閉じる</button><button className="primary" onClick={()=>setAttempt(value=>value+1)}>再試行</button></div></> : !currentPayload ? (
-          <div className="dialog-loading" role="status">ヘルプを読み込んでいます…</div>
+        {currentError ? <><div className="dialog-error" role="alert">{t("help.load_failed", { error: currentError })}</div><div className="dialog-footer"><button onClick={close} disabled={opening}>{t("dialog.close")}</button><button className="primary" onClick={()=>setAttempt(value=>value+1)}>{t("dialog.retry")}</button></div></> : !currentPayload ? (
+          <div className="dialog-loading" role="status">{t("help.loading")}</div>
         ) : (
           <>
             <div className="help-header">{currentPayload.header}</div>
             <div className="help-layout">
-              <nav aria-label="ヘルプ項目">
+              <nav aria-label={t("help.sections")}>
                 {currentPayload.sections.map((x) => (
                   <button
                     key={x.id}
@@ -101,11 +102,11 @@ export default function HelpDialog({
             {currentReleaseError && <div className="dialog-error inline" role="alert">{currentReleaseError}</div>}
             <div className="dialog-footer">
               <button onClick={() => void openReleases()} disabled={opening}>
-                {opening ? "開いています…" : "リリースページ"}
+                {opening ? t("help.opening") : t("help.releases")}
               </button>
               <span />
               <button className="primary" disabled={opening} onClick={close}>
-                閉じる
+                {t("dialog.close")}
               </button>
             </div>
           </>

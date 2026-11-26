@@ -14,9 +14,9 @@ test("ADOFAI export settings are disabled during an operation", () => {
   const end = dialogSource.indexOf("</fieldset>", start);
   assert.ok(start > 0 && end > start, "settings must be wrapped in a disabled fieldset");
   const settings = dialogSource.slice(start, end);
-  assert.match(settings, /<Field label="方式">/);
+  assert.match(settings, /<Field label=\{t\("export\.method"\)\}>/);
   assert.match(settings, /<details className="advanced-fold">/);
-  assert.match(settings, /<Field label="端数タイル">/);
+  assert.match(settings, /<Field label=\{t\("export\.final_tile"\)\}>/);
   assert.match(dialogSource, /locked={working}/);
   const patch = dialogSource.slice(
     dialogSource.indexOf("function patch<"),
@@ -81,9 +81,9 @@ test("ADOFAI export groups checkbox settings without nested labels", () => {
     dialogSource,
     /if \(group\) \{[\s\S]*?<div className="dialog-field" role="group" aria-label=\{label\}>/,
   );
-  for (const label of ["音声", "出力範囲", "音声コピー", "songOffset"]) {
+  for (const label of ['{t("export.audio")}', '{t("export.scope")}', '{t("export.copy_audio")}', '"songOffset"']) {
     assert.ok(
-      dialogSource.includes(`<Field label="${label}" group>`),
+      dialogSource.includes(`<Field label=${label} group>`),
       `${label} must use a group instead of wrapping a nested label`,
     );
   }
@@ -92,12 +92,12 @@ test("ADOFAI export groups checkbox settings without nested labels", () => {
 });
 
 test("ADOFAI export song-source input has its own accessible name", () => {
-  const start = dialogSource.indexOf('<Field label="音源先" group>');
+  const start = dialogSource.indexOf('<Field label={t("export.song_source")} group>');
   const end = dialogSource.indexOf("</Field>", start);
   assert.ok(start >= 0 && end > start);
   const songSource = dialogSource.slice(start, end);
-  assert.match(songSource, /value=\{options\.songSourcePath \|\| "未選択"\}/);
-  assert.match(songSource, /aria-label="音源先"/);
+  assert.match(songSource, /value=\{options\.songSourcePath \|\| t\("export\.not_selected"\)\}/);
+  assert.match(songSource, /aria-label=\{t\("export\.song_source"\)\}/);
   assert.match(songSource, /<button/);
 });
 

@@ -14,7 +14,7 @@ import { runReleasePageAction } from "./releasePageAction";
 import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { blankWorkspaceDefaultsContextIsCurrent, blankWorkspaceMidiRangeIsValid } from "./previewFreshness";
 import { dismissUnlessBusy } from "./dialogClosePolicy";
-import { setLanguage } from "../i18n/index.ts";
+import { setLanguage, t } from "../i18n/index.ts";
 import { changedNewProject, effectiveNewProject, updateCheckMessage, type NewProjectValues } from "./preferencesModel";
 type Common = {
   api: ToolBackendApi;
@@ -54,7 +54,7 @@ function Modal({
       >
         <header className="modal-title">
           <strong id={titleId}>{title}</strong>
-          <button aria-label="閉じる" disabled={locked} onClick={close}>
+          <button aria-label={t("dialog.close")} disabled={locked} onClick={close}>
             ×
           </button>
         </header>
@@ -152,11 +152,11 @@ function Num({
 function LoadFailure({ error, onRetry, disabled = false }: { error: string; onRetry(): void; disabled?: boolean }) {
   return (
     <>
-      <div className="dialog-error" role="alert">読込に失敗しました: {error}</div>
+      <div className="dialog-error" role="alert">{t("dialog.load_failed", { error })}</div>
       <div className="dialog-footer">
         <span />
         <button className="primary" onClick={onRetry} disabled={disabled}>
-          再試行
+          {t("dialog.retry")}
         </button>
       </div>
     </>
@@ -219,7 +219,7 @@ export function BlankWorkspaceDialog({
       try {
         await onApply(snapshot);
         if (!blankWorkspaceDefaultsContextIsCurrent(loadedContext, latestRequestContext.current)) return;
-        onStatus("空のワークスペースに切り替えました");
+        onStatus(t("blank.switched"));
         onClose();
       } catch (e) {
         if (blankWorkspaceDefaultsContextIsCurrent(loadedContext, latestRequestContext.current)) onStatus(String(e));
@@ -229,7 +229,7 @@ export function BlankWorkspaceDialog({
     });
   }
   return (
-    <Modal title="空のワークスペース" onClose={onClose} locked={applying}>
+    <Modal title={t("blank.title")} onClose={onClose} locked={applying}>
       {currentLoadError ? (
         <LoadFailure
           error={currentLoadError}
@@ -242,9 +242,9 @@ export function BlankWorkspaceDialog({
             {value && defaultsCurrent ? (
               <>
                 <div className="info-card">
-                  音声を外して黒い編集領域に切り替えます。既存ノートは保持されます。
+                  {t("blank.info")}
                 </div>
-                <Field label="長さ">
+                <Field label={t("blank.length")}>
                   <Num
                     value={value.duration}
                     disabled={applying}
@@ -253,9 +253,9 @@ export function BlankWorkspaceDialog({
                     step="any"
                     onChange={(v) => patchValue({ duration: v })}
                   />
-                  <span>秒</span>
+                  <span>{t("dialog.seconds")}</span>
                 </Field>
-                <Field label="最低MIDI">
+                <Field label={t("blank.midi_min")}>
                   <Num
                     value={value.midiMin}
                     disabled={applying}
@@ -264,7 +264,7 @@ export function BlankWorkspaceDialog({
                     onChange={(v) => patchValue({ midiMin: Math.round(v) })}
                   />
                 </Field>
-                <Field label="最高MIDI">
+                <Field label={t("blank.midi_max")}>
                   <Num
                     value={value.midiMax}
                     disabled={applying}
@@ -275,23 +275,23 @@ export function BlankWorkspaceDialog({
                 </Field>
                 {!midiRangeValid && (
                   <div className="dialog-error inline" role="alert">
-                    最低MIDIは最高MIDIより小さくしてください。
+                    {t("blank.midi_order")}
                   </div>
                 )}
               </>
             ) : (
-              <div className="dialog-loading" role="status">読み込み中…</div>
+              <div className="dialog-loading" role="status">{t("dialog.loading")}</div>
             )}
           </div>
           <div className="dialog-footer">
             <span />
-            <button disabled={applying} onClick={onClose}>キャンセル</button>
+            <button disabled={applying} onClick={onClose}>{t("dialog.cancel")}</button>
             <button
               className="primary"
               onClick={() => void apply()}
               disabled={!value || !defaultsCurrent || applying || !midiRangeValid}
             >
-              適用
+              {t("dialog.apply")}
             </button>
           </div>
         </>
@@ -323,76 +323,61 @@ export function MidiTrackDialog({
       else next.delete(index);
       return next;
     });
-  const chosen = tracks.filter((t) => checked.has(t.index));
-  const noteTotal = chosen.reduce((sum, t) => sum + t.noteCount, 0);
-  const range = (t: MidiTrackSummary) =>
-    t.lowest === null || t.highest === null
+  const chosen = tracks.filter((track) => checked.has(track.index));
+  const noteTotal = chosen.reduce((sum, track) => sum + track.noteCount, 0);
+  const range = (track: MidiTrackSummary) =>
+    track.lowest === null || track.highest === null
       ? ""
-      : t.lowest === t.highest
-        ? midiLabel(t.lowest)
-        : `${midiLabel(t.lowest)}〜${midiLabel(t.highest)}`;
+      : track.lowest === track.highest
+        ? midiLabel(track.lowest)
+        : `${midiLabel(track.lowest)}〜${midiLabel(track.highest)}`;
   return (
-    <Modal title="MIDIトラックを選択" onClose={onClose}>
+    <Modal title={t("midi.title")} onClose={onClose}>
       <div className="dialog-body export-dialog-body">
         <div className="info-card">
-          {fileName} から読み込むトラックを選んでください。ドラムらしいトラックは最初から外してあります。
+          {t("midi.info", { file: fileName })}
         </div>
-        <div className="midi-track-list" role="group" aria-label="読み込むトラック">
-          {tracks.map((t) => (
-            <label key={t.index} className="inline-check midi-track-row">
+        <div className="midi-track-list" role="group" aria-label={t("midi.tracks")}>
+          {tracks.map((track) => (
+            <label key={track.index} className="inline-check midi-track-row">
               <input
                 type="checkbox"
-                checked={checked.has(t.index)}
-                onChange={(e) => toggle(t.index, e.target.checked)}
+                checked={checked.has(track.index)}
+                onChange={(e) => toggle(track.index, e.target.checked)}
               />
-              <span className="midi-track-name">{t.name}</span>
+              <span className="midi-track-name">{track.name}</span>
               <span className="midi-track-meta">
-                {t.noteCount}ノート
-                {range(t) && ` / ${range(t)}`}
-                {t.channels.length > 0 && ` / ch ${t.channels.join(",")}`}
-                {t.drums && " / ドラム"}
+                {t("midi.notes", { count: track.noteCount })}
+                {range(track) && ` / ${range(track)}`}
+                {track.channels.length > 0 && ` / ch ${track.channels.join(",")}`}
+                {track.drums && t("midi.drums")}
               </span>
             </label>
           ))}
         </div>
         <div className="info-card">
-          各トラックはレイヤーとして読み込まれます。読み込んだあとも、インスペクタのレイヤー一覧で使うレイヤーを切り替えられます。
+          {t("midi.layers_info")}
         </div>
         <div className="midi-track-actions">
           <button type="button" onClick={() => setChecked(new Set(tracks.map((t) => t.index)))}>
-            すべて選択
+            {t("midi.select_all")}
           </button>
           <button type="button" onClick={() => setChecked(new Set())}>
-            すべて解除
+            {t("midi.select_none")}
           </button>
         </div>
       </div>
       <div className="dialog-footer">
         <span>
-          {chosen.length}トラック / {noteTotal}ノート
+          {t("midi.summary", { tracks: chosen.length, notes: noteTotal })}
         </span>
-        <button onClick={onClose}>キャンセル</button>
+        <button onClick={onClose}>{t("dialog.cancel")}</button>
         <button
           className="primary"
           disabled={chosen.length === 0}
           onClick={() => onImport(chosen.map((t) => t.index))}
         >
-          読み込む
-        </button>
-      </div>
-    </Modal>
-  );
-}
-export function LanguageDialog({ onClose }: Common) {
-  return (
-    <Modal title="言語" onClose={onClose}>
-      <div className="dialog-body export-dialog-body">
-        <div className="info-card">Web UIは日本語表示に統一されています。</div>
-      </div>
-      <div className="dialog-footer">
-        <span />
-        <button className="primary" onClick={onClose}>
-          閉じる
+          {t("midi.import")}
         </button>
       </div>
     </Modal>
@@ -439,7 +424,7 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
           () => api.open_releases_page(),
           () => {
             if (!blankWorkspaceDefaultsContextIsCurrent(context, latestContext.current)) return;
-            onStatus("リリースページを開きました");
+            onStatus(t("update.opened"));
             onClose();
           },
           message => {
@@ -453,25 +438,25 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
     });
   }
   return (
-    <Modal title="更新を確認" onClose={onClose} locked={opening}>
+    <Modal title={t("update.title")} onClose={onClose} locked={opening}>
       <div className="dialog-body export-dialog-body">
         {currentError ? (
           <LoadFailure error={currentError} onRetry={() => setAttempt(value => value + 1)} disabled={opening} />
         ) : currentInfo ? (
           <>
-            <div className="info-card">現在のバージョン: {currentInfo.current}</div>
+            <div className="info-card">{t("update.current", { version: currentInfo.current })}</div>
             <div className="info-card">{updateCheckMessage(currentInfo)}</div>
           </>
         ) : (
-          <div className="dialog-loading" role="status">確認中…</div>
+          <div className="dialog-loading" role="status">{t("update.checking")}</div>
         )}
         {currentOpenError && <div className="dialog-error" role="alert">{currentOpenError}</div>}
       </div>
       <div className="dialog-footer">
         <span />
-        <button onClick={onClose} disabled={opening}>あとで</button>
+        <button onClick={onClose} disabled={opening}>{t("update.later")}</button>
         <button className="primary" disabled={opening} onClick={() => void open()}>
-          リリースページを開く
+          {t("update.open_page")}
         </button>
       </div>
     </Modal>
@@ -479,21 +464,21 @@ export function UpdateDialog({ api, onClose, onStatus }: Common) {
 }
 
 const LANGUAGE_LABELS: Record<string, string> = { ja: "日本語", en: "English" };
-const PREVIEW_SOUND_OPTIONS: Array<[string, string]> = [
-  ["sine", "サイン波"],
-  ["piano", "ピアノ"],
-  ["organ", "オルガン"],
-  ["square", "矩形波"],
-  ["triangle", "三角波"],
+const previewSoundOptions = (): Array<[string, string]> => [
+  ["sine", t("panel.sound_sine")],
+  ["piano", t("panel.sound_piano")],
+  ["organ", t("panel.sound_organ")],
+  ["square", t("panel.sound_square")],
+  ["triangle", t("panel.sound_triangle")],
   ["adofai_kick", "ADOFAI Kick"],
 ];
-const COLORMAP_OPTIONS: Array<[string, string]> = [
+const colormapOptions = (): Array<[string, string]> => [
   ["wavetone", "WaveTone"],
   ["viridis", "Viridis"],
   ["magma", "Magma"],
   ["inferno", "Inferno"],
   ["plasma", "Plasma"],
-  ["gray", "グレー"],
+  ["gray", t("prefs.gray")],
 ];
 export function PreferencesDialog({
   api,
@@ -532,11 +517,11 @@ export function PreferencesDialog({
 
   if (!prefs || !values) {
     return (
-      <Modal title="環境設定" onClose={onClose}>
+      <Modal title={t("prefs.title")} onClose={onClose}>
         {error ? (
           <LoadFailure error={error} onRetry={() => setAttempt(v => v + 1)} />
         ) : (
-          <div className="dialog-loading" role="status">読み込んでいます…</div>
+          <div className="dialog-loading" role="status">{t("prefs.loading")}</div>
         )}
       </Modal>
     );
@@ -556,7 +541,7 @@ export function PreferencesDialog({
     setSaving(true);
     try {
       setPrefs(await api.clear_adofai_export_defaults());
-      onStatus("ADOFAI書き出しの既定値を元に戻しました");
+      onStatus(t("prefs.export_cleared"));
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -575,7 +560,7 @@ export function PreferencesDialog({
         reopenLastProject,
       });
       setLanguage(language);
-      onStatus("環境設定を保存しました");
+      onStatus(t("prefs.saved"));
       onClose();
     } catch (reason) {
       setError(String(reason));
@@ -585,87 +570,87 @@ export function PreferencesDialog({
   }
 
   return (
-    <Modal title="環境設定" onClose={onClose} locked={saving}>
+    <Modal title={t("prefs.title")} onClose={onClose} locked={saving}>
       <div className="dialog-body export-dialog-body preferences-body">
         <section className="preferences-section">
-          <h3>言語</h3>
-          <Field label="言語">
+          <h3>{t("prefs.language")}</h3>
+          <Field label={t("prefs.language")}>
             <select value={language} disabled={saving} onChange={e => setLanguage(e.target.value)}>
               {loaded.languages.map(code => (
                 <option key={code} value={code}>{LANGUAGE_LABELS[code] ?? code}</option>
               ))}
             </select>
           </Field>
-          <p className="dialog-note">メニュー、ツールバー、右パネル、ヘルプが切り替わります。ダイアログとメッセージは日本語のままです（順に対応します）。</p>
+          <p className="dialog-note">{t("prefs.language_note")}</p>
         </section>
 
         <section className="preferences-section">
-          <h3>新しいプロジェクトの初期値</h3>
-          <p className="dialog-note">アプリを起動したときの最初の状態に使います。保存済みのプロジェクトを開いたときは、そのプロジェクトの設定が優先されます。</p>
+          <h3>{t("prefs.new_project")}</h3>
+          <p className="dialog-note">{t("prefs.new_project_note")}</p>
           <Field label="BPM">
             <Num label="BPM" value={Number(values.bpm)} min={1} max={10000} step="any" disabled={saving} onChange={v => set("bpm", v)} />
           </Field>
-          <Field label="グリッド">
+          <Field label={t("prefs.grid")}>
             <input type="checkbox" checked={Boolean(values.gridEnabled)} disabled={saving} onChange={e => set("gridEnabled", e.target.checked)} />
           </Field>
-          <Field label="スナップ">
+          <Field label={t("prefs.snap")}>
             <input type="checkbox" checked={Boolean(values.snapEnabled)} disabled={saving} onChange={e => set("snapEnabled", e.target.checked)} />
           </Field>
-          <Field label="分割数">
-            <Num label="分割数" value={Number(values.snapDiv)} min={1} max={64} disabled={saving} onChange={v => set("snapDiv", v)} />
+          <Field label={t("prefs.divisions")}>
+            <Num label={t("prefs.divisions")} value={Number(values.snapDiv)} min={1} max={64} disabled={saving} onChange={v => set("snapDiv", v)} />
           </Field>
-          <Field label="出力オクターブ">
-            <Num label="出力オクターブ" value={Number(values.exportOctave)} min={-4} max={4} disabled={saving} onChange={v => set("exportOctave", v)} />
+          <Field label={t("prefs.export_octave")}>
+            <Num label={t("prefs.export_octave")} value={Number(values.exportOctave)} min={-4} max={4} disabled={saving} onChange={v => set("exportOctave", v)} />
           </Field>
-          <Field label="試聴音色">
+          <Field label={t("prefs.preview_sound")}>
             <select value={String(values.previewSound)} disabled={saving} onChange={e => set("previewSound", e.target.value)}>
-              {PREVIEW_SOUND_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {previewSoundOptions().map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </Field>
-          <Field label="試聴音量">
-            <Num label="試聴音量" value={Number(values.previewVolume)} min={0} max={100} disabled={saving} onChange={v => set("previewVolume", v)} />
+          <Field label={t("prefs.preview_volume")}>
+            <Num label={t("prefs.preview_volume")} value={Number(values.previewVolume)} min={0} max={100} disabled={saving} onChange={v => set("previewVolume", v)} />
           </Field>
-          <Field label="配色">
+          <Field label={t("prefs.colormap")}>
             <select value={String(values.colormap)} disabled={saving} onChange={e => set("colormap", e.target.value)}>
-              {COLORMAP_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {colormapOptions().map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </Field>
           <div className="preferences-actions">
-            <button className="quiet" disabled={saving} onClick={takeCurrentSettings}>今のプロジェクトの値を入れる</button>
-            <button className="quiet" disabled={saving} onClick={() => setValues({ ...loaded.newProjectBuiltin })}>初期値に戻す</button>
+            <button className="quiet" disabled={saving} onClick={takeCurrentSettings}>{t("prefs.take_current")}</button>
+            <button className="quiet" disabled={saving} onClick={() => setValues({ ...loaded.newProjectBuiltin })}>{t("prefs.reset")}</button>
           </div>
         </section>
 
         <section className="preferences-section">
-          <h3>ADOFAI書き出し</h3>
-          <Field label="KPS警告のしきい値">
-            <Num label="KPS警告のしきい値" value={kpsLimit} min={1} max={100000} step="any" disabled={saving} onChange={setKpsLimit} />
+          <h3>{t("prefs.adofai")}</h3>
+          <Field label={t("prefs.kps_limit")}>
+            <Num label={t("prefs.kps_limit")} value={kpsLimit} min={1} max={100000} step="any" disabled={saving} onChange={setKpsLimit} />
           </Field>
-          <Field label="書き出し設定の既定値" group>
-            <span>{loaded.hasExportDefaults ? "保存した値を使っています" : "最初からの値を使っています"}</span>
-            <button className="quiet" disabled={saving || !loaded.hasExportDefaults} onClick={() => void clearExportDefaults()}>元に戻す</button>
+          <Field label={t("prefs.export_defaults")} group>
+            <span>{loaded.hasExportDefaults ? t("prefs.export_saved") : t("prefs.export_builtin")}</span>
+            <button className="quiet" disabled={saving || !loaded.hasExportDefaults} onClick={() => void clearExportDefaults()}>{t("prefs.export_reset")}</button>
           </Field>
-          <p className="dialog-note">書き出しダイアログの「既定にする」で、その時の設定を次から最初に入る値にできます。</p>
+          <p className="dialog-note">{t("prefs.export_note")}</p>
         </section>
 
         <section className="preferences-section">
-          <h3>起動時</h3>
+          <h3>{t("prefs.startup")}</h3>
           <label className="preferences-check">
             <input type="checkbox" checked={checkUpdates} disabled={saving} onChange={e => setCheckUpdates(e.target.checked)} />
-            新しいバージョンを確認する（GitHub に問い合わせます）
+            {t("prefs.check_updates")}
           </label>
           <label className="preferences-check">
             <input type="checkbox" checked={reopenLastProject} disabled={saving} onChange={e => setReopenLastProject(e.target.checked)} />
-            前回のプロジェクトを開く
+            {t("prefs.reopen")}
           </label>
-          {loaded.lastProject && <p className="dialog-note">前回: {loaded.lastProject}</p>}
+          {loaded.lastProject && <p className="dialog-note">{t("prefs.last_project", { path: loaded.lastProject })}</p>}
         </section>
         {error && <div className="dialog-error" role="alert">{error}</div>}
       </div>
       <div className="dialog-footer">
         <span />
-        <button onClick={onClose} disabled={saving}>キャンセル</button>
-        <button className="primary" onClick={() => void save()} disabled={saving}>保存</button>
+        <button onClick={onClose} disabled={saving}>{t("dialog.cancel")}</button>
+        <button className="primary" onClick={() => void save()} disabled={saving}>{t("dialog.save")}</button>
       </div>
     </Modal>
   );
