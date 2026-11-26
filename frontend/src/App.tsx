@@ -11,7 +11,6 @@ import { acceptSettingsPatch } from "./settings/settingsChange";
 import { settingsResponseIsCurrent } from "./settings/settingsResponseFreshness";
 import {
   BlankWorkspaceDialog,
-  HarmonicDiagramDialog,
   MidiTrackDialog,
   UpdateDialog,
 } from "./dialogs/ToolDialogs";
@@ -116,7 +115,7 @@ const defaultPlayback: PlaybackState = {
   available: false,
   error: null,
 };
-type ToolDialog = "blank" | "harmonic" | "update" | null;
+type ToolDialog = "blank" | "update" | null;
 type PendingDestructiveAction = {
   label: string;
   run(): void | Promise<void>;
@@ -1399,7 +1398,6 @@ export default function App() {
       onQuantize={() => void quantize()}
       onMoveOctave={(semitones) => void moveNotes(selected, 0, semitones)}
       onSplit={() => void splitSelected()}
-      onHarmonicDiagram={() => setToolDialog("harmonic")}
       onReanalyze={() => stateAction(() => toolsApi.reanalyze_audio())}
       onUpdates={() => setToolDialog("update")}
       onHelp={() => setHelpSection("quick_start")}
@@ -1562,16 +1560,6 @@ export default function App() {
           onApply={async (options) => {
             await performStateAction(() => toolsApi.apply_blank_workspace(options));
           }}
-        />
-      )}{" "}
-      {toolDialog === "harmonic" && toolsApi && (
-        <HarmonicDiagramDialog
-          api={toolsApi}
-          selected={selected}
-          documentGeneration={documentGeneration.current}
-          onClose={() => setToolDialog(null)}
-          onStatus={setStatus}
-          onQueuedMutation={queueExternalMutation}
         />
       )}{" "}
       {midiTrackPick && api && (

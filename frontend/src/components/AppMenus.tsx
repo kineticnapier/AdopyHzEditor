@@ -24,13 +24,12 @@ type Props = {
   onQuantize():void;
   onMoveOctave(semitones:number):void;
   onSplit():void;
-  onHarmonicDiagram():void;
   onReanalyze():void;
   onUpdates():void;
   onHelp():void;
 };
 
-type MenuId="file"|"edit"|"analyze"|"tools"|"options"|"help";
+type MenuId="file"|"edit"|"analyze"|"options"|"help";
 type MenuProps={id:MenuId;label:string;active:MenuId|null;setActive(v:MenuId|null):void;children:ReactNode};
 
 function Menu({id,label,active,setActive,children}:MenuProps){
@@ -83,7 +82,7 @@ export default function AppMenus(p:Props){
     return()=>{window.removeEventListener("pointerdown",down);window.removeEventListener("keydown",key,true)};
   },[active]);
   const close=()=>{const id=active;setActive(null);if(id)focusTrigger(id)};
-  const menuIds:MenuId[]=["file","edit","analyze","tools","options","help"];
+  const menuIds:MenuId[]=["file","edit","analyze","options","help"];
   function traverseMenus(event:ReactKeyboardEvent<HTMLElement>){
     if(!isPlainMenuNavigationEvent(event.nativeEvent))return;
     if(event.key!=="ArrowLeft"&&event.key!=="ArrowRight")return;
@@ -130,9 +129,6 @@ export default function AppMenus(p:Props){
     </Menu>
     <Menu id="analyze" label="解析" active={active} setActive={setActive}>
       <Action close={close} onClick={p.onReanalyze}>音声を再解析</Action>
-    </Menu>
-    <Menu id="tools" label="ツール" active={active} setActive={setActive}>
-      <Action close={close} onClick={p.onHarmonicDiagram}>倍音ダイアグラムを挿入…</Action>
     </Menu>
     <Menu id="options" label="オプション" active={active} setActive={setActive}>
       <Action close={close} onClick={p.onUpdates}>更新を確認…</Action>

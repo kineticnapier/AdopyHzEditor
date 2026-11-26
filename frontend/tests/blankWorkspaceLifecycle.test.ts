@@ -9,7 +9,7 @@ const source = readFileSync(
 );
 const blank = source.slice(
   source.indexOf("export function BlankWorkspaceDialog("),
-  source.indexOf("export function HarmonicDiagramDialog("),
+  source.indexOf("export function MidiTrackDialog("),
 );
 
 test("blank workspace defaults belong to the exact API and retry", () => {

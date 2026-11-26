@@ -54,12 +54,11 @@ test("tool dialogs commit signed decimals and restore cancelled/blank edits", ()
   assert.equal(commitNumericEdit("-42", 16, -100000, 100000, true), 16);
 });
 
-test("tool dialog group fields and harmonic errors are accessible", () => {
+test("tool dialog group fields are accessible", () => {
   const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8");
   assert.match(source, /<div className="dialog-field" role="group" aria-label=\{label\}>/);
   const numeric = source.slice(source.indexOf("function Num({"), source.indexOf("function LoadFailure("));
   assert.match(numeric, /type="number"\s+aria-label=\{label\}/);
-  assert.match(source, /<div className="dialog-error inline" role="alert">\{currentError\}<\/div>/);
 });
 
 test("tool dialog load failures are announced as alerts", () => {
@@ -82,39 +81,16 @@ test("ADOFAI export defaults failure is announced and busy dialog state is expos
   assert.match(source, /<Modal[\s\S]*?locked=\{working\}/);
 });
 
-test("harmonic frequency and duration accept decimals without native step mismatch", () => {
-  const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-  const harmonic = source.slice(
-    source.indexOf("export function HarmonicDiagramDialog("),
-    source.indexOf("export function LanguageDialog("),
-  );
-  assert.ok(harmonic.length > 0, "harmonic dialog exists");
-  // min=0.001 with step=1 or 0.25 rejects ordinary values such as
-  // 440 Hz and 1 second under the browser's native step-mismatch rules.
-  for (const field of ["rootHz", "duration"]) {
-    const control = harmonic.match(new RegExp(`<Num\\s+value=\\{opts\\.${field}\\}[\\s\\S]*?\\/>`))?.[0];
-    assert.ok(control, `missing ${field} input`);
-    assert.match(control, /min=\{0\.001\}/);
-    assert.match(control, /step="any"/);
-  }
-});
-
 test("tool dialogs accept fractional values returned by the backend", () => {
   const source = readFileSync(new URL("../src/dialogs/ToolDialogs.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const blank = source.slice(
     source.indexOf("export function BlankWorkspaceDialog("),
-    source.indexOf("export function HarmonicDiagramDialog("),
-  );
-  const harmonic = source.slice(
-    source.indexOf("export function HarmonicDiagramDialog("),
-    source.indexOf("export function LanguageDialog("),
+    source.indexOf("export function MidiTrackDialog("),
   );
   // Python returns the current duration, playhead position and BPM as floats.
   // HTML's default step=1 or step=0.25 rejects valid values from those APIs.
   for (const [section, field] of [
     [blank, "value.duration"],
-    [harmonic, "opts.bpm"],
-    [harmonic, "opts.start"],
   ] as const) {
     const start = section.indexOf(`value={${field}}`);
     assert.ok(start >= 0, `missing ${field} input`);
