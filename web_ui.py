@@ -17,7 +17,7 @@ except ImportError as exc:
     ) from exc
 
 from core.note_model import Note
-from i18n import language_config_path, set_language
+from i18n import language_config_path, set_language, tr
 import web.backend as web_backend_module
 
 from web.backend import Bridge as CoreBridge
@@ -32,7 +32,7 @@ class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge)
 
     def __init__(self) -> None:
         super().__init__()
-        self._status = "準備完了"
+        self._status = tr("msg.ready")
 
     def _curve_controls(self, p0: float, p3: float) -> tuple[float, float]:
         """Extend the Web UI's creation-time Bezier shape presets.
@@ -70,7 +70,7 @@ class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge)
         with self._lock:
             valid = [i for i in self._valid_indices(indices) if self.notes[i].is_curve]
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "カーブノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_curve_selection")}
 
             # Validate and prepare every note before changing history or notes.
             updated: list[tuple[int, Note]] = []
@@ -92,7 +92,7 @@ class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge)
                 ).normalized()))
 
             if all(self.notes[i] == note for i, note in updated):
-                self._status = "カーブの形状は変更されませんでした"
+                self._status = tr("msg.shape_unchanged")
                 return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
 
             self._push_undo()
@@ -100,21 +100,21 @@ class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge)
                 self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(valid)}個のカーブに形状を適用しました"
+            self._status = tr("msg.shape_applied", count=len(valid))
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def open_audio(self):
         super().open_audio()
         with self._lock:
             if self.audio_path:
-                self._status = f"{Path(self.audio_path).name} を読み込みました"
+                self._status = tr("msg.audio_loaded", name=Path(self.audio_path).name)
         return self.get_state()
 
     def reanalyze_audio(self):
         had_audio = bool(self.audio_path)
         super().reanalyze_audio()
         with self._lock:
-            self._status = "解析が完了しました" if had_audio else "先に音声を開いてください"
+            self._status = tr("msg.analysis_done") if had_audio else tr("msg.open_audio_before")
         return self.get_state()
 
     def get_adofai_export_defaults(self, selected_indices=None, selected_only=False):
@@ -130,13 +130,13 @@ class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge)
     def choose_adofai_song_source(self):
         path = self._dialog(webview.FileDialog.OPEN, file_types=web_backend_module.AUDIO_FILE_TYPES)
         if not path:
-            return {"ok": False, "status": "キャンセルしました"}
+            return {"ok": False, "status": tr("msg.cancelled")}
         source = str(Path(path).resolve())
         return {
             "ok": True,
             "path": source,
             "name": Path(source).name,
-            "status": f"音源先を {Path(source).name} に変更しました",
+            "status": tr("msg.song_source_changed", name=Path(source).name),
         }
 
     def _reserve_integer_terminal_tiles(self, notes, final_mode):
@@ -179,7 +179,7 @@ class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge)
         use_song = bool(options.get("useProjectSong", bool(song_source)))
         if use_song:
             if not song_source:
-                raise ValueError("音源先を選択してください")
+                raise ValueError(tr("msg.select_song_source"))
             build_opts["song_filename"] = Path(song_source).name
             if bool(options.get("songOffsetAuto", True)):
                 build_opts["song_offset_ms"] = min((n.normalized().start for n in notes), default=0.0) * 1000.0
@@ -189,7 +189,7 @@ class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge)
                 except (TypeError, ValueError):
                     song_offset = 0.0
                 if not math.isfinite(song_offset):
-                    raise ValueError("音源オフセットは有限の数値で指定してください")
+                    raise ValueError(tr("msg.song_offset_finite"))
                 build_opts["song_offset_ms"] = max(-3600000.0, min(3600000.0, song_offset))
             workflow["songSourcePath"] = song_source
             workflow["copySong"] = bool(options.get("copyProjectSong", True))
@@ -206,7 +206,7 @@ class Bridge(PreferencesMixin, PresetMixin, ToolsMixin, AdoFAIMixin, CoreBridge)
             except (TypeError, ValueError):
                 fixed_angle = 165.0
             if not math.isfinite(fixed_angle):
-                raise ValueError("固定角度は有限の数値で指定してください")
+                raise ValueError(tr("msg.fixed_angle_finite"))
             fixed_angle = max(0.001, min(359.999, fixed_angle))
 
             # Fixed Angle Compression controls only the full/main tiles. The

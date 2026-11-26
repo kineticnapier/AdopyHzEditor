@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 
 from core.note_model import Note, hz_to_midi
+from i18n import tr
 from core.pitch_tracking import METHODS, PitchTrackingResult, PitchTrackingSettings, analyze_pitch_region
 from web.track_transcription import _minimum_note_span, _smooth_midis, _velocity
 
@@ -226,7 +227,7 @@ class KickPitchMixin:
             samples = player.audio
             sample_rate = int(player.sr)
         if not audio_path or samples is None or not len(samples):
-            return {"available": False, "status": "音源を開いてください"}
+            return {"available": False, "status": tr("msg.open_audio")}
         if str(method) not in METHODS:
             raise ValueError(f"method must be one of {METHODS}")
         start = max(0.0, float(start_time))
@@ -235,11 +236,11 @@ class KickPitchMixin:
         end = min(end, duration)
         defaults = PitchTrackingSettings()
         if end - start < 0.01:
-            return {"available": False, "status": "解析範囲が短すぎます（10ms以上）"}
+            return {"available": False, "status": tr("msg.kick_too_short")}
         if end - start > defaults.max_region_seconds:
             return {
                 "available": False,
-                "status": f"解析範囲は{defaults.max_region_seconds:g}秒以内にしてください",
+                "status": tr("msg.kick_max_span", seconds=f"{defaults.max_region_seconds:g}"),
             }
         settings = replace(
             defaults,
@@ -251,17 +252,19 @@ class KickPitchMixin:
         result = analyze_pitch_region(samples, sample_rate, start, end, settings)
         with self._lock:
             if source_generation != self._source_generation or audio_path != self.audio_path:
-                return {"available": False, "status": "音源が変更されたため解析結果を破棄しました"}
+                return {"available": False, "status": tr("msg.kick_discarded")}
             self.kick_pitch_result = result
             primary = (
                 result.candidates[result.primary_index]
                 if result.primary_index is not None
                 else None
             )
-            self._status = (
-                f"キック音高: 候補{len(result.candidates)}本"
-                + (f"、主候補 {float(np.median(primary.hz)):.1f} Hz" if primary is not None else "")
-                + f"（{result.stats['frameCount']}フレーム, {result.stats['analysisSeconds']:.2f}s）"
+            self._status = tr(
+                "msg.kick_result",
+                count=len(result.candidates),
+                primary=tr("msg.kick_primary", hz=f"{float(np.median(primary.hz)):.1f}") if primary is not None else "",
+                frames=result.stats["frameCount"],
+                seconds=f"{result.stats['analysisSeconds']:.2f}",
             )
             status = self._status
         payload = result.to_dict()
@@ -292,7 +295,7 @@ class KickPitchMixin:
                     "notes": self._note_dicts(),
                     "indices": [],
                     "changed": False,
-                    "status": "キック音高を先に解析してください",
+                    "status": tr("msg.kick_first"),
                 }
             by_id = {c.id: c for c in result.candidates}
             chosen = [by_id[int(v)] for v in candidate_ids if isinstance(v, (int, np.integer)) and int(v) in by_id]
@@ -342,17 +345,14 @@ class KickPitchMixin:
                     "notes": self._note_dicts(),
                     "indices": [],
                     "changed": False,
-                    "status": "信頼度の条件を満たす区間がありません",
+                    "status": tr("msg.kick_no_reliable"),
                 }
             self._push_undo()
             first_index = len(self.notes)
             self.notes.extend(created)
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = (
-                f"キック音高 {len(chosen)}本から Curve Note {len(created)}個を作成"
-                f"（最大誤差 {worst_error:.1f} cent）"
-            )
+            self._status = tr("msg.kick_notes_created", lines=len(chosen), count=len(created), error=f"{worst_error:.1f}")
             return {
                 "notes": self._note_dicts(),
                 "indices": list(range(first_index, first_index + len(created))),

@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from core.note_model import Note, hz_to_midi, midi_to_hz
+from i18n import tr
 
 
 MIN_NOTE_DURATION = 0.001
@@ -92,7 +93,7 @@ class EditingMixin:
         with self._lock:
             valid = set(self._valid_indices(indices))
             if not valid:
-                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": tr("msg.no_selection")}
             t = self._snap_time(float(at_time))
             split_count = 0
             new_notes: list[Note] = []
@@ -107,14 +108,14 @@ class EditingMixin:
                 else:
                     new_notes.append(n)
             if split_count == 0:
-                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "再生位置をまたぐ選択ノートがありません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": tr("msg.no_split_notes")}
             # Build every fragment before touching Undo/Redo. A failed curve
             # calculation must leave the document and history unchanged.
             self._push_undo()
             self.notes = new_notes
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{split_count}個のノートを分割しました"
+            self._status = tr("msg.split", count=split_count)
             return {"notes": self._note_dicts(), "indices": new_indices, "status": self._status}
 
     def cut_notes_range(self, indices: list[int], start_time: float, end_time: float) -> dict[str, Any]:
@@ -127,14 +128,14 @@ class EditingMixin:
         with self._lock:
             valid = set(self._valid_indices(indices))
             if not valid:
-                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": tr("msg.no_selection")}
 
             a = self._snap_time(float(start_time))
             b = self._snap_time(float(end_time))
             if b < a:
                 a, b = b, a
             if b - a < MIN_NOTE_DURATION:
-                return {"notes": self._note_dicts(), "indices": sorted(valid), "changed": False, "status": "切り取り範囲が短すぎます"}
+                return {"notes": self._note_dicts(), "indices": sorted(valid), "changed": False, "status": tr("msg.cut_too_short")}
 
             changed = 0
             new_notes: list[Note] = []
@@ -178,21 +179,21 @@ class EditingMixin:
                 # ultra-short notes later.
 
             if changed == 0:
-                return {"notes": self._note_dicts(), "indices": sorted(valid), "changed": False, "status": "切り取り範囲と選択ノートが重なっていません"}
+                return {"notes": self._note_dicts(), "indices": sorted(valid), "changed": False, "status": tr("msg.cut_no_overlap")}
 
             # The full cut must succeed before recording a history step.
             self._push_undo()
             self.notes = new_notes
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{changed}個のノートから指定区間を切り取りました"
+            self._status = tr("msg.cut", count=changed)
             return {"notes": self._note_dicts(), "indices": new_indices, "changed": True, "status": self._status}
 
     def duplicate_notes_shifted(self, indices: list[int], dx: float, dy: float) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": tr("msg.no_selection")}
             source = [self.notes[i].normalized() for i in valid]
             min_start = min(n.start for n in source)
             max_end = max(n.end for n in source)
@@ -216,14 +217,14 @@ class EditingMixin:
             new_indices = list(range(first_index, first_index + len(copies)))
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(new_indices)}個のノートをドラッグ複製しました"
+            self._status = tr("msg.drag_duplicated", count=len(new_indices))
             return {"notes": self._note_dicts(), "indices": new_indices, "status": self._status}
 
     def bulk_edit_notes(self, indices: list[int], changes: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_selection")}
             if not isinstance(changes, dict):
                 raise TypeError("changes must be an object")
 
@@ -281,7 +282,7 @@ class EditingMixin:
             # A no-op must not clear Redo, create an empty Undo step, or dirty
             # the document. Build all notes first so errors are atomic too.
             if updated == notes:
-                self._status = "ノートの一括編集で変更はありませんでした"
+                self._status = tr("msg.bulk_no_change")
                 return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
 
             self._push_undo()
@@ -289,5 +290,5 @@ class EditingMixin:
                 self.notes[i] = edited
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(valid)}個のノートを一括編集しました"
+            self._status = tr("msg.bulk_edited", count=len(valid))
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}

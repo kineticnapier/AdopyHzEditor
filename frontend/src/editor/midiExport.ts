@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 type MidiExportResult = { status: string };
 
 export async function runMidiExport(
@@ -9,6 +10,6 @@ export async function runMidiExport(
     setStatus(result.status);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    setStatus(`MIDI出力に失敗しました: ${detail}`);
+    setStatus(t("status.midi_export_failed", { error: detail }));
   }
 }

@@ -167,4 +167,5 @@ def tr(key: str, **kwargs) -> str:
     return text
 
 
-load_language(load_app_language())
+# Japanese until the app reads the saved choice (web_ui.main); tests rely on it.
+load_language("ja")

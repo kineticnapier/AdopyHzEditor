@@ -67,7 +67,7 @@ class ToolsMixin:
             self.player.seek(0.0)
             self._sync_notes_to_player()
             self._dirty = True
-            self._status = f"Blank workspace: {duration:.3f}s / MIDI {midi_min}-{midi_max}"
+            self._status = tr("msg.blank_workspace", seconds=f"{duration:.3f}", low=midi_min, high=midi_max)
             return self._state_dict()
 
     def load_project_notes_only_dialog(self) -> dict[str, Any]:
@@ -88,7 +88,7 @@ class ToolsMixin:
             self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
             self._dirty = True
-            self._status = f"Loaded notes only: {Path(path).name}"
+            self._status = tr("msg.loaded_notes_only", name=Path(path).name)
             return self._state_dict()
 
     def merge_project_notes_dialog(self) -> dict[str, Any]:
@@ -98,7 +98,7 @@ class ToolsMixin:
         _audio, notes, _settings = load_project(path)
         if not notes:
             with self._lock:
-                self._status = f"No notes in {Path(path).name}"
+                self._status = tr("msg.no_notes_in", name=Path(path).name)
                 return self._state_dict()
         with self._lock:
             self._push_undo()
@@ -111,7 +111,7 @@ class ToolsMixin:
                 self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
             self._dirty = True
-            self._status = f"Merged {len(notes)} note(s) from {Path(path).name}"
+            self._status = tr("msg.merged_notes", count=len(notes), name=Path(path).name)
             return self._state_dict()
 
     def _fit_blank_bounds_to_notes(self) -> None:
@@ -143,7 +143,7 @@ class ToolsMixin:
     def export_selected_midi_dialog(self, indices: list[int]) -> dict[str, Any]:
         valid = sorted({int(i) for i in indices if 0 <= int(i) < len(self.notes)})
         if not valid:
-            return {"ok": False, "status": "No selected notes"}
+            return {"ok": False, "status": tr("msg.no_selected_notes")}
         path = self._dialog(webview.FileDialog.SAVE, file_types=MIDI_FILE_TYPES, save_filename="selected.mid")
         if not path:
             return {"ok": False, "status": "Cancelled"}
@@ -155,7 +155,7 @@ class ToolsMixin:
             bpm = float(self.settings["bpm"])
         export_midi(notes, path, bpm=bpm)
         with self._lock:
-            self._status = f"Exported {len(notes)} selected note(s): {Path(path).name}"
+            self._status = tr("msg.exported_selected", count=len(notes), name=Path(path).name)
         return {"ok": True, "path": str(path), "status": self._status}
 
     # ------------------------------------------------------------------

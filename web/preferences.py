@@ -15,7 +15,7 @@ from typing import Any
 
 from app_metadata import APP_NAME, APP_VERSION, GITHUB_LATEST_RELEASE_API, GITHUB_RELEASES_URL
 from exporters.adofai_kps import HUMAN_KPS_LIMIT
-from i18n import available_languages, current_language, set_language
+from i18n import available_languages, current_language, set_language, tr
 from web.io import DEFAULT_EDITOR_SETTINGS
 
 PREFERENCES_KEY = "preferences"
@@ -266,9 +266,9 @@ class PreferencesMixin:
                     self._load_project_path(last)
                     reopened = last
                 except Exception as exc:  # a broken file must not stop startup
-                    reopen_error = f"前回のプロジェクトを開けませんでした: {exc}"
+                    reopen_error = tr("msg.reopen_failed", error=exc)
             else:
-                reopen_error = f"前回のプロジェクトが見つかりません: {last}"
+                reopen_error = tr("msg.reopen_missing", path=last)
         if reopen_error:
             with self._lock:
                 self._status = reopen_error

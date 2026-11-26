@@ -12,6 +12,7 @@ from exporters.midi import export_midi
 from importers.midi import cleanup_imported_midi_notes, import_midi
 from core.note_model import Note
 from core.project_io import load_project, save_project
+from i18n import tr
 
 AUDIO_FILE_TYPES = ("音声ファイル (*.wav;*.mp3;*.ogg;*.flac;*.m4a;*.aac)", "すべてのファイル (*.*)")
 PROJECT_FILE_TYPES = ("AdopyHzEditorプロジェクト (*.adopyhz;*.ahe.json)", "JSON (*.json)", "すべてのファイル (*.*)")
@@ -153,7 +154,7 @@ class IOMixin:
             # Keep an unresolved project audio reference until the user relinks
             # or explicitly creates a derived audio-less workspace.
             audio_reference = self.audio_path or self.project_audio_reference
-            save_project(path,audio_path=audio_reference,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._saved_checkpoint=self._document_checkpoint();self._dirty=False;self._status=f"{Path(path).name} を保存しました";state=self._state_dict()
+            save_project(path,audio_path=audio_reference,notes=self.notes,settings=self._project_settings());self.project_path=str(Path(path).resolve());self._saved_checkpoint=self._document_checkpoint();self._dirty=False;self._status=tr("msg.saved", name=Path(path).name);state=self._state_dict()
         self._remember_last_project(path)
         return state
 
@@ -246,7 +247,7 @@ class IOMixin:
             self.project_path=str(Path(path).resolve())
             self.project_audio_reference=str(audio_path) if audio_path else None
             self._dirty=False
-            self._status=f"{Path(path).name} を読み込みました"
+            self._status=tr("msg.loaded", name=Path(path).name)
             if prepared_audio is not None and audio_path:
                 decoded,spec,analysis_stats,analysis_kind=prepared_audio
                 self._commit_prepared_audio(
@@ -260,20 +261,20 @@ class IOMixin:
                 self._apply_player_settings()
                 self._sync_notes_to_player()
                 if analysis_kind=="direct_pending":
-                    self._status=f"{Path(path).name} と音声を読み込みました（Vorbis Direct解析待ち）"
+                    self._status=tr("msg.loaded_with_audio_pending", name=Path(path).name)
                 elif analysis_kind=="fallback":
-                    self._status=f"{Path(path).name} と音声を読み込みました（Vorbis Direct非対応のためCQT）"
+                    self._status=tr("msg.loaded_with_audio_fallback", name=Path(path).name)
                 else:
-                    self._status=f"{Path(path).name} と音声を読み込みました"
+                    self._status=tr("msg.loaded_with_audio", name=Path(path).name)
             else:
                 self._detach_active_audio()
                 assert workspace_bounds is not None
                 self.duration, self.midi_min, self.midi_max = workspace_bounds
                 self.pitch_step=1.0;self.player.clear_audio();self._apply_player_settings();self._sync_notes_to_player()
                 if audio_path:
-                    self._status=f"{Path(path).name} の音源が見つかりません。ファイル → プロジェクト音源を再指定… から選び直せます"
+                    self._status=tr("msg.audio_missing", name=Path(path).name)
                 else:
-                    self._status=f"{Path(path).name} のノートを読み込みました"
+                    self._status=tr("msg.loaded_notes", name=Path(path).name)
             self._saved_checkpoint=self._document_checkpoint();self._dirty=False
         self._remember_last_project(path)
         return self.get_state()
@@ -281,7 +282,7 @@ class IOMixin:
     def relink_project_audio_dialog(self) -> dict[str, Any]:
         with self._lock:
             if not self.project_path:
-                self._status="先にプロジェクトを読み込んでください"
+                self._status=tr("msg.load_project_first")
                 return self._state_dict()
 
         path=self._dialog(webview.FileDialog.OPEN,file_types=AUDIO_FILE_TYPES)
@@ -295,11 +296,11 @@ class IOMixin:
                 # Rebuild preview notes because the audio sample rate may have changed.
                 self._sync_notes_to_player();self._dirty=True
                 suffix = (
-                    "（Vorbis Direct解析待ち）"
+                    tr("msg.direct_pending_suffix")
                     if bool(self.analysis_stats.get("pending"))
                     else ""
                 )
-                self._status=f"プロジェクト音源を {Path(source).name} に再指定しました{suffix}"
+                self._status=tr("msg.relinked", name=Path(source).name, suffix=suffix)
         finally:
             with self._lock:self._busy=False
         return self.get_state()
@@ -350,15 +351,15 @@ class IOMixin:
         """
         path = getattr(self, "_pending_midi_path", None)
         if not path:
-            raise ValueError("MIDIファイルが選択されていません")
+            raise ValueError(tr("msg.no_midi_file"))
         indices: set[int] = set()
         for value in track_indices or []:
             if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) != int(value):
-                raise ValueError("トラック番号が不正です")
+                raise ValueError(tr("msg.bad_track_index"))
             indices.add(int(value))
         if not indices:
             with self._lock:
-                self._status = "読み込むトラックが選ばれていません"
+                self._status = tr("msg.no_tracks_chosen")
                 return self._state_dict()
         result = import_midi(path, track_indices=indices)
         self._pending_midi_path = None
@@ -373,7 +374,7 @@ class IOMixin:
         state = self._apply_imported_midi_notes(notes, _midi_tempo_bpm(result))
         if merged:
             with self._lock:
-                self._status += f"（重なった同じ音{merged}個を1つにまとめました）"
+                self._status += tr("msg.midi_merged_suffix", count=merged)
                 state["status"] = self._status
         return state
 
@@ -382,7 +383,7 @@ class IOMixin:
             # An empty MIDI import must not create an Undo step, erase Redo,
             # or mark an otherwise unchanged project as modified.
             if not imported:
-                self._status = "MIDIに読み込めるノートがありませんでした"
+                self._status = tr("msg.midi_no_notes")
                 return self._state_dict()
             # Prepare and validate every incoming note before modifying history
             # or the document. A malformed later note must not leave a partial
@@ -407,31 +408,31 @@ class IOMixin:
             self.duration = new_duration
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"MIDIから{len(prepared)}個のノートを読み込みました"
+            self._status = tr("msg.midi_imported", count=len(prepared))
             if tempo_bpm is not None:
                 # MIDI time 0 is the start of bar 1, so the grid offset is 0.
                 tempo = {"bpm": self._normalize_setting("bpm", tempo_bpm), "offsetMs": 0.0}
                 if any(self.settings.get(k) != v for k, v in tempo.items()):
                     self.settings.update(tempo)
                     self._apply_player_settings()
-                    self._status += f"（BPMを{tempo['bpm']:g}に設定）"
+                    self._status += tr("msg.midi_bpm_suffix", bpm=f"{tempo['bpm']:g}")
             return self._state_dict()
 
     def export_midi_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.SAVE,file_types=MIDI_FILE_TYPES,save_filename="notes.mid")
-        if not path:return {"ok":False,"status":"キャンセルしました"}
+        if not path:return {"ok":False,"status":tr("msg.cancelled")}
         if Path(path).suffix.lower() not in {".mid",".midi"}:path+=".mid"
         with self._lock:notes=self._shifted_export_notes();bpm=float(self.settings["bpm"])
         export_midi(notes,path,bpm=bpm)
-        with self._lock:self._status=f"{Path(path).name} をMIDI出力しました"
+        with self._lock:self._status=tr("msg.midi_exported", name=Path(path).name)
         return {"ok":True,"path":str(path),"status":self._status}
 
     def export_adofai_dialog(self) -> dict[str, Any]:
         path=self._dialog(webview.FileDialog.SAVE,file_types=ADOF_FILE_TYPES,save_filename="level.adofai")
-        if not path:return {"ok":False,"status":"キャンセルしました"}
+        if not path:return {"ok":False,"status":tr("msg.cancelled")}
         if Path(path).suffix.lower()!=".adofai":path+=".adofai"
         with self._lock:notes=self._shifted_export_notes();song_filename=Path(self.audio_path).name if self.audio_path else None;offset_ms=float(self.settings["offsetMs"])
         level,stats=build_adofai_level(notes,method="rabbit_zip",song_filename=song_filename,song_offset_ms=offset_ms)
         Path(path).write_text(json.dumps(level,ensure_ascii=False,indent=2),encoding="utf-8")
-        with self._lock:self._status=f"{Path(path).name} をADOFAI出力しました（{stats.get('tiles_total',0)}タイル）"
+        with self._lock:self._status=tr("msg.adofai_exported", name=Path(path).name, tiles=stats.get("tiles_total", 0))
         return {"ok":True,"path":str(path),"stats":stats,"status":self._status}

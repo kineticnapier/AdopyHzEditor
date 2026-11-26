@@ -5,6 +5,7 @@ import { getLanguage, normalizeLanguage, setLanguage, t } from "../src/i18n/inde
 import { ja } from "../src/i18n/ja.ts";
 import { workspaceTitle } from "../src/editor/emptyState.ts";
 import { playbackStatusMessage } from "../src/components/playbackStatusMessage.ts";
+import { selectionStatusText } from "../src/editor/selectionAnnouncement.ts";
 
 test("both languages have every key and no empty text", () => {
   assert.deepEqual(Object.keys(en).sort(), Object.keys(ja).sort());
@@ -21,6 +22,9 @@ test("switching the language changes the text, with parameters filled in", () =>
     assert.equal(t("menu.file"), "File");
     assert.equal(workspaceTitle(null, false), "Empty workspace");
     assert.equal(playbackStatusMessage({ available: false, error: "boom" }), "Playback error: boom");
+    const notes = [{ start: 1.25, end: 2, midi: 60 }, { start: 2.5, end: 3, midi: 64 }] as never;
+    assert.equal(selectionStatusText(notes, [0, 1], [], null), "2 notes selected (#1, #2)");
+    assert.equal(selectionStatusText(notes, [], [], null), "Nothing selected");
   } finally {
     setLanguage("ja");
   }
