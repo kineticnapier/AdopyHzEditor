@@ -17,7 +17,7 @@ except ImportError as exc:
     ) from exc
 
 from core.note_model import Note
-from i18n import language_config_path, set_language, tr
+from i18n import language_config_path, set_language, system_default_language, tr
 import web.backend as web_backend_module
 
 from web.backend import Bridge as CoreBridge
@@ -315,9 +315,9 @@ def _saved_language() -> str | None:
 
 def main() -> int:
     _quiet_qt_environment()
-    # Japanese unless the user picked another language in 環境設定; the
+    # The language picked in 環境設定, or on first launch Windows' own; the
     # screens get the same language from apply_startup_preferences.
-    set_language(_saved_language() or "ja", save=False)
+    set_language(_saved_language() or system_default_language(), save=False)
     bridge = Bridge()
     bridge._preferences_file = language_config_path()
     window = webview.create_window(

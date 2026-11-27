@@ -82,7 +82,28 @@ def available_languages() -> list[str]:
     return sorted(langs) or ["en", "ja"]
 
 
+# Primary language ID of a Windows LANGID (low 10 bits); 0x11 is Japanese.
+_WINDOWS_LANG_JAPANESE = 0x11
+
+
+def _windows_ui_language_is_japanese() -> bool | None:
+    """Windows' display language, or None off Windows or if it cannot be read."""
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import ctypes
+
+        langid = int(ctypes.windll.kernel32.GetUserDefaultUILanguage())
+    except Exception:
+        return None
+    return (langid & 0x3FF) == _WINDOWS_LANG_JAPANESE
+
+
 def system_default_language() -> str:
+    """Japanese on a Japanese system, otherwise English."""
+    windows = _windows_ui_language_is_japanese()
+    if windows is not None:
+        return "ja" if windows else "en"
     try:
         code = (locale.getlocale()[0] or locale.getdefaultlocale()[0] or "").lower()
     except Exception:
