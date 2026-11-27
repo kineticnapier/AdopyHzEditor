@@ -11,9 +11,9 @@ import { acceptSettingsPatch } from "./settings/settingsChange";
 import { settingsResponseIsCurrent } from "./settings/settingsResponseFreshness";
 import {
   BlankWorkspaceDialog,
-  HarmonicDiagramDialog,
   MidiTrackDialog,
   UpdateDialog,
+  PreferencesDialog,
 } from "./dialogs/ToolDialogs";
 import { useDialogAccessibility } from "./dialogs/useDialogAccessibility";
 import Timeline from "./editor/Timeline";
@@ -68,6 +68,7 @@ import {
   runWithErrorFeedback,
 } from "./api/requestCoordinator";
 import type { ToolBackendApi } from "./api/toolsBridge";
+import { setLanguage, t, useLanguage } from "./i18n/index.ts";
 
 const defaultSettings: EditorSettings = {
   volume: 85,
@@ -116,7 +117,7 @@ const defaultPlayback: PlaybackState = {
   available: false,
   error: null,
 };
-type ToolDialog = "blank" | "harmonic" | "update" | null;
+type ToolDialog = "blank" | "update" | "preferences" | null;
 type PendingDestructiveAction = {
   label: string;
   run(): void | Promise<void>;
@@ -148,20 +149,20 @@ function UnsavedChangesDialog({
         aria-labelledby={titleId}
       >
         <header className="modal-title">
-          <strong id={titleId}>未保存の変更</strong>
+          <strong id={titleId}>{t("unsaved.title")}</strong>
         </header>
         <div className="dialog-body export-dialog-body">
-          <div className="info-card">「{label}」の前に変更を保存しますか？</div>
+          <div className="info-card">{t("unsaved.question", { label })}</div>
         </div>
         <div className="dialog-footer">
           <button className="primary" disabled={saving} onClick={onSave}>
-            {saving ? "保存中…" : "保存"}
+            {saving ? t("unsaved.saving") : t("dialog.save")}
           </button>
           <button disabled={saving} onClick={onDiscard}>
-            保存せず続行
+            {t("unsaved.discard")}
           </button>
           <button disabled={saving} onClick={onCancel}>
-            キャンセル
+            {t("dialog.cancel")}
           </button>
         </div>
       </section>
@@ -170,6 +171,7 @@ function UnsavedChangesDialog({
 }
 
 export default function App() {
+  useLanguage();
   const [api, setApi] = useState<BackendApi | null>(null),
     [connected, setConnected] = useState(false),
     [settings, setSettings] = useState(defaultSettings),
@@ -190,7 +192,7 @@ export default function App() {
     [projectPath, setProjectPath] = useState<string | null>(null),
     [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(false),
-    [status, setStatus] = useState("準備完了");
+    [status, setStatus] = useState("");
   const [adoExportOpen, setAdoExportOpen] = useState(false),
     [adoExportSelectedOnly,setAdoExportSelectedOnly]=useState(false),
     [helpSection, setHelpSection] = useState<string | null>(null),
@@ -337,7 +339,7 @@ export default function App() {
     setProjectPath(state.projectPath);
     setDirty(state.dirty);
     setBusy(state.busy);
-    setStatus(state.status || "準備完了");
+    setStatus(state.status || "");
   }
   async function refreshSpectrum(
     backend = api,
@@ -369,8 +371,27 @@ export default function App() {
     } catch (e) {
       if (spectrumRequests.current.isCurrent(request)) {
         setSpectrum(null);
-        setStatus(`スペクトラム取得失敗: ${String(e)}`);
+        setStatus(t("status.spectrum_failed", { error: String(e) }));
       }
+    }
+  }
+
+  /** 環境設定: new-project defaults, reopening the last project, update check. */
+  async function applyStartupPreferences(backend: ToolBackendApi, isActive: () => boolean) {
+    if (typeof backend.apply_startup_preferences !== "function") return;
+    try {
+      const startup = await backend.apply_startup_preferences();
+      if (!isActive()) return;
+      setLanguage(startup.language);
+      applyState(startup.state);
+      if (startup.reopened && shouldFetchCqtSpectrum(startup.state.analysis.available, startup.state.analysis.source, startup.state.view.mode))
+        await refreshSpectrum(backend, startup.state.view);
+      if (startup.checkUpdates) {
+        const update = await backend.check_for_update();
+        if (isActive() && update.ok && update.newer) setToolDialog("update");
+      }
+    } catch (e) {
+      if (isActive()) setStatus(t("status.prefs_failed", { error: String(e) }));
     }
   }
 
@@ -387,7 +408,7 @@ export default function App() {
         try {
           const ping = await backend.ping();
           if (!active) return;
-          if (!ping.ok) throw new Error("バックエンドの準備が完了していません");
+          if (!ping.ok) throw new Error(t("status.backend_not_ready"));
           // Do not expose an API to controls or polling before the initial
           // state is loaded. A failed get_state must leave the UI disconnected.
           const state = await backend.get_state();
@@ -397,11 +418,12 @@ export default function App() {
           setConnected(ping.ok);
           if (shouldFetchCqtSpectrum(state.analysis.available, state.analysis.source, state.view.mode))
             await refreshSpectrum(backend, state.view);
+          void applyStartupPreferences(backend as ToolBackendApi, () => active);
           return;
         } catch (e) {
           if (!active) return;
           setConnected(false);
-          setStatus(`バックエンド接続を再試行中: ${String(e)}`);
+          setStatus(t("status.backend_retry", { error: String(e) }));
           await new Promise((resolve) => window.setTimeout(resolve, 500));
         }
       }
@@ -654,7 +676,7 @@ export default function App() {
       // Follow updates must share the manual viewport queue and failure recovery.
       // Otherwise an in-flight follow write can overtake a user's pan/zoom.
       if (api && stateTransitionPending.current === 0)
-        void applyViewAction(() => api.set_view({ start: next }), "再生追従");
+        void applyViewAction(() => api.set_view({ start: next }), t("status.follow"));
     }
   }, [
     api,
@@ -670,11 +692,11 @@ export default function App() {
     // Settings remain visible while the initial backend connection is loading.
     // Never mark an unsent edit dirty or queue it without a usable API.
     if (!api || !connected) {
-      setStatus("バックエンド接続完了まで設定を変更できません");
+      setStatus(t("status.settings_wait_backend"));
       return;
     }
     if (stateTransitionPending.current > 0) {
-      setStatus("プロジェクト処理中は設定を変更できません");
+      setStatus(t("status.settings_busy"));
       return;
     }
     // The backend also treats unchanged batches as no-ops. Do not create a
@@ -725,7 +747,7 @@ export default function App() {
         } catch (e) {
           // A newer edit or document may have arrived while the request failed.
           if (isCurrent()) {
-            setStatus(`設定の更新に失敗しました: ${String(e)}`);
+            setStatus(t("status.settings_failed", { error: String(e) }));
             try {
               const recovered = (await api.get_state()).settings;
               // Recheck after awaiting recovery: do not overwrite edits made meanwhile.
@@ -760,21 +782,21 @@ export default function App() {
       isCurrent,
       applyViewState,
       async (error) => {
-        setStatus(`${label}に失敗しました: ${String(error)}`);
+        setStatus(t("status.action_failed", { label, error: String(error) }));
         try {
           // Read the backend's actual view, not the optimistic local value.
           const state = await viewQueue.current.enqueue(() => api.get_state());
           if (isCurrent()) applyViewState(state.view);
         } catch (recoveryError) {
           if (isCurrent())
-            setStatus(`表示範囲の再取得に失敗しました: ${String(recoveryError)}`);
+            setStatus(t("status.view_recover_failed", { error: String(recoveryError) }));
         }
       },
     );
   }
   async function updateView(changes: Partial<ViewState>) {
     if (stateTransitionPending.current > 0) {
-      setStatus("プロジェクト処理中は表示範囲を変更できません");
+      setStatus(t("status.view_busy"));
       return;
     }
     // Match Bridge.set_view time and MIDI bounds before optimistic rendering.
@@ -791,21 +813,21 @@ export default function App() {
       setHoveredTrack(null);
     }
     applyViewChanges(normalized);
-    if (api) await applyViewAction(() => api.set_view(normalized), "表示範囲の変更");
+    if (api) await applyViewAction(() => api.set_view(normalized), t("status.view_change"));
   }
   async function fitView() {
     if (stateTransitionPending.current > 0) {
-      setStatus("プロジェクト処理中は表示範囲を変更できません");
+      setStatus(t("status.view_busy"));
       return;
     }
     setFollowPlayback(false);
-    if (api) await applyViewAction(() => api.fit_view(), "全体表示");
+    if (api) await applyViewAction(() => api.fit_view(), t("status.fit"));
   }
   async function performStateAction(
     action: () => Promise<AppState>,
     clearSelection = false,
   ): Promise<AppState> {
-    if (!api) throw new Error("バックエンドに接続されていません");
+    if (!api) throw new Error(t("status.not_connected"));
     stateTransitionPending.current += 1;
     // A pending CQT peak belongs to the previous document or analysis state.
     peakRequest.current.invalidate();
@@ -857,7 +879,7 @@ export default function App() {
     }
     if (picked.cancelled) return;
     if (picked.tracks.length === 0) {
-      setStatus("MIDIに読み込めるノートがありませんでした");
+      setStatus(t("status.midi_no_notes"));
       return;
     }
     if (picked.tracks.length === 1) {
@@ -925,7 +947,7 @@ export default function App() {
       if (!state) return;
       if (state.dirty) {
         await cancelPendingDestructive(
-          "保存がキャンセルされたため、操作を中止しました",
+          t("status.save_cancelled"),
         );
         return;
       }
@@ -988,7 +1010,7 @@ export default function App() {
       ),
       () => undefined,
       (message) => {
-        if (generation === documentGeneration.current) setStatus(`ノート編集に失敗しました: ${message}`);
+        if (generation === documentGeneration.current) setStatus(t("status.edit_failed", { error: message }));
       },
     );
   }
@@ -1098,7 +1120,7 @@ export default function App() {
           () => generation === documentGeneration.current && latestNotes.current === snapshot,
         ),
         () => undefined,
-        (message) => { if (generation === documentGeneration.current) setStatus(`コピーに失敗しました: ${message}`); },
+        (message) => { if (generation === documentGeneration.current) setStatus(t("status.copy_failed", { error: message })); },
       );
     }
   }
@@ -1147,7 +1169,7 @@ export default function App() {
         () => generation === documentGeneration.current,
       ),
       () => undefined,
-      (message) => { if (generation === documentGeneration.current) setStatus(`再生操作に失敗しました: ${message}`); },
+      (message) => { if (generation === documentGeneration.current) setStatus(t("status.playback_failed", { error: message })); },
     );
   }
   async function seekTo(t: number) {
@@ -1296,19 +1318,19 @@ export default function App() {
       : 0.01;
   const openAudioSafely = () =>
     api &&
-    requestDestructive("音声を開く", () =>
+    requestDestructive(t("unsaved.open_audio"), () =>
       runStateAction(() => api.open_audio()),
     );
   const loadProjectSafely = () =>
     api &&
-    requestDestructive("プロジェクトを読み込む", () =>
+    requestDestructive(t("unsaved.load_project"), () =>
       runStateAction(() => api.load_project_dialog(), true),
     );
   useEffect(() => {
     if (!api) return;
     const requested = () =>
       setPendingDestructive({
-        label: "ウィンドウを閉じる",
+        label: t("unsaved.close_window"),
         run: async () => {
           await api.close_window();
         },
@@ -1373,12 +1395,12 @@ export default function App() {
       onExportMidi={() => exportMidi()}
       onExportAdo={() => {setAdoExportSelectedOnly(false);setAdoExportOpen(true)}}
       onBlankWorkspace={() =>
-        requestDestructive("空のワークスペースへ切り替える", () =>
+        requestDestructive(t("unsaved.blank_workspace"), () =>
           setToolDialog("blank"),
         )
       }
       onLoadNotesOnly={() =>
-        requestDestructive("ノートだけ読み込む", () =>
+        requestDestructive(t("unsaved.load_notes_only"), () =>
           runStateAction(() => toolsApi.load_project_notes_only_dialog(), true),
         )
       }
@@ -1391,7 +1413,7 @@ export default function App() {
       onExportSelectedMidi={() => exportMidi(true)}
       onExportSelectedAdo={() => {
         setAdoExportSelectedOnly(true);setAdoExportOpen(true);
-        setStatus("ADOFAI出力で「選択ノートのみ」を使用できます");
+        setStatus(t("status.selected_export_hint"));
       }}
       onUndo={() => void undo()}
       onRedo={() => void redo()}
@@ -1399,9 +1421,9 @@ export default function App() {
       onQuantize={() => void quantize()}
       onMoveOctave={(semitones) => void moveNotes(selected, 0, semitones)}
       onSplit={() => void splitSelected()}
-      onHarmonicDiagram={() => setToolDialog("harmonic")}
       onReanalyze={() => stateAction(() => toolsApi.reanalyze_audio())}
       onUpdates={() => setToolDialog("update")}
+      onPreferences={() => setToolDialog("preferences")}
       onHelp={() => setHelpSection("quick_start")}
     />
   ) : null;
@@ -1458,12 +1480,12 @@ export default function App() {
             />
             {shouldShowCanvasEmptyHint(audioName, notes.length) && (
               <div className="canvas-empty" aria-hidden="true">
-                <strong>ノートを追加するか、音源を開く</strong>
+                <strong>{t("frame.empty_title")}</strong>
                 <span>
-                  ドラッグでノート作成 / ファイル → 音声を開く…{" "}
+                  {t("frame.empty_drag")}{" "}
                   <kbd>Ctrl+O</kbd>
                 </span>
-                <small>音源がない空のワークスペースでも採譜できます。</small>
+                <small>{t("frame.empty_blank")}</small>
               </div>
             )}
           </div>
@@ -1527,10 +1549,10 @@ export default function App() {
         )}
       </main>
       <footer className="statusbar" role="status" aria-live="polite">
-        <span>{busy ? "処理中…" : status}</span>
+        <span>{busy ? t("dialog.processing") : status || t("frame.ready")}</span>
         <span>
-          {projectPath ? projectPath.split(/[\\/]/).pop() : "プロジェクトなし"}{" "}
-          · Note {notes.length}個
+          {projectPath ? projectPath.split(/[\\/]/).pop() : t("frame.no_project")}{" "}
+          · {t("frame.note_count", { count: notes.length })}
         </span>
       </footer>
       {adoExportOpen && api && (
@@ -1564,16 +1586,6 @@ export default function App() {
           }}
         />
       )}{" "}
-      {toolDialog === "harmonic" && toolsApi && (
-        <HarmonicDiagramDialog
-          api={toolsApi}
-          selected={selected}
-          documentGeneration={documentGeneration.current}
-          onClose={() => setToolDialog(null)}
-          onStatus={setStatus}
-          onQueuedMutation={queueExternalMutation}
-        />
-      )}{" "}
       {midiTrackPick && api && (
         <MidiTrackDialog
           fileName={midiTrackPick.fileName}
@@ -1585,6 +1597,14 @@ export default function App() {
           }}
         />
       )}{" "}
+      {toolDialog === "preferences" && toolsApi && (
+        <PreferencesDialog
+          api={toolsApi}
+          settings={settings}
+          onClose={() => setToolDialog(null)}
+          onStatus={setStatus}
+        />
+      )}
       {toolDialog === "update" && toolsApi && (
         <UpdateDialog
           api={toolsApi}

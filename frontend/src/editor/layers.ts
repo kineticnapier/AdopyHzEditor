@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import type { NoteDto } from "../api/bridge";
 
 // Notes carry the layer they came from (e.g. a MIDI track name).  "" stands
@@ -15,7 +16,7 @@ export function summarizeLayers(notes: readonly NoteDto[]): LayerSummary[] {
     const name = noteLayer(note);
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
-  return [...counts].map(([name, count]) => ({ name, label: name || "レイヤーなし", count }));
+  return [...counts].map(([name, count]) => ({ name, label: name || t("layers.none"), count }));
 }
 
 export function isLayerMuted(note: NoteDto, muted: readonly string[] | undefined): boolean {

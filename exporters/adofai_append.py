@@ -17,6 +17,7 @@ existing level ends.
 from __future__ import annotations
 
 import json
+from i18n import tr
 from typing import Any
 
 MIDSPIN = 999
@@ -77,9 +78,9 @@ def load_adofai_text(text: str) -> dict[str, Any]:
         try:
             data = json.loads(_strip_trailing_commas(text))
         except json.JSONDecodeError as exc:
-            raise AppendError(f"譜面ファイルを読み込めません: {exc}") from exc
+            raise AppendError(tr("msg.chart_file_unreadable", error=exc)) from exc
     if not isinstance(data, dict):
-        raise AppendError("譜面ファイルの形式が正しくありません")
+        raise AppendError(tr("msg.chart_bad_format"))
     return data
 
 
@@ -107,10 +108,8 @@ def append_level(base: dict[str, Any], generated: dict[str, Any]) -> tuple[dict[
     """Return ``(merged_level, info)``; neither input is modified."""
     if not isinstance(base.get("angleData"), list):
         if "pathData" in base:
-            raise AppendError(
-                "古い形式（pathData）の譜面には追記できません。ADOFAIで一度開いて保存し直してから選んでください"
-            )
-        raise AppendError("譜面にタイル情報（angleData）がありません")
+            raise AppendError(tr("msg.chart_path_data"))
+        raise AppendError(tr("msg.chart_no_angle_data"))
     base_angles = list(base["angleData"])
     gen_angles = list(generated["angleData"])
     joint = len(base_angles)  # last floor of the existing level
@@ -173,7 +172,7 @@ def append_level(base: dict[str, Any], generated: dict[str, Any]) -> tuple[dict[
 
     warnings = []
     if any(a.get("eventType") == "MultiPlanet" for a in base_actions):
-        warnings.append("既存譜面に MultiPlanet があるため、追記部分の角度がずれる可能性があります")
+        warnings.append(tr("msg.chart_multiplanet"))
     info = {
         "baseFloors": _floor_count(base),
         "addedFloors": len(gen_angles),

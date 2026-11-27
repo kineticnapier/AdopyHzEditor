@@ -14,6 +14,7 @@ import math
 import numpy as np
 
 from core.note_model import Note
+from i18n import tr
 from web.editing import MIN_NOTE_DURATION
 
 
@@ -284,7 +285,7 @@ def find_frequency_tracks(
         store = getattr(self, "frequency_track_store", None)
         duration = float(self.duration)
     if store is None:
-        return {"trackIds": [], "status": "Frequency Tracks を先に解析してください"}
+        return {"trackIds": [], "status": tr("msg.tracks_first")}
 
     raw_start, raw_end = sorted((
         _finite_number(start_time, "start_time"),
@@ -297,7 +298,7 @@ def find_frequency_tracks(
     # A rectangle wholly outside the timeline or MIDI range must not snap to
     # the nearest boundary and accidentally select a track at 0s / MIDI 0/127.
     if raw_end < 0.0 or raw_start > duration or raw_max < 0.0 or raw_min > 127.0:
-        return {"trackIds": [], "status": "Frequency Track を0本選択しました"}
+        return {"trackIds": [], "status": tr("msg.tracks_selected", count=0, suffix="")}
     start = max(0.0, raw_start)
     end = min(duration, raw_end)
     midi_min = max(0.0, raw_min)
@@ -314,10 +315,10 @@ def find_frequency_tracks(
             if len(found) >= _MAX_TRACK_SELECTION:
                 truncated = True
                 break
-    suffix = "（上限10000本で打ち切り）" if truncated else ""
+    suffix = tr("msg.tracks_truncated") if truncated else ""
     return {
         "trackIds": found,
-        "status": f"Frequency Track を{len(found)}本選択しました{suffix}",
+        "status": tr("msg.tracks_selected", count=len(found), suffix=suffix),
     }
 
 
@@ -346,7 +347,7 @@ def create_notes_from_tracks(
                 "notes": self._note_dicts(),
                 "indices": [],
                 "changed": False,
-                "status": "Frequency Tracks を先に解析してください",
+                "status": tr("msg.tracks_first"),
             }
 
         valid_ids = sorted(
@@ -363,7 +364,7 @@ def create_notes_from_tracks(
                 "notes": self._note_dicts(),
                 "indices": [],
                 "changed": False,
-                "status": "Track が選択されていません",
+                "status": tr("msg.no_tracks_selected"),
             }
 
         # Normalize the requested interval before clipping it to the audio.
@@ -378,7 +379,7 @@ def create_notes_from_tracks(
                 "notes": self._note_dicts(),
                 "indices": [],
                 "changed": False,
-                "status": "指定範囲にNote化できるTrackがありません",
+                "status": tr("msg.no_tracks_in_range"),
             }
         clip_start = None if raw_start is None else max(0.0, raw_start)
         clip_end = None if raw_end is None else min(duration, raw_end)
@@ -405,7 +406,7 @@ def create_notes_from_tracks(
                 "notes": self._note_dicts(),
                 "indices": [],
                 "changed": False,
-                "status": "指定範囲にNote化できるTrackがありません",
+                "status": tr("msg.no_tracks_in_range"),
             }
 
         self._push_undo()
@@ -414,8 +415,8 @@ def create_notes_from_tracks(
         indices = list(range(first_index, first_index + len(created)))
         self._dirty = True
         self._sync_notes_to_player()
-        label = "Curve Note" if conversion_mode == "curve" else "固定Note"
-        self._status = f"Frequency Track {len(created)}本を{label}へ変換しました"
+        key = "msg.tracks_converted_curve" if conversion_mode == "curve" else "msg.tracks_converted_fixed"
+        self._status = tr(key, count=len(created))
         return {
             "notes": self._note_dicts(),
             "indices": indices,

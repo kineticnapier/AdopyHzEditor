@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 /** Keep the update dialog open when the system browser could not be launched. */
 export async function runReleasePageAction(
   openPage: () => Promise<{ ok: boolean; url: string }>,
@@ -7,11 +8,11 @@ export async function runReleasePageAction(
   try {
     const result = await openPage();
     if (!result.ok) {
-      onError(`リリースページを開けませんでした。URL: ${result.url}`);
+      onError(t("release.open_failed_url", { url: result.url }));
       return;
     }
     onOpened();
   } catch (error) {
-    onError(`リリースページを開けませんでした: ${String(error)}`);
+    onError(t("release.open_failed", { error: String(error) }));
   }
 }

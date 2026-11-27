@@ -6,7 +6,7 @@ const toolbar = readFileSync(new URL("../src/components/TopToolbar.tsx", import.
 
 test("rapidly changing playback time is not an automatic live announcement", () => {
   // <output> has an implicit status role, so its live behavior must be explicitly disabled.
-  assert.match(toolbar, /<output aria-live="off" aria-label="再生位置と総再生時間">/);
+  assert.match(toolbar, /<output aria-live="off" aria-label=\{t\("toolbar\.time"\)\}>/);
   assert.match(toolbar, /formatPlaybackTime\(p\.playback\.time\)/);
   assert.match(toolbar, /formatPlaybackTime\(p\.playback\.duration\)/);
 });

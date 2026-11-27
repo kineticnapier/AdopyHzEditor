@@ -17,6 +17,7 @@ from core.audio_analysis import (
     enhance_spectrogram,
 )
 from core.note_model import Note, midi_to_hz, note_name
+from i18n import tr
 from web.audio import WebAudioPlayer, decode_audio_file
 from core.frequency_tracks import FrequencyTrackStore, build_frequency_track_store
 from core.vorbis_direct import select_analysis_backend
@@ -146,7 +147,7 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
         self._source_generation = 0
         self._analysis_generation = 0
         self._analysis_inflight = 0
-        self._status = "Ready"
+        self._status = tr("msg.ready")
         self._dirty = False
         self._saved_checkpoint: tuple[Any, ...] | None = None
         self._allow_window_close = False
@@ -559,12 +560,12 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
                     self.player.set_note_sample(decoded.samples)
                     with self._lock:
                         if self.settings.get("previewSound") == "adofai_kick":
-                            self._status = "ADOFAI Kick を準備しました"
+                            self._status = tr("msg.kick_prepared")
                 except Exception as exc:
                     LOGGER.exception("Failed to prepare ADOFAI kick preview")
                     with self._lock:
                         if self.settings.get("previewSound") == "adofai_kick":
-                            self._status = f"ADOFAI Kick の準備に失敗しました: {exc}"
+                            self._status = tr("msg.kick_prepare_failed", error=exc)
                 finally:
                     with self._preview_asset_lock:
                         self._preview_asset_thread = None
@@ -695,7 +696,7 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
         request = self._reserve_source_request()
         with self._lock:
             self._busy = True
-            self._status = f"Loading {Path(path).name}..."
+            self._status = tr("msg.loading", name=Path(path).name)
         try:
             requested = str(settings_snapshot.get("analysisSource", "cqt"))
             result_kind = "cqt"
@@ -742,23 +743,20 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
                         "requestedSource": "vorbis_direct",
                         "selectedSource": "vorbis_direct",
                     }
-                    self._status = (
-                        "Vorbis Direct を選択中です。解析を実行すると"
-                        "採譜用スペクトルを作成します"
-                    )
+                    self._status = tr("msg.direct_pending")
                 elif result_kind == "fallback":
                     self.analysis_stats = {
                         "requestedSource": "vorbis_direct",
                         "selectedSource": "cqt",
                         "fallbackReason": fallback_reason,
                     }
-                    self._status = "Vorbis Direct はこの音源で使えないため、CQTで解析しました"
+                    self._status = tr("msg.direct_fallback")
                 else:
                     self.analysis_stats = {
                         "requestedSource": requested,
                         "selectedSource": "cqt",
                     }
-                    self._status = f"Loaded {Path(path).name}"
+                    self._status = tr("msg.audio_loaded", name=Path(path).name)
                 self._apply_player_settings()
                 self._sync_notes_to_player()
                 self._dirty = was_dirty or previous_audio != self.audio_path
@@ -822,10 +820,7 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
                                 "requestedSource": "vorbis_direct",
                                 "selectedSource": "vorbis_direct",
                             }
-                            self._status = (
-                                "Vorbis Direct を選択中です。解析を実行すると"
-                                "採譜用スペクトルを作成します"
-                            )
+                            self._status = tr("msg.direct_pending")
                         return "direct_pending"
                     store = analyze_vorbis_spectrum_store(path)
                     track_store = build_frequency_track_store(store)
@@ -856,11 +851,12 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
                         self.pitch_step = 1.0
                         self._rebase_history_to_current_source(float(store.duration))
                         self.view["mode"] = "both" if self.notes else "spec"
-                        self._status = (
-                            f"Vorbis Direct: {stats['storedBins']} bins "
-                            f"/ {stats['totalTrackCount']} tracks "
-                            f"({stats['blocksProcessed']} blocks, "
-                            f"{stats['analysisSeconds']:.2f}s)"
+                        self._status = tr(
+                            "msg.direct_stats",
+                            bins=stats["storedBins"],
+                            tracks=stats["totalTrackCount"],
+                            blocks=stats["blocksProcessed"],
+                            seconds=f"{stats['analysisSeconds']:.2f}",
                         )
                     LOGGER.info("Vorbis Direct analysis stats: %s", stats)
                     return "vorbis_direct"
@@ -900,9 +896,9 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
                 self._rebase_history_to_current_source(float(spec.duration))
                 self.player.set_virtual_duration(self.duration)
                 self._status = (
-                    "Vorbis Direct はこの音源で使えないため、CQTで解析しました"
+                    tr("msg.direct_fallback")
                     if requested == "vorbis_direct"
-                    else "Analysis ready"
+                    else tr("msg.analysis_ready")
                 )
             return "fallback" if requested == "vorbis_direct" else "cqt"
         finally:
@@ -913,7 +909,7 @@ class Bridge(KickPitchMixin, TrackTranscriptionMixin, EditingMixin, NoteMixin, I
     def reanalyze_audio(self) -> dict[str, Any]:
         if not self.audio_path:
             with self._lock:
-                self._status = "Open an audio file first"
+                self._status = tr("msg.open_audio_first")
             return self.get_state()
         self._analyze_current_audio(explicit=True)
         return self.get_state()

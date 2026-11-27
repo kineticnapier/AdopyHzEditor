@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +67,7 @@ class ToolsMixin:
             self.player.seek(0.0)
             self._sync_notes_to_player()
             self._dirty = True
-            self._status = f"Blank workspace: {duration:.3f}s / MIDI {midi_min}-{midi_max}"
+            self._status = tr("msg.blank_workspace", seconds=f"{duration:.3f}", low=midi_min, high=midi_max)
             return self._state_dict()
 
     def load_project_notes_only_dialog(self) -> dict[str, Any]:
@@ -89,7 +88,7 @@ class ToolsMixin:
             self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
             self._dirty = True
-            self._status = f"Loaded notes only: {Path(path).name}"
+            self._status = tr("msg.loaded_notes_only", name=Path(path).name)
             return self._state_dict()
 
     def merge_project_notes_dialog(self) -> dict[str, Any]:
@@ -99,7 +98,7 @@ class ToolsMixin:
         _audio, notes, _settings = load_project(path)
         if not notes:
             with self._lock:
-                self._status = f"No notes in {Path(path).name}"
+                self._status = tr("msg.no_notes_in", name=Path(path).name)
                 return self._state_dict()
         with self._lock:
             self._push_undo()
@@ -112,7 +111,7 @@ class ToolsMixin:
                 self._fit_blank_bounds_to_notes()
             self._sync_notes_to_player()
             self._dirty = True
-            self._status = f"Merged {len(notes)} note(s) from {Path(path).name}"
+            self._status = tr("msg.merged_notes", count=len(notes), name=Path(path).name)
             return self._state_dict()
 
     def _fit_blank_bounds_to_notes(self) -> None:
@@ -144,7 +143,7 @@ class ToolsMixin:
     def export_selected_midi_dialog(self, indices: list[int]) -> dict[str, Any]:
         valid = sorted({int(i) for i in indices if 0 <= int(i) < len(self.notes)})
         if not valid:
-            return {"ok": False, "status": "No selected notes"}
+            return {"ok": False, "status": tr("msg.no_selected_notes")}
         path = self._dialog(webview.FileDialog.SAVE, file_types=MIDI_FILE_TYPES, save_filename="selected.mid")
         if not path:
             return {"ok": False, "status": "Cancelled"}
@@ -156,147 +155,8 @@ class ToolsMixin:
             bpm = float(self.settings["bpm"])
         export_midi(notes, path, bpm=bpm)
         with self._lock:
-            self._status = f"Exported {len(notes)} selected note(s): {Path(path).name}"
+            self._status = tr("msg.exported_selected", count=len(notes), name=Path(path).name)
         return {"ok": True, "path": str(path), "status": self._status}
-
-    # ------------------------------------------------------------------
-    # Harmonic diagram
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _parse_ratio_fraction(text: str) -> Fraction:
-        s = str(text).strip()
-        if not s:
-            raise ValueError("empty ratio")
-        if ":" in s:
-            a, b = s.split(":", 1)
-            value = Fraction(a.strip()) / Fraction(b.strip())
-        else:
-            value = Fraction(s)
-        if value <= 0:
-            raise ValueError("ratio must be positive")
-        return value
-
-    @staticmethod
-    def _factor_int(value: int) -> dict[int, int]:
-        n = abs(int(value)); factors: dict[int, int] = {}; d = 2
-        while d * d <= n:
-            while n % d == 0:
-                factors[d] = factors.get(d, 0) + 1; n //= d
-            d += 1 if d == 2 else 2
-        if n > 1:
-            factors[n] = factors.get(n, 0) + 1
-        return factors
-
-    @classmethod
-    def _dimension_ratio_fraction(cls, ratio: Fraction) -> Fraction:
-        r = Fraction(ratio)
-        if r <= 0:
-            raise ValueError("ratio must be positive")
-        generators = {2: Fraction(2, 1), 3: Fraction(3, 2), 5: Fraction(5, 4), 7: Fraction(7, 4), 11: Fraction(11, 4)}
-        exponents: dict[int, int] = {}
-        for p, e in cls._factor_int(r.numerator).items(): exponents[p] = exponents.get(p, 0) + e
-        for p, e in cls._factor_int(r.denominator).items(): exponents[p] = exponents.get(p, 0) - e
-        out = Fraction(1, 1)
-        for p, e in sorted(exponents.items()):
-            gen = generators.get(p)
-            if gen is None:
-                raise ValueError(f"unsupported dimension prime: {p}")
-            out = out * (gen ** e) if e >= 0 else out / (gen ** (-e))
-        return out
-
-    @staticmethod
-    def _format_ratio(ratio: Fraction) -> str:
-        value = float(ratio)
-        return f"{ratio.numerator}/{ratio.denominator} ({value:.6f})" if ratio.denominator <= 100000 and abs(value) < 100000 else f"{value:.6f}"
-
-    @staticmethod
-    def _caftaphata_pitch_number(ratio: float, edo: int = 41, offset: int = 2) -> int:
-        edo = max(1, int(edo))
-        return (int(offset) + int(round(edo * math.log2(max(1e-12, float(ratio)))))) % edo
-
-    def get_harmonic_diagram_defaults(self, selected_indices: list[int] | None = None) -> dict[str, Any]:
-        root_hz = 261.625565
-        valid = [int(i) for i in (selected_indices or []) if 0 <= int(i) < len(self.notes)]
-        if valid:
-            root_hz = 440.0 * (2.0 ** ((float(self.notes[valid[0]].midi) - 69.0) / 12.0))
-        return {
-            "rootHz": root_hz,
-            "rootShift": "1",
-            "base1dOffset": 0,
-            "harmonics": "1/3,1,3,7,9",
-            "timeUnit": "seconds",
-            "bpm": float(self.settings.get("bpm", 175.0)),
-            "start": float(self.player.time),
-            "duration": 1.0,
-            "edo": 41,
-            "offset": 2,
-        }
-
-    def _harmonic_diagram_rows(self, options: dict[str, Any]) -> tuple[list[dict[str, Any]], float, float]:
-        root_hz = max(0.001, float(options.get("rootHz", 261.625565)))
-        shift = self._parse_ratio_fraction(str(options.get("rootShift", "1")))
-        vals = [self._parse_ratio_fraction(x) for x in str(options.get("harmonics", "1/3,1,3,7,9")).replace(";", ",").split(",") if x.strip()]
-        if not vals:
-            raise ValueError("harmonics list is empty")
-        one_d = int(options.get("base1dOffset", 0))
-        offset_factor = Fraction(2, 1) ** one_d if one_d >= 0 else Fraction(1, 2) ** (-one_d)
-        base_rep = self._dimension_ratio_fraction(shift) * offset_factor
-        start = max(0.0, float(options.get("start", self.player.time)))
-        duration = max(0.001, float(options.get("duration", 1.0)))
-        if str(options.get("timeUnit", "seconds")) == "beats":
-            beat_sec = 60.0 / max(1e-9, float(options.get("bpm", self.settings.get("bpm", 175.0))))
-            start *= beat_sec; duration *= beat_sec
-        edo = max(1, min(999, int(options.get("edo", 41)))); offset = max(-999, min(999, int(options.get("offset", 2))))
-        rows: list[dict[str, Any]] = []
-        for local in vals:
-            raw_ratio = shift * local
-            local_rep = self._dimension_ratio_fraction(local)
-            ratio = base_rep * local_rep
-            hz = root_hz * float(ratio)
-            midi = 69.0 + 12.0 * math.log2(max(1e-12, hz) / 440.0)
-            rows.append({
-                "local": self._format_ratio(local),
-                "dimension": self._format_ratio(local_rep),
-                "ratio": self._format_ratio(ratio),
-                "hz": hz,
-                "midi": midi,
-                "pitchNumber": self._caftaphata_pitch_number(float(raw_ratio), edo=edo, offset=offset),
-            })
-        return rows, start, duration
-
-    def preview_harmonic_diagram(self, options: dict[str, Any]) -> dict[str, Any]:
-        rows, start, duration = self._harmonic_diagram_rows(options)
-        return {"rows": rows, "startSeconds": start, "endSeconds": start + duration, "durationSeconds": duration}
-
-    def insert_harmonic_diagram(self, options: dict[str, Any]) -> dict[str, Any]:
-        rows, start, duration = self._harmonic_diagram_rows(options)
-        invalid = [
-            row
-            for row in rows
-            if not (0.0 <= float(row["midi"]) <= 127.0)
-        ]
-        if invalid:
-            values = ", ".join(
-                f'{float(row["midi"]):.3f}'
-                for row in invalid[:4]
-            )
-            suffix = "…" if len(invalid) > 4 else ""
-            raise ValueError(
-                "MIDI範囲外の倍音は挿入できません "
-                f"(0–127): {values}{suffix}"
-            )
-        with self._lock:
-            self._push_undo()
-            first = len(self.notes)
-            for row in rows:
-                self.notes.append(Note(start, start + duration, float(row["midi"])).normalized())
-            indices = list(range(first, len(self.notes)))
-            self.duration = max(self.duration, start + duration)
-            self._sync_notes_to_player()
-            self._dirty = True
-            numbers = ", ".join(str(row["pitchNumber"]) for row in rows)
-            self._status = f"Inserted {len(rows)} harmonic note(s): {numbers}"
-            return {"notes": self._note_dicts(), "status": self._status, "indices": indices}
 
     # ------------------------------------------------------------------
     # Language / update

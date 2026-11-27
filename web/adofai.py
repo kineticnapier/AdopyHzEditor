@@ -23,7 +23,7 @@ from exporters.adofai import (
 )
 from web.gap_bridge import build_adofai_level_with_gap_bridges as build_adofai_level
 from exporters.adofai_append import AppendError, append_level, load_adofai_text
-from exporters.adofai_kps import kps_report, kps_warning
+from exporters.adofai_kps import HUMAN_KPS_LIMIT, kps_report, kps_warning
 from app_metadata import APP_VERSION, GITHUB_RELEASES_URL
 from i18n import tr
 
@@ -256,7 +256,7 @@ class AdoFAIMixin:
             selected_only = bool(raw.get("selectedOnly", False))
             if selected_only and not selected:
                 # Never turn an explicitly selected-only export into a full export.
-                raise ValueError("選択ノートがありません")
+                raise ValueError(tr("msg.no_selected_notes"))
             muted = set(self.settings.get("mutedLayers") or ())
             source = [self.notes[i] for i in selected] if selected_only else list(self.notes)
             # Switched-off layers are never exported.
@@ -410,7 +410,7 @@ class AdoFAIMixin:
         if workflow.get("copySong") and source:
             source_path = Path(str(source)).resolve()
             if not source_path.is_file():
-                return {"ok": False, "status": f"Audio source not found: {source_path}"}
+                return {"ok": False, "status": tr("msg.audio_not_found", path=source_path)}
             copy_target = Path(path).resolve().parent / source_path.name
             if _same_file_or_content(source_path, copy_target):
                 copy_required = False
@@ -425,7 +425,7 @@ class AdoFAIMixin:
                     return {
                         "ok": False,
                         "conflict": True,
-                        "status": f"Audio copy cancelled: {copy_target.name} already exists with different content",
+                        "status": tr("msg.audio_copy_conflict", name=copy_target.name),
                     }
             else:
                 copy_required = True
@@ -440,7 +440,7 @@ class AdoFAIMixin:
                 return {
                     "ok": False,
                     "path": str(path),
-                    "status": f"Audio copy failed: {exc}",
+                    "status": tr("msg.audio_copy_failed", error=exc),
                 }
 
         # Do not replace an existing chart until every fallible preparation
@@ -451,7 +451,7 @@ class AdoFAIMixin:
             encoding="utf-8",
         )
 
-        kps = kps_report(level)
+        kps = kps_report(level, limit=self._kps_limit())
         status = f"Exported {Path(path).name} ({stats.get('tiles_total', 0)} tiles)"
         warning = kps_warning(kps)
         if warning:
@@ -483,7 +483,7 @@ class AdoFAIMixin:
             original = target.read_bytes()
             base = load_adofai_text(original.decode("utf-8-sig"))
         except (OSError, UnicodeDecodeError) as exc:
-            return {"ok": False, "status": f"譜面を読み込めません: {exc}"}
+            return {"ok": False, "status": tr("msg.chart_unreadable", error=exc)}
         except AppendError as exc:
             return {"ok": False, "status": str(exc)}
         # The existing chart's song and offset stay; the generated part only
@@ -504,15 +504,12 @@ class AdoFAIMixin:
                 encoding="utf-8",
             )
         except OSError as exc:
-            return {"ok": False, "path": str(target), "status": f"追記に失敗しました: {exc}"}
-        status = (
-            f"{target.name} の最後に {info['addedFloors']} タイルを追記しました"
-            f"（元の譜面は {backup.name} に保存）"
-        )
+            return {"ok": False, "path": str(target), "status": tr("msg.append_failed", error=exc)}
+        status = tr("msg.appended", name=target.name, tiles=info["addedFloors"], backup=backup.name)
         if info["warnings"]:
             status += "。" + " ".join(info["warnings"])
         # Only the appended part is checked; floors and times are the merged chart's.
-        kps = kps_report(merged, first_floor=info["jointFloor"])
+        kps = kps_report(merged, limit=self._kps_limit(), first_floor=info["jointFloor"])
         warning = kps_warning(kps)
         if warning:
             status += "。" + warning
@@ -544,6 +541,10 @@ class AdoFAIMixin:
         lines = ["\t".join(columns)]
         lines.extend("\t".join(str(row.get(key, "")) for key in columns) for row in rows)
         return "\n".join(lines)
+
+    def _kps_limit(self) -> float:
+        """KPS above which the export warns; 環境設定 overrides it."""
+        return HUMAN_KPS_LIMIT
 
     def get_help_sections(self) -> dict[str, Any]:
         sections = []

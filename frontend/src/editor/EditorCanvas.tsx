@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { t } from "../i18n/index.ts";
 import { isLayerMuted } from "./layers";
 import type { DirectSpectrumPayload, EditorSettings, FrequencyTrackPayload, KickPitchPayload, NoteDto, PlaybackState, SpectrogramPayload, ViewState } from "./bridge";
 import { adjacentNoteIndex, boundedGridRange, boundedTimelineTickRange, buildNoteTimeIndex, buildSegmentSpatialIndex, nearbySegmentIndices, noteCandidatesAt, notesInTimeRange, noteEdgeAt, regionSelectedNoteIndices, noteMidiAt, spectrogramPitchVisibleCrop, spectrogramTimeCrop, directSpectrumVisibleCrop, clampDraggedNoteOffset, noteGhostIntersectsViewport, trackPrimitiveIntersectsViewport, contextMenuDeleteIndices, isValidTrackSample, type NoteTimeIndex } from "./editorMath";
@@ -770,9 +771,9 @@ export default function EditorCanvas(props: Props) {
     };
   }, [props.notes, props.selected, props.trackSelection.ids, keyboardNote, props.documentGeneration]);
   return <div className="canvas-wrap" ref={containerRef}>
-    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label="採譜エディタ。時間を横軸、音高を縦軸にスペクトル、Track、Noteを編集します。" aria-describedby="editor-keyboard-help editor-selection-status" title="Track: クリックで選択 / Ctrl+クリックで複数選択 / Shift+ドラッグでTrack範囲選択 / Ctrl+Alt+ドラッグで選択ノートを切り取り" onKeyDown={onCanvasKeyDown} onBlur={onCanvasBlur} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>{cursorReporterRef.current.cancel();props.onTrackHover?.(null)}} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
+    <canvas ref={canvasRef} tabIndex={0} role="region" aria-label={t("frame.canvas_label")} aria-describedby="editor-keyboard-help editor-selection-status" title={t("frame.canvas_tip")} onKeyDown={onCanvasKeyDown} onBlur={onCanvasBlur} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerLeave={()=>{cursorReporterRef.current.cancel();props.onTrackHover?.(null)}} onPointerUp={e=>void onPointerUp(e)} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} onContextMenu={e=>void onContextMenu(e)}/>
     <canvas ref={playheadRef} className="playhead-canvas" aria-hidden="true"/>
-    <span id="editor-keyboard-help" className="sr-only">左右矢印で時間順にノートを選択します。Shiftと矢印で複数選択、Escapeで選択解除します。F1で操作方法を確認できます。</span>
+    <span id="editor-keyboard-help" className="sr-only">{t("frame.canvas_keys")}</span>
     <span id="editor-selection-status" className="sr-only" aria-live="polite">{selectionAnnouncement}</span>
     <span id="editor-selection-change" className="sr-only" aria-live="polite" aria-atomic="true">{selectionChangeAnnouncement}</span>
   </div>;

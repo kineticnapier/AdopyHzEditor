@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { BackendApi, KickPitchFitMode, KickPitchMethod, KickPitchPayload, NoteMutationResult } from "./bridge";
 import type { TrackSelectionRange } from "../editor/trackSelection";
 import {
@@ -155,10 +156,9 @@ export default function KickPitchSection({
 
   return (
     <details className="kick-pitch-section">
-      <summary>キック音高解析</summary>
+      <summary>{t("kick.title")}</summary>
       <p className="inspector-help">
-        短い区間の基本周波数を追跡します。倍音は基本周波数へまとめ、
-        独立した成分は別候補として表示します。
+        {t("kick.info")}
       </p>
       <div className="kick-pitch-pick">
         <button
@@ -167,38 +167,36 @@ export default function KickPitchSection({
           disabled={!api || !audioLoaded || busy || running}
           onClick={() => onPickingChange(!picking)}
         >
-          {picking ? "ドラッグ待ち…（Escで取消）" : "画面でドラッグして解析"}
+          {picking ? t("kick.picking") : t("kick.pick")}
         </button>
       </div>
       {picking && (
         <p className="inspector-help">
-          キックの音高線を囲むように、時間×音高の四角をドラッグしてください。
-          離すとその範囲で解析します。
+          {t("kick.pick_info")}
         </p>
       )}
       <div className="kick-pitch-grid">
-        {field("start", "開始 s", 0.001)}
-        {field("end", "終了 s", 0.001)}
-        {field("minHz", "最低 Hz", 1)}
-        {field("maxHz", "最高 Hz", 1)}
+        {field("start", t("kick.start_s"), 0.001)}
+        {field("end", t("kick.end_s"), 0.001)}
+        {field("minHz", t("kick.min_hz"), 1)}
+        {field("maxHz", t("kick.max_hz"), 1)}
       </div>
       <label className="kick-pitch-field kick-pitch-method">
-        <span>方式</span>
+        <span>{t("kick.method")}</span>
         <select value={method} onChange={(event) => setMethod(event.target.value as KickPitchMethod)}>
-          <option value="harmonic">倍音解析（標準・音高が安定した音向け）</option>
-          <option value="cycle">1周期ごと（音高が速く上下する音向け）</option>
-          <option value="multiwindow">一番明るい線（高い音・シンセ向け）</option>
+          <option value="harmonic">{t("kick.method_harmonic")}</option>
+          <option value="cycle">{t("kick.method_cycle")}</option>
+          <option value="multiwindow">{t("kick.method_multiwindow")}</option>
         </select>
       </label>
       {method === "multiwindow" && (
         <p className="inspector-help">
-          範囲の中で一番強く見える線をそのままたどります。倍音のまとめ方を気にせず、見えている線を追いたいとき向けです。
+          {t("kick.multiwindow_info")}
         </p>
       )}
       {method === "cycle" && (
         <p className="inspector-help">
-          波形の1周期ごとに音高を測ります。速く上下する動きも追えます。
-          キックが範囲内で一番大きい低音である必要があり、キックのない雑音だけの区間でも音高が出ることがあります。
+          {t("kick.cycle_info")}
         </p>
       )}
       <div className="track-actions">
@@ -207,20 +205,20 @@ export default function KickPitchSection({
           disabled={busy || running}
           onClick={() => setRegion(defaultKickPitchRegion(trackRange, viewStart))}
         >
-          {trackRange ? "Track矩形から" : "表示位置から"}
+          {trackRange ? t("kick.from_track") : t("kick.from_view")}
         </button>
         <button
           disabled={!api || !audioLoaded || busy || running || Boolean(invalid)}
           title={invalid ?? undefined}
           onClick={() => void analyze()}
         >
-          {running ? "解析中…" : "数値で解析"}
+          {running ? t("kick.running") : t("kick.run")}
         </button>
       </div>
       {invalid && <p className="inspector-help">{invalid}</p>}
       {kickPitch?.available && (
         <>
-          <ul className="kick-pitch-candidates" aria-label="キック音高の候補">
+          <ul className="kick-pitch-candidates" aria-label={t("kick.candidates")}>
             {shownCandidates.map((candidate) => (
               <li key={candidate.id}>
                 <label className="inline-check">
@@ -244,15 +242,15 @@ export default function KickPitchSection({
                 </label>
               </li>
             ))}
-            {!candidates.length && <li>信頼できる音高が見つかりませんでした</li>}
+            {!candidates.length && <li>{t("kick.no_candidates")}</li>}
           </ul>
           {(hiddenCandidates > 0 || showAllCandidates) && (
             <button className="quiet-button" onClick={() => setShowAllCandidates(!showAllCandidates)}>
-              {showAllCandidates ? "短い候補をたたむ" : `ほかの短い候補 ${hiddenCandidates}件を表示`}
+              {showAllCandidates ? t("kick.hide_short") : t("kick.show_short", { count: hiddenCandidates })}
             </button>
           )}
           <label className="kick-pitch-field kick-pitch-method">
-            <span>作り方</span>
+            <span>{t("kick.build")}</span>
             <select
               value={fitMode}
               onChange={(event) => {
@@ -261,18 +259,18 @@ export default function KickPitchSection({
                 setMaxErrorCents(next === "line" ? 30 : 5);
               }}
             >
-              <option value="line">1本につなげて近似（途切れを埋める）</option>
-              <option value="exact">信頼できる区間だけ正確に</option>
+              <option value="line">{t("kick.build_line")}</option>
+              <option value="exact">{t("kick.build_exact")}</option>
             </select>
           </label>
           <p className="inspector-help">
             {fitMode === "line"
-              ? "途切れた解析点を直線でつなぎ、外れた点を除いて1本の線にします。最大本数を1にすると曲線1個で近似します。"
-              : "信頼度の高い区間だけを使い、途切れた所で分けます。"}
+              ? t("kick.build_line_info")
+              : t("kick.build_exact_info")}
           </p>
           <div className="kick-pitch-grid">
             <label className="kick-pitch-field">
-              <span>許容誤差 cent</span>
+              <span>{t("kick.tolerance")}</span>
               <input
                 type="number"
                 min={0.5}
@@ -283,7 +281,7 @@ export default function KickPitchSection({
               />
             </label>
             <label className="kick-pitch-field">
-              <span>最低信頼度</span>
+              <span>{t("kick.min_confidence")}</span>
               <input
                 type="number"
                 min={0}
@@ -295,7 +293,7 @@ export default function KickPitchSection({
             </label>
             {fitMode === "line" && (
               <label className="kick-pitch-field">
-                <span>最大本数（0=制限なし）</span>
+                <span>{t("kick.max_notes")}</span>
                 <input
                   type="number"
                   min={0}
@@ -312,7 +310,7 @@ export default function KickPitchSection({
               disabled={busy || !selectedIds.length}
               onClick={() => void convert()}
             >
-              Curve Noteを作成
+              {t("kick.make_curve")}
             </button>
             <button
               className="quiet-button"
@@ -322,7 +320,7 @@ export default function KickPitchSection({
                 void api?.clear_kick_pitch();
               }}
             >
-              結果を消去
+              {t("kick.clear")}
             </button>
           </div>
         </>

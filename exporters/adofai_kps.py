@@ -9,6 +9,7 @@ exporter warns about the stretches above ``HUMAN_KPS_LIMIT``.
 from __future__ import annotations
 
 from collections import defaultdict
+from i18n import tr
 from typing import Any
 
 HUMAN_KPS_LIMIT = 200.0
@@ -130,14 +131,23 @@ def kps_warning(report: dict[str, Any]) -> str | None:
     ranges = report.get("ranges") or []
     if not ranges:
         return None
-    listed = "、".join(
-        f"{r['startFloor']}〜{r['endFloor']}タイル（{r['startSeconds']:.2f}秒〜、最大{r['maxKps']:.0f}）"
+    listed = tr("msg.list_sep").join(
+        tr(
+            "msg.kps_range",
+            start=r["startFloor"],
+            end=r["endFloor"],
+            seconds=f"{r['startSeconds']:.2f}",
+            kps=f"{r['maxKps']:.0f}",
+        )
         for r in ranges[:MAX_LISTED_RANGES]
     )
     rest = len(ranges) - MAX_LISTED_RANGES
     if rest > 0:
-        listed += f" ほか{rest}か所"
-    return (
-        f"KPSが{report['limit']:.0f}を超える所が{len(ranges)}か所あります（最大{report['maxKps']:.0f}）。"
-        f"人の手では叩けない可能性があります: {listed}"
+        listed += tr("msg.kps_more", count=rest)
+    return tr(
+        "msg.kps_warning",
+        limit=f"{report['limit']:.0f}",
+        count=len(ranges),
+        max=f"{report['maxKps']:.0f}",
+        listed=listed,
     )

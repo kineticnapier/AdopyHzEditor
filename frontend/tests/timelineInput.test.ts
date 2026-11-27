@@ -147,9 +147,9 @@ test("App normalizes both pitch and time before the follow-playback no-op guard"
 
 test("Timeline exposes separate pitch labels in a group rather than a label with two inputs", () => {
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8");
-  assert.match(source, /<div className="timeline-field pitch-field" role="group" aria-label="音高表示範囲">/);
-  assert.match(source, /<CommitNumber label="下端音高"/);
-  assert.match(source, /<CommitNumber label="上端音高"/);
+  assert.match(source, /<div className="timeline-field pitch-field" role="group" aria-label=\{t\("timeline\.pitch_range"\)\}>/);
+  assert.match(source, /<CommitNumber label=\{t\("timeline\.pitch_bottom"\)\}/);
+  assert.match(source, /<CommitNumber label=\{t\("timeline\.pitch_top"\)\}/);
   assert.doesNotMatch(source, /<label className="timeline-field pitch-field"/);
 });
 

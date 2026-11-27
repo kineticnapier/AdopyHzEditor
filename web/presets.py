@@ -7,6 +7,7 @@ from typing import Any
 
 from core.note_model import Note
 from core.atomic_io import atomic_write_text
+from i18n import tr
 
 
 class PresetMixin:
@@ -35,13 +36,9 @@ class PresetMixin:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
-            raise ValueError(
-                f"ノートプリセットファイルを読み込めません。元ファイルは変更していません: {path}"
-            ) from exc
+            raise ValueError(tr("msg.presets_unreadable", path=path)) from exc
         if not isinstance(raw, dict):
-            raise ValueError(
-                f"ノートプリセットファイルの形式が不正です。元ファイルは変更していません: {path}"
-            )
+            raise ValueError(tr("msg.presets_bad_format", path=path))
         out: dict[str, dict[str, Any]] = {}
         for raw_name, raw_note in raw.items():
             name = str(raw_name).strip()
@@ -78,29 +75,29 @@ class PresetMixin:
     def save_note_preset(self, name: str, index: int) -> dict[str, Any]:
         preset_name = str(name).strip()
         if not preset_name:
-            raise ValueError("プリセット名を入力してください")
+            raise ValueError(tr("msg.preset_name_required"))
         if len(preset_name) > 80:
-            raise ValueError("プリセット名が長すぎます")
+            raise ValueError(tr("msg.preset_name_too_long"))
         with self._lock:
             valid = self._valid_indices([index])
             if not valid:
-                raise ValueError("1個のノートを選択してください")
+                raise ValueError(tr("msg.select_one_note"))
             i = valid[0]
             note = self.notes[i].normalized().with_time_offset(-self.notes[i].normalized().start)
         presets = self._load_note_preset_map()
         presets[preset_name] = note.to_dict()
         self._save_note_preset_map(presets)
-        self._status = f"プリセット「{preset_name}」を保存しました"
+        self._status = tr("msg.preset_saved", name=preset_name)
         return {"presets": self.get_note_presets(), "status": self._status}
 
     def delete_note_preset(self, name: str) -> dict[str, Any]:
         preset_name = str(name).strip()
         presets = self._load_note_preset_map()
         if preset_name not in presets:
-            return {"presets": self.get_note_presets(), "status": "プリセットが見つかりません"}
+            return {"presets": self.get_note_presets(), "status": tr("msg.preset_not_found")}
         del presets[preset_name]
         self._save_note_preset_map(presets)
-        self._status = f"プリセット「{preset_name}」を削除しました"
+        self._status = tr("msg.preset_deleted", name=preset_name)
         return {"presets": self.get_note_presets(), "status": self._status}
 
     def insert_note_preset(self, name: str, at_time: float) -> dict[str, Any]:
@@ -108,7 +105,7 @@ class PresetMixin:
         presets = self._load_note_preset_map()
         raw = presets.get(preset_name)
         if raw is None:
-            raise ValueError("プリセットが見つかりません")
+            raise ValueError(tr("msg.preset_not_found"))
         template = Note.from_dict(raw).normalized()
         with self._lock:
             start = self._snap_time(float(at_time))
@@ -122,7 +119,7 @@ class PresetMixin:
             index = len(self.notes) - 1
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"プリセット「{preset_name}」を挿入しました"
+            self._status = tr("msg.preset_inserted", name=preset_name)
             return {
                 "notes": self._note_dicts(),
                 "index": index,

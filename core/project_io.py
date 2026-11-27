@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 from core.note_model import Note
+from i18n import tr
 
 
 PROJECT_VERSION = 3
@@ -19,17 +20,13 @@ class UnsupportedProjectVersionError(ProjectVersionError):
     def __init__(self, version: int) -> None:
         self.version = version
         self.supported_version = PROJECT_VERSION
-        super().__init__(
-            "このプロジェクトは新しいAdopyHzEditorで作成されています。"
-            "アプリを更新してください。"
-            f"（プロジェクト: v{version} / 対応: v{PROJECT_VERSION}）"
-        )
+        super().__init__(tr("msg.project_too_new", version=version, supported=PROJECT_VERSION))
 
 
 class InvalidProjectVersionError(ProjectVersionError):
     def __init__(self, value: object) -> None:
         self.value = value
-        super().__init__("プロジェクトのversionが不正なため読み込めません。")
+        super().__init__(tr("msg.project_bad_version"))
 
 
 def _validate_project_version(data: dict[str, Any]) -> int | None:
@@ -182,7 +179,7 @@ def load_project(path: str | Path) -> tuple[str | None, list[Note], dict[str, An
     project_path = Path(path)
     data = json.loads(project_path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
-        raise ValueError("プロジェクトのJSON形式が不正です。")
+        raise ValueError(tr("msg.project_bad_json"))
     _validate_project_version(data)
     audio_path = _resolve_audio_path(project_path, data)
     notes = [Note.from_dict(x) for x in data.get("notes", [])]

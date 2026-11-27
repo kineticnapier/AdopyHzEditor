@@ -10,7 +10,7 @@ const panel = readFileSync(
 
 test("ADOFAI kick is selectable from the note preview sound setting", () => {
   const previewSoundRow = panel.match(
-    /<Row label="試聴音色">([\s\S]*?)<\/Row>/,
+    /<Row label=\{t\("panel\.preview_sound"\)\}>([\s\S]*?)<\/Row>/,
   )?.[1];
   assert.ok(previewSoundRow, "note preview sound selector must exist");
   assert.match(previewSoundRow, /value=\{settings\.previewSound\}/);

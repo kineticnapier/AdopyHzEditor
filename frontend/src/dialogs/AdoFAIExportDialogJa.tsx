@@ -15,17 +15,18 @@ import { createExclusiveAsyncAction } from "./exclusiveAsyncAction";
 import { exportDefaultsContextIsCurrent } from "./previewFreshness";
 import { exportFailureMessage, exportStatusMessage, kpsRangeLines } from "./exportResult";
 import { exportScopeOffset } from "./exportScopeOffset";
+import { t } from "../i18n/index.ts";
 import { isXModeAvailable, xModeForCompression } from "./angleCompressionXMode";
 
 type ExportContext = { api: BackendApi; selected: number[]; defaultSelectedOnly: boolean; loadAttempt: number; documentGeneration: number };
 
-const xModeOptions: Array<[AdoFAIExportOptions["xMode"], string]> = [
-  ["floor", "切り捨て"],
-  ["lowest_floor", "最小切り捨て"],
-  ["round", "四捨五入"],
-  ["ceil", "切り上げ"],
-  ["fixed", "固定"],
-  ["target_bpm", "目標BPM"],
+const xModeOptions = (): Array<[AdoFAIExportOptions["xMode"], string]> => [
+  ["floor", t("export.x_floor")],
+  ["lowest_floor", t("export.x_lowest_floor")],
+  ["round", t("export.x_round")],
+  ["ceil", t("export.x_ceil")],
+  ["fixed", t("export.fixed")],
+  ["target_bpm", t("export.target_bpm")],
 ];
 
 type Props = {
@@ -43,7 +44,7 @@ function formatBpm(bpm: number): string {
 function formatCycleSeconds(cycleAngle: number, bpm: number): string {
   if (!(cycleAngle > 0) || !(bpm > 0)) return "-";
   const seconds = (cycleAngle * 60) / (180 * bpm);
-  return `${seconds.toFixed(4)}秒`;
+  return t("export.seconds", { value: seconds.toFixed(4) });
 }
 export default function AdoFAIExportDialogJa({
   api,
@@ -224,6 +225,12 @@ export default function AdoFAIExportDialogJa({
       setPreviewMode("debug");
     }
   }
+  async function saveAsDefaults() {
+    if (!fixed) return;
+    const snapshot = { ...fixed };
+    const r = await run(() => api.save_adofai_export_defaults(snapshot));
+    if (r?.ok) onStatus(t("export.saved_defaults"));
+  }
   async function chooseSongSource() {
     const context = loadedContext;
     if (!fixed || !context) return;
@@ -245,39 +252,38 @@ export default function AdoFAIExportDialogJa({
   }
   if (!options || !defaultsCurrent)
     return (
-      <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
+      <Modal title={t("export.title")} onClose={onClose} locked={working}>
         {currentError ? (
           <>
             <div className="dialog-error" role="alert">
-              設定の読込に失敗しました: {currentError}
+              {t("export.defaults_failed", { error: currentError })}
             </div>
             <div className="dialog-footer">
-              <button onClick={onClose} disabled={working}>閉じる</button>
+              <button onClick={onClose} disabled={working}>{t("dialog.close")}</button>
               <button
                 className="primary"
                 disabled={working}
                 onClick={() => setLoadAttempt((v) => v + 1)}
               >
-                再試行
+                {t("dialog.retry")}
               </button>
             </div>
           </>
         ) : (
-          <div className="dialog-loading" role="status">{working ? "出力処理中…" : "設定を読み込んでいます…"}</div>
+          <div className="dialog-loading" role="status">{working ? t("export.exporting") : t("export.loading")}</div>
         )}
       </Modal>
     );
   if (kpsNotice)
     return (
-      <Modal title="ADOFAI出力" onClose={onClose} locked={working}>
+      <Modal title={t("export.title")} onClose={onClose} locked={working}>
         <div className="export-dialog-body">
-          <p>書き出しました。</p>
+          <p>{t("export.done")}</p>
           <div className="dialog-warning" role="alert">
             <b>
-              KPSが{kpsNotice.report.limit}を超える所が{kpsNotice.report.ranges.length}か所あります（最大{" "}
-              {Math.round(kpsNotice.report.maxKps)} KPS）
+              {t("export.kps_heading", { limit: kpsNotice.report.limit, count: kpsNotice.report.ranges.length, max: Math.round(kpsNotice.report.maxKps) })}
             </b>
-            <p>人の手では叩けない可能性があります。タイル番号は ADOFAI のエディタで探せます。</p>
+            <p>{t("export.kps_hint")}</p>
             <ul>
               {kpsRangeLines(kpsNotice.report).map((line) => (
                 <li key={line}>{line}</li>
@@ -288,7 +294,7 @@ export default function AdoFAIExportDialogJa({
         <div className="dialog-footer">
           <span />
           <button className="primary" onClick={onClose}>
-            閉じる
+            {t("dialog.close")}
           </button>
         </div>
       </Modal>
@@ -306,7 +312,7 @@ export default function AdoFAIExportDialogJa({
     );
   return (
     <Modal
-      title="ADOFAI出力"
+      title={t("export.title")}
       onClose={onClose}
       locked={working}
       wide={previewMode !== "none"}
@@ -314,25 +320,25 @@ export default function AdoFAIExportDialogJa({
       <div className={previewMode !== "none" ? "dialog-body export-dialog-body compact-export with-preview" : "dialog-body export-dialog-body compact-export"}>
         <fieldset
           disabled={working}
-          aria-label="ADOFAI出力設定"
+          aria-label={t("export.settings_label")}
           style={{ display: "grid", gap: 8, border: 0, margin: 0, padding: 0, minWidth: 0 }}
         >
-        <Field label="出力先">
+        <Field label={t("export.destination")}>
           <Select
             value={options.appendToChart ? "append" : "new"}
             options={[
-              ["new", "新しい譜面を作る"],
-              ["append", "既存の譜面の最後に追記"],
+              ["new", t("export.dest_new")],
+              ["append", t("export.dest_append")],
             ]}
             onChange={(v) => patch("appendToChart", v === "append")}
           />
         </Field>
         {options.appendToChart && (
           <div className="info-card compact">
-            選んだ譜面の最後にタイルを足します。元の設定・イベントはそのままで、曲の時間には合わせません。元ファイルは「名前.adofai.bak」に残ります。
+            {t("export.append_info")}
           </div>
         )}
-        <Field label="方式">
+        <Field label={t("export.method")}>
           <Select
             value={options.method}
             options={[
@@ -346,13 +352,13 @@ export default function AdoFAIExportDialogJa({
           />
         </Field>
         {isHarmony && isRatioPoly && (
-          <Field label="周期の長さ">
+          <Field label={t("export.cycle_length")}>
             <Select
               value={cycleTiming}
               options={[
-                ["pitch", "音の高さ（Hz）"],
-                ["beat", `曲の拍（${formatBpm(options.projectBpm)} BPM）`],
-                ["manual", "出力BPMで指定"],
+                ["pitch", t("export.cycle_pitch")],
+                ["beat", t("export.cycle_beat", { bpm: formatBpm(options.projectBpm) })],
+                ["manual", t("export.cycle_manual")],
               ]}
               onChange={(v) =>
                 patch(
@@ -364,19 +370,19 @@ export default function AdoFAIExportDialogJa({
           </Field>
         )}
         {isHarmony && isRatioPoly && beatSync && (
-          <Field label="1周期の拍数">
+          <Field label={t("export.beats_per_cycle")}>
             <Num
               value={options.harmonyPolyBeatsPerCycle ?? 1}
               min={1 / 64}
               max={64}
               step="any"
-              suffix="拍"
+              suffix={t("export.beats_unit")}
               onChange={(v) => patch("harmonyPolyBeatsPerCycle", v)}
             />
           </Field>
         )}
         {(isAngle || isHarmony) && !(isHarmony && isRatioPoly && cycleTiming !== "manual") && (
-          <Field label="出力BPM">
+          <Field label={t("export.output_bpm")}>
             <Num
               value={options.angleOnlyBpm}
               min={1}
@@ -389,35 +395,35 @@ export default function AdoFAIExportDialogJa({
         {isHarmony && isRatioPoly && (
           <div className="info-card">
             {cycleTiming === "pitch"
-              ? "1周期 = 根音（一番低い音）の周期 × 比の根音の数。各声部が自分の音の高さで鳴ります（A#5なら毎秒932回）。和音や音程が変わるたびに速さが切り替わります。"
+              ? t("export.cycle_info_pitch")
               : beatSync
-                ? `出力BPM = ${formatBpm(syncedBpm)}（自動）、1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, syncedBpm)}。周期は曲の拍の位置から始まり、音符のないところは休みになります。音の高さは再現しません。`
-                : `1周期 = ${formatCycleSeconds(options.harmonyPolyCycleAngle, options.angleOnlyBpm)}（周期角 ÷ (3 × 出力BPM)）。音の高さは再現しません。`}
+                ? t("export.cycle_info_beat", { bpm: formatBpm(syncedBpm), cycle: formatCycleSeconds(options.harmonyPolyCycleAngle, syncedBpm) })
+                : t("export.cycle_info_manual", { cycle: formatCycleSeconds(options.harmonyPolyCycleAngle, options.angleOnlyBpm) })}
           </div>
         )}
         {isHarmony && (
           <>
-            <Field label="和音">
+            <Field label={t("export.chord")}>
               <Select
                 value={options.harmonyMode}
                 options={[
-                  ["off", "なし"],
-                  ["octave +12", "1オクターブ上"],
-                  ["fifth +7", "完全5度"],
-                  ["major third +4", "長3度"],
-                  ["minor third +3", "短3度"],
-                  ["lower octave -12", "1オクターブ下"],
-                  ["major triad", "長三和音"],
-                  ["minor triad", "短三和音"],
+                  ["off", t("export.none")],
+                  ["octave +12", t("export.chord_octave_up")],
+                  ["fifth +7", t("export.chord_fifth")],
+                  ["major third +4", t("export.chord_major_third")],
+                  ["minor third +3", t("export.chord_minor_third")],
+                  ["lower octave -12", t("export.chord_octave_down")],
+                  ["major triad", t("export.chord_major_triad")],
+                  ["minor triad", t("export.chord_minor_triad")],
                   ["sus4", "sus4"],
-                  ["dominant 7", "属7"],
-                  ["custom", "カスタム"],
+                  ["dominant 7", t("export.chord_dominant7")],
+                  ["custom", t("export.custom")],
                 ]}
                 onChange={(v) => patch("harmonyMode", v)}
               />
             </Field>
             {options.harmonyMode === "custom" && (
-              <Field label="半音差">
+              <Field label={t("export.semitones")}>
                 <Num
                   value={options.harmonyCustomSemitone}
                   min={-48}
@@ -427,13 +433,13 @@ export default function AdoFAIExportDialogJa({
                 />
               </Field>
             )}
-            <Field label="タイミング">
+            <Field label={t("export.timing")}>
               <Select
                 value={options.harmonyTimingMode}
                 options={[
                   ["setspeed", "SetSpeed"],
                   ["angle-only", "Angle-only"],
-                  ["ratio-polyrhythm", "比率ポリリズム"],
+                  ["ratio-polyrhythm", t("export.ratio_polyrhythm")],
                 ]}
                 onChange={(v) =>
                   patch(
@@ -444,12 +450,12 @@ export default function AdoFAIExportDialogJa({
               />
             </Field>
             {options.harmonyTimingMode === "ratio-polyrhythm" && (
-              <Field label="和音の決め方">
+              <Field label={t("export.chord_source")}>
                 <Select
                   value={options.harmonyPolyChordSource ?? "overlap"}
                   options={[
-                    ["overlap", "重なったノーツから"],
-                    ["preset", "和音設定のみ"],
+                    ["overlap", t("export.chord_overlap")],
+                    ["preset", t("export.chord_preset")],
                   ]}
                   onChange={(v) =>
                     patch(
@@ -463,9 +469,9 @@ export default function AdoFAIExportDialogJa({
             {options.harmonyTimingMode === "ratio-polyrhythm" &&
               (options.harmonyPolyChordSource ?? "overlap") === "overlap" && (
                 <details className="advanced-fold">
-                  <summary>和音の詳細</summary>
+                  <summary>{t("export.chord_details")}</summary>
                   <div className="advanced-grid">
-                  <Field label="短い重なりを無視">
+                  <Field label={t("export.ignore_short")}>
                     <Num
                       value={options.harmonyPolyLegatoMs ?? 50}
                       min={0}
@@ -475,37 +481,37 @@ export default function AdoFAIExportDialogJa({
                       onChange={(v) => patch("harmonyPolyLegatoMs", v)}
                     />
                   </Field>
-                  <Field label="和音の最大音数">
+                  <Field label={t("export.max_voices")}>
                     <Num
                       value={options.harmonyPolyMaxVoices ?? 3}
                       min={0}
                       max={16}
                       step={1}
-                      suffix="音（0で無制限）"
+                      suffix={t("export.max_voices_unit")}
                       onChange={(v) => patch("harmonyPolyMaxVoices", Math.round(v))}
                     />
                   </Field>
-                  <Field label="和音の細かさ上限">
+                  <Field label={t("export.max_root_cycles")}>
                     <Num
                       value={options.harmonyPolyMaxRootCycles ?? 12}
                       min={0}
                       max={1024}
                       step={1}
-                      suffix="（0で無制限）"
+                      suffix={t("export.no_limit_unit")}
                       onChange={(v) => patch("harmonyPolyMaxRootCycles", Math.round(v))}
                     />
                   </Field>
                   <div className="info-card">
-                    音が多い和音は濁り、打点も詰まりすぎます。一番高い音（メロディー）は必ず残し、ほかは一番低い音と響きの単純な音から残します。細かさ上限は「1周期が根音の何周期分か」で、長三和音(4:5:6)は4、短三和音(10:12:15)は10です。
+                    {t("export.voices_info")}
                   </div>
-                  <Field label="オクターブ重複" group>
+                  <Field label={t("export.octave_dup")} group>
                     <label className="inline-check">
                       <input
                         type="checkbox"
                         checked={options.harmonyPolyMergeOctaves ?? true}
                         onChange={(e) => patch("harmonyPolyMergeOctaves", e.target.checked)}
                       />
-                      オクターブ違いの重なりは高い方（メロディー側）にまとめる
+                      {t("export.merge_octaves")}
                     </label>
                   </Field>
                   </div>
@@ -514,89 +520,89 @@ export default function AdoFAIExportDialogJa({
             <div className="info-card">
               {options.harmonyTimingMode === "ratio-polyrhythm"
                 ? (options.harmonyPolyChordSource ?? "overlap") === "overlap"
-                  ? "同時に鳴っているノーツの音程を純正比（ドミソなら4:5:6）にしてリズムを作ります。単音の区間は「和音」の設定を使い、和音の切り替えは周期の区切りで行います。"
-                  : "比率ポリリズムは純正比（長三和音なら4:5:6）でリズムを作ります。"
-                : "音律は平均律に固定されています。"}
+                  ? t("export.ratio_info_overlap")
+                  : t("export.ratio_info_preset")
+                : t("export.equal_temperament")}
             </div>
           </>
         )}
         {!options.appendToChart && (<>
-        <Field label="音声" group>
+        <Field label={t("export.audio")} group>
           <label className="inline-check">
             <input
               type="checkbox"
               checked={options.useProjectSong}
               onChange={(e) => patch("useProjectSong", e.target.checked)}
             />
-            音声を使用
+            {t("export.use_audio")}
           </label>
         </Field>
         {options.useProjectSong && (
-          <Field label="音源先" group>
+          <Field label={t("export.song_source")} group>
             <div className="number-with-suffix">
               <input
                 type="text"
-                value={options.songSourcePath || "未選択"}
-                aria-label="音源先"
+                value={options.songSourcePath || t("export.not_selected")}
+                aria-label={t("export.song_source")}
                 readOnly
-                title={options.songSourcePath || "音源先が未選択です"}
+                title={options.songSourcePath || t("export.song_not_selected")}
               />
               <button
                 type="button"
                 onClick={() => void chooseSongSource()}
                 disabled={working}
               >
-                変更
+                {t("export.change")}
               </button>
             </div>
           </Field>
         )}
         </>)}
         {selected.length > 0 && (
-          <Field label="出力範囲" group>
+          <Field label={t("export.scope")} group>
             <label className="inline-check">
               <input
                 type="checkbox"
                 checked={options.selectedOnly}
                 onChange={(e) => changeSelectedOnly(e.target.checked)}
               />
-              選択ノートのみ（{selected.length}個）
+              {t("export.selected_only", { count: selected.length })}
             </label>
           </Field>
         )}
         <details className="advanced-fold">
-          <summary>詳細設定</summary>
+          <summary>{t("export.advanced")}</summary>
           <div className="advanced-grid">
-            <Field label="同じ音の重なり" group>
+            <Field label={t("export.duplicates")} group>
               <label className="inline-check">
                 <input
                   type="checkbox"
                   checked={options.mergeDuplicateNotes ?? true}
                   onChange={(e) => patch("mergeDuplicateNotes", e.target.checked)}
                 />
-                別のレイヤーで同じ音が同時に鳴るところは1つにまとめる
+                {t("export.merge_duplicates")}
               </label>
             </Field>
             {!isHarmony && (
-              <Field label="ノート連結" group>
+              <Field label={t("export.chain")} group>
                 <label className="inline-check">
                   <input
                     type="checkbox"
                     checked={options.chainContiguous ?? true}
                     onChange={(e) => patch("chainContiguous", e.target.checked)}
                   />
-                  隙間なく続くノートを1本につなげる（境目で切らない）
+                  {t("export.chain_contiguous")}
                 </label>
               </Field>
             )}
             {isZip && (
               <>
-                <Field label="圧縮角度">
+                <Field label={t("export.compression_angle")}>
                   <Select
                     value={options.angleCompressionMode}
                     options={[
-                      ["auto", "自動"],
-                      ["fixed", "固定角度"],
+                      ["auto", t("export.auto")],
+                      ["fixed", t("export.fixed_angle")],
                     ]}
                     onChange={(v) =>
                       changeAngleCompressionMode(v as AdoFAIExportOptions["angleCompressionMode"])
@@ -604,7 +610,7 @@ export default function AdoFAIExportDialogJa({
                   />
                 </Field>
                 {options.angleCompressionMode === "fixed" && (
-                  <Field label="固定角度">
+                  <Field label={t("export.fixed_angle")}>
                     <Num
                       value={options.angleCompressionFixedAngle}
                       min={0.001}
@@ -616,12 +622,12 @@ export default function AdoFAIExportDialogJa({
                   </Field>
                 )}
                 {options.angleCompressionMode === "fixed" && (
-                  <div className="info-card">固定圧縮角度では「目標BPM」のX計算は使えません。</div>
+                  <div className="info-card">{t("export.fixed_angle_no_target")}</div>
                 )}
-                <Field label="Xの決め方">
+                <Field label={t("export.x_mode")}>
                   <Select
                     value={options.xMode}
-                    options={xModeOptions.filter(([mode]) =>
+                    options={xModeOptions().filter(([mode]) =>
                       isXModeAvailable(options.angleCompressionMode, mode)
                     )}
                     onChange={(v) =>
@@ -630,7 +636,7 @@ export default function AdoFAIExportDialogJa({
                   />
                 </Field>
                 {options.xMode === "fixed" && (
-                  <Field label="固定X">
+                  <Field label={t("export.fixed_x")}>
                     <Num
                       value={options.fixedX}
                       min={0.000001}
@@ -641,7 +647,7 @@ export default function AdoFAIExportDialogJa({
                   </Field>
                 )}
                 {options.xMode === "target_bpm" && (
-                  <Field label="目標BPM">
+                  <Field label={t("export.target_bpm")}>
                     <Num
                       value={options.targetBpm}
                       min={1}
@@ -653,14 +659,14 @@ export default function AdoFAIExportDialogJa({
                 )}
               </>
             )}
-            <Field label="経路">
+            <Field label={t("export.path")}>
               <Select
                 value={options.visualPathMode}
                 options={[
-                  ["raw", "そのまま"],
-                  ["upward", "上向き"],
-                  ["upward avoid", "上向き＋重なり回避"],
-                  ["auto route twirl", "自動経路（Twirl）"],
+                  ["raw", t("export.path_raw")],
+                  ["upward", t("export.path_upward")],
+                  ["upward avoid", t("export.path_upward_avoid")],
+                  ["auto route twirl", t("export.path_auto_twirl")],
                 ]}
                 onChange={(v) =>
                   patch(
@@ -671,7 +677,7 @@ export default function AdoFAIExportDialogJa({
               />
             </Field>
             {options.visualPathMode !== "raw" && (
-              <Field label="経路角度">
+              <Field label={t("export.path_angle")}>
                 <Num
                   value={options.visualPathAngle}
                   min={0}
@@ -682,12 +688,12 @@ export default function AdoFAIExportDialogJa({
                 />
               </Field>
             )}
-            <Field label="位置イベント">
+            <Field label={t("export.position_events")}>
               <Select
                 value={options.visualPositionMode}
                 options={[
-                  ["off", "オフ"],
-                  ["note step", "ノートごと"],
+                  ["off", t("export.off")],
+                  ["note step", t("export.per_note")],
                 ]}
                 onChange={(v) =>
                   patch(
@@ -699,7 +705,7 @@ export default function AdoFAIExportDialogJa({
             </Field>
             {options.visualPositionMode !== "off" && (
               <>
-                <Field label="位置X">
+                <Field label={t("export.position_x")}>
                   <Num
                     value={options.visualPositionX}
                     min={-100000}
@@ -708,7 +714,7 @@ export default function AdoFAIExportDialogJa({
                     onChange={(v) => patch("visualPositionX", v)}
                   />
                 </Field>
-                <Field label="位置Y">
+                <Field label={t("export.position_y")}>
                   <Num
                     value={options.visualPositionY}
                     min={-100000}
@@ -719,14 +725,14 @@ export default function AdoFAIExportDialogJa({
                 </Field>
               </>
             )}
-            <Field label="端数タイル">
+            <Field label={t("export.final_tile")}>
               <Select
                 value={options.finalAngleMode}
                 options={[
-                  ["scaled", "比率維持"],
-                  ["cardinal", "基準角へ丸める"],
-                  ["horizontal", "水平"],
-                  ["custom", "指定角度"],
+                  ["scaled", t("export.final_scaled")],
+                  ["cardinal", t("export.final_cardinal")],
+                  ["horizontal", t("export.final_horizontal")],
+                  ["custom", t("export.final_custom")],
                 ]}
                 onChange={(v) =>
                   patch(
@@ -737,7 +743,7 @@ export default function AdoFAIExportDialogJa({
               />
             </Field>
             {options.finalAngleMode === "custom" && (
-              <Field label="指定角度">
+              <Field label={t("export.final_custom")}>
                 <Num
                   value={options.finalCustomAngle}
                   min={0.001}
@@ -749,7 +755,7 @@ export default function AdoFAIExportDialogJa({
               </Field>
             )}
             {options.finalAngleMode === "cardinal" && (
-              <Field label="丸め幅">
+              <Field label={t("export.step")}>
                 <Num
                   value={options.finalCardinalStep}
                   min={1}
@@ -762,32 +768,32 @@ export default function AdoFAIExportDialogJa({
             )}
             {isHarmony && (
               <>
-                <Field label="基準音推定">
+                <Field label={t("export.root_estimate")}>
                   <Select
                     value={options.harmonyRootMode}
                     options={[
-                      ["fixed root", "固定"],
-                      ["least squares Hz", "最小二乗（Hz）"],
-                      ["least squares cents", "最小二乗（セント）"],
-                      ["minimax cents", "最大誤差最小（セント）"],
+                      ["fixed root", t("export.fixed")],
+                      ["least squares Hz", t("export.root_ls_hz")],
+                      ["least squares cents", t("export.root_ls_cents")],
+                      ["minimax cents", t("export.root_minimax")],
                     ]}
                     onChange={(v) => patch("harmonyRootMode", v)}
                   />
                 </Field>
-                <Field label="見た目丸め">
+                <Field label={t("export.visual_round")}>
                   <Select
                     value={options.harmonyVisualMode}
                     options={[
-                      ["raw", "なし"],
+                      ["raw", t("export.none")],
                       ["round 45°", "45°"],
                       ["round 90°", "90°"],
-                      ["custom step", "指定幅"],
+                      ["custom step", t("export.custom_step")],
                     ]}
                     onChange={(v) => patch("harmonyVisualMode", v)}
                   />
                 </Field>
                 {options.harmonyVisualMode === "custom step" && (
-                  <Field label="丸め幅">
+                  <Field label={t("export.step")}>
                     <Num
                       value={options.harmonyVisualStep}
                       min={1}
@@ -800,12 +806,12 @@ export default function AdoFAIExportDialogJa({
                 )}
                 {options.harmonyTimingMode === "ratio-polyrhythm" && (
                   <>
-                    <Field label="周期角">
+                    <Field label={t("export.cycle_angle")}>
                       <Select
                         value={options.harmonyPolyCycleMode}
                         options={[
-                          ["auto", "自動（形を整える）"],
-                          ["fixed", "固定"],
+                          ["auto", t("export.cycle_angle_auto")],
+                          ["fixed", t("export.fixed")],
                         ]}
                         onChange={(v) =>
                           patch(
@@ -818,8 +824,8 @@ export default function AdoFAIExportDialogJa({
                     <Field
                       label={
                         options.harmonyPolyCycleMode === "auto"
-                          ? "周期の長さ"
-                          : "周期角度"
+                          ? t("export.cycle_length")
+                          : t("export.cycle_angle_value")
                       }
                     >
                       <Num
@@ -833,10 +839,10 @@ export default function AdoFAIExportDialogJa({
                     </Field>
                     {options.harmonyPolyCycleMode === "auto" && (
                       <div className="info-card">
-                        1周期の長さは「周期の長さ」とBPMで決まります。角度は1枚平均180°になるよう自動で決め、BPMも同じ比率で合わせるので、リズムは変わりません。
+                        {t("export.cycle_auto_info")}
                       </div>
                     )}
-                    <Field label="最大分母">
+                    <Field label={t("export.max_denominator")}>
                       <Num
                         value={options.harmonyPolyMaxDenominator}
                         min={1}
@@ -847,12 +853,12 @@ export default function AdoFAIExportDialogJa({
                         }
                       />
                     </Field>
-                    <Field label="オクターブ比">
+                    <Field label={t("export.octave_ratio")}>
                       <Select
                         value={options.harmonyPolyRatioOctaveMode}
                         options={[
-                          ["octave-folded", "オクターブ内へ折り返す"],
-                          ["absolute", "絶対比率"],
+                          ["octave-folded", t("export.octave_folded")],
+                          ["absolute", t("export.absolute")],
                         ]}
                         onChange={(v) =>
                           patch(
@@ -868,7 +874,7 @@ export default function AdoFAIExportDialogJa({
             )}
             {options.useProjectSong && !options.appendToChart && (
               <>
-                <Field label="音声コピー" group>
+                <Field label={t("export.copy_audio")} group>
                   <label className="inline-check">
                     <input
                       type="checkbox"
@@ -877,17 +883,17 @@ export default function AdoFAIExportDialogJa({
                         patch("copyProjectSong", e.target.checked)
                       }
                     />
-                    譜面の横へコピー
+                    {t("export.copy_beside")}
                   </label>
                 </Field>
                 {options.copyProjectSong && (
-                  <Field label="同名音源">
+                  <Field label={t("export.same_name")}>
                     <Select
                       value={options.songConflictAction}
                       options={[
-                        ["cancel", "中止して保護"],
-                        ["rename", "別名でコピー"],
-                        ["overwrite", "上書き"],
+                        ["cancel", t("export.conflict_cancel")],
+                        ["rename", t("export.conflict_rename")],
+                        ["overwrite", t("export.conflict_overwrite")],
                       ]}
                       onChange={(v) =>
                         patch(
@@ -905,7 +911,7 @@ export default function AdoFAIExportDialogJa({
                       checked={options.songOffsetAuto}
                       onChange={(e) => changeSongOffsetAuto(e.target.checked)}
                     />
-                    最初のノートから自動計算
+                    {t("export.offset_auto")}
                   </label>
                 </Field>
                 {!options.songOffsetAuto && (
@@ -932,24 +938,27 @@ export default function AdoFAIExportDialogJa({
       <div className="dialog-footer">
         {/* Side tools on the left; the decision (cancel / export) together on the right. */}
         <button className="quiet" onClick={() => onHelp("adofai_export")} disabled={working}>
-          ヘルプ
+          {t("export.help")}
         </button>
         <button className="quiet" onClick={() => void tilePreview()} disabled={working}>
-          タイルプレビュー
+          {t("export.tile_preview")}
         </button>
         <button className="quiet" onClick={() => void debugPreview()} disabled={working}>
-          デバッグ
+          {t("export.debug")}
+        </button>
+        <button className="quiet" onClick={() => void saveAsDefaults()} disabled={working} title={t("export.set_default_tip")}>
+          {t("export.set_default")}
         </button>
         <span />
         <button onClick={onClose} disabled={working}>
-          キャンセル
+          {t("dialog.cancel")}
         </button>
         <button
           className="primary"
           onClick={() => void exportLevel()}
           disabled={working}
         >
-          {working ? "処理中…" : options?.appendToChart ? "譜面を選んで追記" : "出力"}
+          {working ? t("dialog.processing") : options?.appendToChart ? t("export.append_button") : t("export.export_button")}
         </button>
       </div>
     </Modal>
@@ -990,7 +999,7 @@ function Modal({
       >
         <header className="modal-title">
           <strong id={titleId}>{title}</strong>
-          <button aria-label="閉じる" disabled={locked} onClick={close}>
+          <button aria-label={t("dialog.close")} disabled={locked} onClick={close}>
             ×
           </button>
         </header>
@@ -1125,18 +1134,18 @@ function TilePreview({ preview }: { preview: AdoFAITilePreview }) {
       viewBox: `${minX - pad} ${-maxY - pad} ${Math.max(1, maxX - minX + pad * 2)} ${Math.max(1, maxY - minY + pad * 2)}`,
     };
   }, [preview]);
-  if (!geo) return <div className="info-card">タイルがありません。</div>;
+  if (!geo) return <div className="info-card">{t("export.no_tiles")}</div>;
   return (
     <div className="tile-preview-wrap">
       <div className="preview-summary">
-        表示 {preview.shownTiles} / 全 {preview.totalTiles} タイル
-        {preview.limited ? "（一部のみ）" : ""}
+        {t("export.tiles_shown", { shown: preview.shownTiles, total: preview.totalTiles })}
+        {preview.limited ? t("export.partial") : ""}
       </div>
       <svg
         className="tile-preview-svg"
         viewBox={geo.viewBox}
         role="img"
-        aria-label={`ADOFAI経路プレビュー。${preview.shownTiles}タイルを表示`}
+        aria-label={t("export.path_preview", { count: preview.shownTiles })}
       >
         <path d={geo.d} className="tile-track-outline" />
         <path d={geo.d} className="tile-track" />
@@ -1150,9 +1159,9 @@ function DebugPreview({ preview }: { preview: AdoFAIDebugPreview }) {
   return (
     <div className="debug-preview">
       <div className="preview-summary">
-        表示 {rows.length} / 全 {preview.summary.rows} 行{" "}
-        {preview.summary.rows > rows.length || preview.limited ? "（一部のみ）" : ""} / 推定タイル{" "}
-        {preview.summary.estimatedTiles} / 警告 {preview.summary.warnings}
+        {t("export.rows_shown", { shown: rows.length, total: preview.summary.rows })}
+        {preview.summary.rows > rows.length || preview.limited ? t("export.partial") : ""}{" / "}
+        {t("export.estimated", { tiles: preview.summary.estimatedTiles, warnings: preview.summary.warnings })}
       </div>
       <div className="debug-table-wrap">
         <table>

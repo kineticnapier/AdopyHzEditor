@@ -11,7 +11,7 @@ const backendSource = readFileSync(new URL("../../web/adofai.py", import.meta.ur
 test("Harmony export shows the output BPM it actually uses", () => {
   // Harmony timing runs at angle_only_bpm; hiding the field left it stuck at
   // the project BPM x 10 default.
-  const start = dialogSource.indexOf('<Field label="出力BPM">');
+  const start = dialogSource.indexOf('<Field label={t("export.output_bpm")}>');
   assert.ok(start > 0, "output BPM field exists");
   const guard = dialogSource.slice(dialogSource.lastIndexOf("{", start), start);
   assert.match(guard, /isAngle \|\| isHarmony/);
@@ -26,7 +26,7 @@ test("Angle Compression no longer asks for a base BPM", () => {
 });
 
 test("ratio-polyrhythm picks its cycle length from pitch, beat or output BPM", () => {
-  assert.match(dialogSource, /\["pitch", "音の高さ（Hz）"\]/);
+  assert.match(dialogSource, /\["pitch", t\("export\.cycle_pitch"\)\]/);
   assert.match(dialogSource, /cycleTiming = options\.harmonyPolyCycleTiming \?\? "pitch"/);
   assert.match(dialogSource, /patch\("harmonyPolyBeatsPerCycle", v\)/);
   // The manual output BPM input only shows for manual timing in ratio mode.

@@ -18,6 +18,7 @@ import { commitNumericEdit } from "./numericInputModel";
 import { isDialogCompositionKey, isPlainDialogEscape } from "../dialogs/dialogFocus";
 import { selectionIdentityKey } from "./selectionIdentity";
 import { setLayerActive, summarizeLayers } from "../editor/layers";
+import { t, useLanguage } from "../i18n/index.ts";
 
 type Page = "inspector" | "settings";
 type Props = {
@@ -93,6 +94,7 @@ export default function SettingsPanel({
   kickPitchPick,
   onKickPitchPickingChange,
 }: Props) {
+  useLanguage();
   const [page, setPage] = useState<Page>("inspector");
   const one = selected.length === 1 ? notes[selected[0]] : null;
   const curveShape = parseCurveShape(settings.curveShape);
@@ -110,7 +112,7 @@ export default function SettingsPanel({
   const requested =
     settings.analysisSource === "vorbis_direct" ? "Vorbis Direct" : "CQT";
   const actual = !analysisAvailable
-    ? "未解析"
+    ? t("panel.not_analyzed")
     : actualAnalysisSource === "vorbis_direct"
       ? "Vorbis Direct"
       : "CQT";
@@ -124,24 +126,24 @@ export default function SettingsPanel({
   }, [selectionKey]);
 
   return (
-    <aside className="settings inspector-panel" aria-label={page === "inspector" ? "インスペクタ" : "設定"}>
-      <nav className="inspector-tabs" aria-label="右パネルの表示">
+    <aside className="settings inspector-panel" aria-label={page === "inspector" ? t("panel.inspector") : t("panel.settings")}>
+      <nav className="inspector-tabs" aria-label={t("panel.tabs")}>
         <button
           className={page === "inspector" ? "active" : ""}
           aria-pressed={page === "inspector"}
           onClick={() => setPage("inspector")}
         >
-          インスペクタ
+          {t("panel.inspector")}
         </button>
         <button
           className={page === "settings" ? "active" : ""}
           aria-pressed={page === "settings"}
           onClick={() => setPage("settings")}
         >
-          設定
+          {t("panel.settings")}
         </button>
       </nav>
-      {!api && <p className="inspector-help" role="status">バックエンド接続待ち…</p>}
+      {!api && <p className="inspector-help" role="status">{t("panel.waiting")}</p>}
       <div className="settings-body" inert={!api} aria-busy={!api}>
         {page === "inspector" && (
           <>
@@ -153,37 +155,35 @@ export default function SettingsPanel({
             />
             {selected.length === 0 && trackSelection.ids.length === 0 && (
               <div className="inspector-empty">
-                <strong>選択なし</strong>
-                <span>
-                  NoteまたはTrackを選択すると、ここに編集項目が表示されます。
-                </span>
+                <strong>{t("panel.no_selection")}</strong>
+                <span>{t("panel.no_selection_hint")}</span>
               </div>
             )}
             {trackSelection.ids.length > 0 && (
-              <section className="track-inspector" aria-label="選択したTrack">
+              <section className="track-inspector" aria-label={t("panel.selected_track")}>
                 <div className="inspector-summary">
                   <strong>Frequency Track</strong>
-                  <span>{trackSelection.ids.length}本選択</span>
+                  <span>{t("panel.tracks_selected", { count: trackSelection.ids.length })}</span>
                 </div>
                 <div className="property-readout">
                   <span>Track ID</span>
                   <b>
                     {trackSelection.ids.length === 1
                       ? `#${trackSelection.ids[0]}`
-                      : `${trackSelection.ids.length} tracks`}
+                      : t("panel.tracks_count", { count: trackSelection.ids.length })}
                   </b>
                 </div>
                 {trackSelection.range && (
                   <>
                     <div className="property-readout">
-                      <span>時間範囲</span>
+                      <span>{t("panel.time_range")}</span>
                       <b>
                         {trackSelection.range.startTime.toFixed(3)}–
                         {trackSelection.range.endTime.toFixed(3)} s
                       </b>
                     </div>
                     <div className="property-readout">
-                      <span>音高範囲</span>
+                      <span>{t("panel.pitch_range")}</span>
                       <b>
                         MIDI {trackSelection.range.minMidi.toFixed(1)}–
                         {trackSelection.range.maxMidi.toFixed(1)}
@@ -200,7 +200,7 @@ export default function SettingsPanel({
                           })
                         }
                       />
-                      選択矩形でNoteを切り取る
+                      {t("panel.cut_by_rect")}
                     </label>
                   </>
                 )}
@@ -210,28 +210,25 @@ export default function SettingsPanel({
                       <span>{hoveredTrack.noteName}</span>
                       <b>{hoveredTrack.frequency.toFixed(2)} Hz</b>
                       <small>
-                        {hoveredTrack.duration.toFixed(3)} s · 強度{" "}
+                        {hoveredTrack.duration.toFixed(3)} s · {t("panel.strength")}{" "}
                         {(hoveredTrack.magnitude * 100).toFixed(1)}%
                       </small>
                     </div>
                   )}
-                <p className="inspector-help">
-                  固定音程なら固定Note、音高変化を残すならCurve
-                  Noteへ変換します。
-                </p>
+                <p className="inspector-help">{t("panel.track_hint")}</p>
                 <div className="track-actions">
                   <button
                     className="primary-soft"
                     disabled={busy}
                     onClick={() => void onConvertTracks("fixed")}
                   >
-                    固定Noteを作成
+                    {t("panel.make_fixed")}
                   </button>
                   <button
                     disabled={busy}
                     onClick={() => void onConvertTracks("curve")}
                   >
-                    Curve Noteを作成
+                    {t("panel.make_curve")}
                   </button>
                 </div>
                 <button
@@ -245,7 +242,7 @@ export default function SettingsPanel({
                     })
                   }
                 >
-                  Track選択を解除
+                  {t("panel.clear_tracks")}
                 </button>
               </section>
             )}
@@ -261,13 +258,13 @@ export default function SettingsPanel({
                 <span>
                   {one
                     ? `${midiLabel(one.midi)} · ${midiToHz(one.midi).toFixed(2)} Hz`
-                    : `${selected.length}個選択中`}
+                    : t("panel.notes_selected", { count: selected.length })}
                 </span>
               </div>
             )}
             {one && api && (
               <Fragment key={`note-${selected[0]}`}>
-                <Row label="開始">
+                <Row label={t("panel.start")}>
                   <NumberInput
                     value={one.start}
                     min={0}
@@ -282,7 +279,7 @@ export default function SettingsPanel({
                     }
                   />
                 </Row>
-                <Row label="終了">
+                <Row label={t("panel.end")}>
                   <NumberInput
                     value={one.end}
                     min={0}
@@ -297,7 +294,7 @@ export default function SettingsPanel({
                     }
                   />
                 </Row>
-                <Row label="長さ">
+                <Row label={t("panel.length")}>
                   <NumberInput
                     value={Math.max(0, one.end - one.start)}
                     min={0.001}
@@ -333,20 +330,20 @@ export default function SettingsPanel({
                   </b>
                 </div>
                 {(one.kind ?? "note") === "curve" && (
-                  <Fold title="カーブ" open>
-                    <Row label="形状">
+                  <Fold title={t("panel.curve")} open>
+                    <Row label={t("panel.shape")}>
                       <Select
                         value={curveShape.mode}
                         options={[
-                          ["ease", "イーズ"],
-                          ["s_curve", "S字"],
-                          ["sine", "サイン"],
-                          ["expo_in", "指数イン"],
-                          ["expo_out", "指数アウト"],
-                          ["linear", "直線"],
-                          ["ease_in", "イーズイン"],
-                          ["ease_out", "イーズアウト"],
-                          ["custom", "カスタム Bézier"],
+                          ["ease", t("panel.shape_ease")],
+                          ["s_curve", t("panel.shape_s_curve")],
+                          ["sine", t("panel.shape_sine")],
+                          ["expo_in", t("panel.shape_expo_in")],
+                          ["expo_out", t("panel.shape_expo_out")],
+                          ["linear", t("panel.shape_linear")],
+                          ["ease_in", t("panel.shape_ease_in")],
+                          ["ease_out", t("panel.shape_ease_out")],
+                          ["custom", t("panel.shape_custom")],
                         ]}
                         onChange={setCurveShape}
                       />
@@ -381,16 +378,16 @@ export default function SettingsPanel({
                         mutate(() => api.apply_curve_shape(selected), selected)
                       }
                     >
-                      形状を適用
+                      {t("panel.apply_shape")}
                     </button>
-                    <Row label="補間">
+                    <Row label={t("panel.interpolation")}>
                       <Select
                         value={settings.curveInterpolation}
                         options={[
-                          ["bezier_pitch", "ベジェ（音高）"],
-                          ["linear_pitch", "直線（音高）"],
-                          ["linear_hz", "直線（Hz）"],
-                          ["bezier_hz", "ベジェ（Hz）"],
+                          ["bezier_pitch", t("panel.interp_bezier_pitch")],
+                          ["linear_pitch", t("panel.interp_linear_pitch")],
+                          ["linear_hz", t("panel.interp_linear_hz")],
+                          ["bezier_hz", t("panel.interp_bezier_hz")],
                         ]}
                         onChange={(v) =>
                           void onPatch({ curveInterpolation: v })
@@ -409,9 +406,9 @@ export default function SettingsPanel({
                         )
                       }
                     >
-                      補間を適用
+                      {t("panel.apply_interpolation")}
                     </button>
-                    <Row label="目標角度">
+                    <Row label={t("panel.target_angle")}>
                       <NumberInput
                         value={settings.targetAngle}
                         min={0.001}
@@ -433,14 +430,14 @@ export default function SettingsPanel({
                           )
                         }
                       >
-                        角度を適用
+                        {t("panel.apply_angle")}
                       </button>
                       <button
                         onClick={() =>
                           mutate(() => api.clear_target_angle(selected), selected)
                         }
                       >
-                        角度を解除
+                        {t("panel.clear_angle")}
                       </button>
                     </div>
                   </Fold>
@@ -476,14 +473,14 @@ export default function SettingsPanel({
 
         {page === "settings" && (
           <>
-            <Fold title="再生" open>
-              <Row label="楽曲音量">
+            <Fold title={t("panel.playback")} open>
+              <Row label={t("panel.song_volume")}>
                 <Range
                   value={settings.volume}
                   onChange={(v) => void onPatch({ volume: v })}
                 />
               </Row>
-              <Row label="再生速度">
+              <Row label={t("panel.speed")}>
                 <NumberInput
                   value={settings.speed}
                   min={0.1}
@@ -493,7 +490,7 @@ export default function SettingsPanel({
                   onChange={(v) => void onPatch({ speed: v })}
                 />
               </Row>
-              <Row label="ノート試聴">
+              <Row label={t("panel.note_preview")}>
                 <input
                   type="checkbox"
                   checked={settings.notePreview}
@@ -502,23 +499,23 @@ export default function SettingsPanel({
                   }
                 />
               </Row>
-              <Row label="試聴音量">
+              <Row label={t("panel.preview_volume")}>
                 <Range
                   value={settings.previewVolume}
                   disabled={!settings.notePreview}
                   onChange={(v) => void onPatch({ previewVolume: v })}
                 />
               </Row>
-              <Row label="試聴音色">
+              <Row label={t("panel.preview_sound")}>
                 <Select
                   value={settings.previewSound}
                   disabled={!settings.notePreview}
                   options={[
-                    ["sine", "サイン波"],
-                    ["piano", "ピアノ"],
-                    ["organ", "オルガン"],
-                    ["square", "矩形波"],
-                    ["triangle", "三角波"],
+                    ["sine", t("panel.sound_sine")],
+                    ["piano", t("panel.sound_piano")],
+                    ["organ", t("panel.sound_organ")],
+                    ["square", t("panel.sound_square")],
+                    ["triangle", t("panel.sound_triangle")],
                     ["adofai_kick", "ADOFAI Kick"],
                   ]}
                   onChange={(v) => void onPatch({ previewSound: v })}
@@ -526,8 +523,8 @@ export default function SettingsPanel({
               </Row>
             </Fold>
 
-            <Fold title="グリッド / スナップ">
-              <Row label="グリッド">
+            <Fold title={t("panel.grid_snap")}>
+              <Row label={t("panel.grid")}>
                 <input
                   type="checkbox"
                   checked={settings.gridEnabled}
@@ -536,7 +533,7 @@ export default function SettingsPanel({
                   }
                 />
               </Row>
-              <Row label="スナップ">
+              <Row label={t("panel.snap")}>
                 <input
                   type="checkbox"
                   checked={settings.snapEnabled}
@@ -554,7 +551,7 @@ export default function SettingsPanel({
                   onChange={(v) => void onPatch({ bpm: v })}
                 />
               </Row>
-              <Row label="分割数">
+              <Row label={t("panel.divisions")}>
                 <NumberInput
                   value={settings.snapDiv}
                   min={1}
@@ -564,7 +561,7 @@ export default function SettingsPanel({
                   onChange={(v) => void onPatch({ snapDiv: v })}
                 />
               </Row>
-              <Row label="オフセット">
+              <Row label={t("panel.offset")}>
                 <NumberInput
                   value={settings.offsetMs}
                   min={-600000}
@@ -574,7 +571,7 @@ export default function SettingsPanel({
                   onChange={(v) => void onPatch({ offsetMs: v })}
                 />
               </Row>
-              <Row label="メトロノーム">
+              <Row label={t("panel.metronome")}>
                 <input
                   type="checkbox"
                   checked={settings.metronomeEnabled}
@@ -583,7 +580,7 @@ export default function SettingsPanel({
                   }
                 />
               </Row>
-              <Row label="メトロ音量">
+              <Row label={t("panel.metronome_volume")}>
                 <Range
                   value={settings.metronomeVolume}
                   disabled={!settings.metronomeEnabled}
@@ -592,8 +589,8 @@ export default function SettingsPanel({
               </Row>
             </Fold>
 
-            <Fold title="表示">
-              <Row label="コントラスト">
+            <Fold title={t("panel.display")}>
+              <Row label={t("panel.contrast")}>
                 <Range
                   value={settings.contrast}
                   min={0}
@@ -601,7 +598,7 @@ export default function SettingsPanel({
                   onChange={(v) => void onPatch({ contrast: v })}
                 />
               </Row>
-              <Row label="ガンマ">
+              <Row label={t("panel.gamma")}>
                 <Range
                   value={settings.gamma}
                   min={5}
@@ -609,36 +606,36 @@ export default function SettingsPanel({
                   onChange={(v) => void onPatch({ gamma: v })}
                 />
               </Row>
-              <Row label="強調">
+              <Row label={t("panel.enhance")}>
                 <input
                   type="checkbox"
                   checked={settings.enhance}
                   onChange={(e) => void onPatch({ enhance: e.target.checked })}
                 />
               </Row>
-              <Row label="描画">
+              <Row label={t("panel.render")}>
                 <Select
                   value={settings.displayMode}
                   options={[
-                    ["wavetone", "標準"],
-                    ["ridge", "輪郭"],
-                    ["smooth", "滑らか"],
+                    ["wavetone", t("panel.standard")],
+                    ["ridge", t("panel.render_ridge")],
+                    ["smooth", t("panel.render_smooth")],
                   ]}
                   onChange={(v) => void onPatch({ displayMode: v })}
                 />
               </Row>
-              <Row label="倍音表示">
+              <Row label={t("panel.harmonics")}>
                 <Select
                   value={settings.harmonics}
                   options={[
-                    ["off", "オフ"],
-                    ["soft", "弱"],
-                    ["strong", "強"],
+                    ["off", t("panel.off")],
+                    ["soft", t("panel.soft")],
+                    ["strong", t("panel.strong")],
                   ]}
                   onChange={(v) => void onPatch({ harmonics: v })}
                 />
               </Row>
-              <Row label="配色">
+              <Row label={t("panel.colormap")}>
                 <Select
                   value={settings.colormap}
                   options={[
@@ -647,31 +644,31 @@ export default function SettingsPanel({
                     ["magma", "Magma"],
                     ["inferno", "Inferno"],
                     ["plasma", "Plasma"],
-                    ["gray", "グレー"],
+                    ["gray", t("panel.gray")],
                   ]}
                   onChange={(v) => void onPatch({ colormap: v })}
                 />
               </Row>
             </Fold>
 
-            <Fold title="解析" open>
+            <Fold title={t("panel.analysis")} open>
               <div
                 className={fallback ? "analysis-state warn" : "analysis-state"}
               >
-                <span>指定</span>
+                <span>{t("panel.requested")}</span>
                 <b>{requested}</b>
-                <span>実際</span>
+                <span>{t("panel.actual")}</span>
                 <b>
                   {actual}
-                  {fallback ? "（代替）" : ""}
+                  {fallback ? t("panel.fallback_mark") : ""}
                 </b>
               </div>
-              <Row label="解析元">
+              <Row label={t("panel.source")}>
                 <Select
                   value={settings.analysisSource}
                   options={[
                     ["cqt", "CQT"],
-                    ["vorbis_direct", "Vorbis Direct（実験）"],
+                    ["vorbis_direct", t("panel.vorbis_experimental")],
                   ]}
                   onChange={(v) =>
                     void onPatch({
@@ -682,27 +679,27 @@ export default function SettingsPanel({
               </Row>
               {settings.analysisSource === "cqt" && (
                 <>
-                  <Row label="解析品質">
+                  <Row label={t("panel.quality")}>
                     <Select
                       value={settings.analysisProfile}
                       options={[
-                        ["Fast", "高速"],
-                        ["Normal", "標準"],
-                        ["Precise", "高精度"],
-                        ["Full C0-C10", "全域 C0-C10"],
+                        ["Fast", t("panel.quality_fast")],
+                        ["Normal", t("panel.standard")],
+                        ["Precise", t("panel.quality_precise")],
+                        ["Full C0-C10", t("panel.quality_full")],
                       ]}
                       onChange={(v) => void onPatch({ analysisProfile: v })}
                     />
                   </Row>
-                  <Row label="CQT解像度">
+                  <Row label={t("panel.cqt_resolution")}>
                     <Select
                       value={settings.cqtResolution}
                       options={[
-                        ["profile default", "自動"],
-                        ["100 cents", "100セント"],
-                        ["50 cents", "50セント"],
-                        ["25 cents", "25セント"],
-                        ["12.5 cents", "12.5セント"],
+                        ["profile default", t("panel.auto")],
+                        ["100 cents", t("panel.cents", { n: 100 })],
+                        ["50 cents", t("panel.cents", { n: 50 })],
+                        ["25 cents", t("panel.cents", { n: 25 })],
+                        ["12.5 cents", t("panel.cents", { n: 12.5 })],
                       ]}
                       onChange={(v) => void onPatch({ cqtResolution: v })}
                     />
@@ -711,7 +708,7 @@ export default function SettingsPanel({
               )}
               {settings.analysisSource === "vorbis_direct" && (
                 <>
-                  <Row label="Direct表示">
+                  <Row label={t("panel.direct_view")}>
                     <Select
                       value={settings.spectrumLayerMode}
                       options={[
@@ -727,7 +724,7 @@ export default function SettingsPanel({
                       }
                     />
                   </Row>
-                  <Row label="しきい値">
+                  <Row label={t("panel.threshold")}>
                     <Select
                       value={String(settings.spectrumThreshold)}
                       options={[
@@ -743,7 +740,7 @@ export default function SettingsPanel({
                       }
                     />
                   </Row>
-                  <Row label="表示濃度">
+                  <Row label={t("panel.opacity")}>
                     <Range
                       value={settings.spectrumOpacity}
                       onChange={(v) => void onPatch({ spectrumOpacity: v })}
@@ -756,18 +753,15 @@ export default function SettingsPanel({
                 disabled={!api || !audioName || busy}
                 onClick={() => void onStateAction(() => api!.reanalyze_audio())}
               >
-                音声を解析
+                {t("panel.analyze_audio")}
               </button>
               {fallback && (
-                <div className="compact-warning">
-                  この音源では Vorbis Direct を使用できないため CQT
-                  にフォールバックしています。
-                </div>
+                <div className="compact-warning">{t("panel.fallback_warning")}</div>
               )}
             </Fold>
 
-            <Fold title="出力">
-              <Row label="オクターブ">
+            <Fold title={t("panel.output")}>
+              <Row label={t("panel.octave")}>
                 <NumberInput
                   value={settings.exportOctave}
                   min={-4}
@@ -776,7 +770,7 @@ export default function SettingsPanel({
                   onChange={(v) => void onPatch({ exportOctave: v })}
                 />
               </Row>
-              <Row label="半音">
+              <Row label={t("panel.semitone")}>
                 <NumberInput
                   value={settings.exportSemitone}
                   min={-12}
@@ -807,6 +801,7 @@ function BulkEditor({
   ): Promise<NoteMutationResult | undefined>;
   onStatus(text: string): void;
 }) {
+  useLanguage();
   const [timeDelta, setTimeDelta] = useState(0),
     [pitchDelta, setPitchDelta] = useState(0),
     [duration, setDuration] = useState(0.25);
@@ -821,8 +816,8 @@ function BulkEditor({
     }
   }
   return (
-    <Fold title="一括編集">
-      <Row label="時間移動">
+    <Fold title={t("panel.bulk_edit")}>
+      <Row label={t("panel.time_shift")}>
         <NumberInput
           value={timeDelta}
           min={-36000}
@@ -832,13 +827,13 @@ function BulkEditor({
           onChange={setTimeDelta}
         />
       </Row>
-      <Row label="音高移動">
+      <Row label={t("panel.pitch_shift")}>
         <NumberInput
           value={pitchDelta}
           min={-127}
           max={127}
           step="any"
-          suffix="半音"
+          suffix={t("panel.semitone_unit")}
           onChange={setPitchDelta}
         />
       </Row>
@@ -846,9 +841,9 @@ function BulkEditor({
         className="wide"
         onClick={() => void apply({ timeDelta, pitchDelta })}
       >
-        移動を適用
+        {t("panel.apply_move")}
       </button>
-      <Row label="長さ">
+      <Row label={t("panel.length")}>
         <NumberInput
           value={duration}
           min={0.001}
@@ -859,14 +854,14 @@ function BulkEditor({
         />
       </Row>
       <button className="wide" onClick={() => void apply({ duration })}>
-        長さを適用
+        {t("panel.apply_length")}
       </button>
       <div className="button-row">
         <button onClick={() => void apply({ align: "start" })}>
-          開始を揃える
+          {t("panel.align_start")}
         </button>
         <button onClick={() => void apply({ align: "end" })}>
-          終了を揃える
+          {t("panel.align_end")}
         </button>
       </div>
     </Fold>
@@ -884,16 +879,17 @@ function LayerList({
   disabled: boolean;
   onChange(muted: string[]): void;
 }) {
+  useLanguage();
   const layers = summarizeLayers(notes);
   // A single unnamed layer means the project has no layers to choose from.
   if (layers.length === 0 || (layers.length === 1 && layers[0].name === "")) return null;
   const activeCount = layers.filter((l) => !muted.includes(l.name)).length;
   return (
-    <section className="layer-list" aria-label="レイヤー">
+    <section className="layer-list" aria-label={t("panel.layers")}>
       <div className="inspector-summary">
-        <strong>レイヤー</strong>
+        <strong>{t("panel.layers")}</strong>
         <span>
-          {activeCount}/{layers.length} 使用中
+          {t("panel.layers_in_use", { active: activeCount, total: layers.length })}
         </span>
       </div>
       {layers.map((layer) => (
@@ -910,17 +906,17 @@ function LayerList({
       ))}
       <div className="layer-actions">
         <button type="button" disabled={disabled || muted.length === 0} onClick={() => onChange([])}>
-          すべて使う
+          {t("panel.use_all")}
         </button>
         <button
           type="button"
           disabled={disabled || activeCount === 0}
           onClick={() => onChange(layers.map((l) => l.name))}
         >
-          すべて外す
+          {t("panel.exclude_all")}
         </button>
       </div>
-      <p className="inspector-help">外したレイヤーは薄く表示され、再生と出力に入りません。</p>
+      <p className="inspector-help">{t("panel.layers_hint")}</p>
     </section>
   );
 }

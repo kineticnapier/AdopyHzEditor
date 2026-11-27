@@ -176,7 +176,7 @@ test("old-document mutation errors cannot overwrite the new document status", ()
   const end = app.indexOf("  function queueExternalMutation(", start);
   assert.ok(start >= 0 && end > start);
   const block = app.slice(start, end);
-  assert.match(block, /if \(generation === documentGeneration\.current\) setStatus\(`ノート編集に失敗しました: \$\{message\}`\)/);
+  assert.match(block, /if \(generation === documentGeneration\.current\) setStatus\(t\("status\.edit_failed", \{ error: message \}\)\)/);
 });
 
 test("current-document mutations still execute and apply", async () => {
@@ -383,8 +383,8 @@ test("wheel and fit view share the recoverable request path", () => {
   assert.match(app, /await enqueueRecoverableViewTask\(\s*viewQueue\.current,/);
   assert.match(app, /const pitchNormalized = clampPitchViewChange\(currentView, changes\)/);
   assert.match(app, /const normalized = clampTimeViewChange\(currentView, pitchNormalized, playback\.duration\)/);
-  assert.match(app, /applyViewAction\(\(\) => api\.set_view\(normalized\), "表示範囲の変更"\)/);
-  assert.match(app, /applyViewAction\(\(\) => api\.fit_view\(\), "全体表示"\)/);
+  assert.match(app, /applyViewAction\(\(\) => api\.set_view\(normalized\), t\("status\.view_change"\)\)/);
+  assert.match(app, /applyViewAction\(\(\) => api\.fit_view\(\), t\("status\.fit"\)\)/);
   assert.match(app, /viewQueue\.current\.enqueue\(\(\) => api\.get_state\(\)\)/);
   assert.match(app, /generation === documentGeneration\.current/);
 });
@@ -425,7 +425,7 @@ test("queued superseded follow request never writes the backend", async () => {
 
 test("playback follow shares manual view queue and error feedback", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(app, /void applyViewAction\(\(\) => api\.set_view\(\{ start: next \}\), "再生追従"\)/);
+  assert.match(app, /void applyViewAction\(\(\) => api\.set_view\(\{ start: next \}\), t\("status\.follow"\)\)/);
   assert.match(app, /stateTransitionPending\.current === 0/);
   assert.doesNotMatch(app, /void api\?\.set_view\(\{ start: next \}\)/);
 });
@@ -684,8 +684,8 @@ test("App routes both MIDI export modes through the document queue", () => {
 test("obsolete copy and playback failures do not overwrite the next document status", async () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   for (const [startMarker, endMarker, label] of [
-    ["  async function copySelected()", "  async function cutSelected()", "コピーに失敗しました"],
-    ["  async function queuedPlaybackAction(", "  async function seekTo(", "再生操作に失敗しました"],
+    ["  async function copySelected()", "  async function cutSelected()", 't("status.copy_failed"'],
+    ["  async function queuedPlaybackAction(", "  async function seekTo(", 't("status.playback_failed"'],
   ] as const) {
     const start = app.indexOf(startMarker);
     const end = app.indexOf(endMarker, start);

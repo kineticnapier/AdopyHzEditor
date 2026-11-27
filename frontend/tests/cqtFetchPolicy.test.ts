@@ -20,7 +20,9 @@ test("CQT requests are needed only when the CQT layer is visible", () => {
 
 test("initial connection, document replacement, and delayed CQT refresh share the visibility guard", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.equal((app.match(/shouldFetchCqtSpectrum\(/g) ?? []).length, 3);
+  assert.equal((app.match(/shouldFetchCqtSpectrum\(/g) ?? []).length, 4);
+  // A project reopened at startup by 環境設定 refreshes the same way.
+  assert.match(app, /startup\.reopened && shouldFetchCqtSpectrum\(startup\.state\.analysis\.available, startup\.state\.analysis\.source, startup\.state\.view\.mode\)\)\s*await refreshSpectrum\(backend, startup\.state\.view\)/);
   assert.match(app, /if\s*\(shouldFetchCqtSpectrum\(state\.analysis\.available, state\.analysis\.source, state\.view\.mode\)\)\s*await refreshSpectrum\(backend, state\.view\)/);
   assert.match(app, /if\s*\(shouldFetchCqtSpectrum\(state\.analysis\.available, state\.analysis\.source, state\.view\.mode\)\)\s*await refreshSpectrum\(api, state\.view\);\s*else setSpectrum\(null\)/);
   assert.match(app, /if\s*\(!api \|\| !shouldFetchCqtSpectrum\(analysisAvailable, analysisSource, view\.mode\)\)\s*\{\s*setSpectrum\(null\);\s*return;/);

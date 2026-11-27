@@ -11,3 +11,11 @@
 .export-dialog-body.with-preview>fieldset{grid-column:1;grid-row:1/span 2}
 .export-dialog-body.with-preview>.tile-preview-wrap,.export-dialog-body.with-preview>.debug-preview{grid-column:2;grid-row:1;position:sticky;top:0}
 .export-dialog-body.with-preview>.dialog-error{grid-column:1/-1}
+/* 環境設定: grouped sections in one scrolling column. */
+.preferences-body{display:grid;gap:14px;max-height:min(70vh,640px);overflow:auto}
+.preferences-section{display:grid;gap:8px;padding-bottom:12px;border-bottom:1px solid var(--seam)}
+.preferences-section:last-of-type{border-bottom:0;padding-bottom:0}
+.preferences-section h3{margin:0;font-size:var(--text-lg);font-weight:600;color:#e6ebf0}
+.preferences-actions{display:flex;gap:8px;justify-content:flex-end}
+.preferences-check{display:flex;align-items:center;gap:8px;min-height:28px}
+.dialog-note{margin:0;color:#929ca7;font-size:var(--text-sm);line-height:1.5}

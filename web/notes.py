@@ -5,6 +5,7 @@ import math
 from typing import Any, Iterable
 
 from core.note_model import Note
+from i18n import tr
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -225,27 +226,27 @@ class NoteMixin:
             self.notes.append(note)
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = "カーブを追加しました" if note.is_curve else "ノートを追加しました"
+            self._status = tr("msg.curve_added") if note.is_curve else tr("msg.note_added")
             return {"index": len(self.notes) - 1, "notes": self._note_dicts(), "status": self._status}
 
     def delete_notes(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
             valid = sorted(self._valid_indices(indices), reverse=True)
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_selection")}
             self._push_undo()
             for i in valid:
                 self.notes.pop(i)
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(valid)}個のノートを削除しました"
+            self._status = tr("msg.deleted", count=len(valid))
             return {"notes": self._note_dicts(), "status": self._status}
 
     def move_notes(self, indices: list[int], dx: float, dy: float) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_selection")}
             original = [self.notes[i].normalized() for i in valid]
             min_start = min(n.start for n in original)
             max_end = max(n.end for n in original)
@@ -259,7 +260,7 @@ class NoteMixin:
                 octaves = float(dy) / 12.0
                 if octaves and abs(octaves - round(octaves)) < 1e-9 and abs(clamped - float(dy)) > 1e-9:
                     # A cut-short octave move would change the note names.
-                    self._status = "MIDIの音域（0〜127）を超えるため、オクターブ移動できません"
+                    self._status = tr("msg.octave_out_of_range")
                     return {"notes": self._note_dicts(), "changed": False, "status": self._status}
                 dy = clamped
 
@@ -271,7 +272,7 @@ class NoteMixin:
 
             updated = [n.shifted(dx=float(dx), dy=float(dy)).normalized() for n in original]
             if updated == original:
-                self._status = "ノートの位置は変更されませんでした"
+                self._status = tr("msg.position_unchanged")
                 return {
                     "notes": self._note_dicts(),
                     "changed": False,
@@ -283,7 +284,7 @@ class NoteMixin:
                 self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(valid)}個のノートを移動しました"
+            self._status = tr("msg.moved", count=len(valid))
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def resize_notes(self, indices: list[int], edge: str, delta_seconds: float) -> dict[str, Any]:
@@ -295,7 +296,7 @@ class NoteMixin:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_selection")}
             edge_key = str(edge).lower()
             if edge_key not in {"start", "end"}:
                 raise ValueError("edge must be start or end")
@@ -316,7 +317,7 @@ class NoteMixin:
             # A resize clamped at an edge (or snapped back to its original
             # position) must not create an empty Undo step or clear Redo.
             if updated == original:
-                self._status = "ノートの長さは変更されませんでした"
+                self._status = tr("msg.length_unchanged")
                 return {
                     "notes": self._note_dicts(),
                     "changed": False,
@@ -327,8 +328,8 @@ class NoteMixin:
                 self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
-            side = "左端" if edge_key == "start" else "右端"
-            self._status = f"{len(valid)}個のノートの{side}を変更しました"
+            side = tr("msg.edge_left") if edge_key == "start" else tr("msg.edge_right")
+            self._status = tr("msg.edge_changed", count=len(valid), side=side)
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def set_note_properties(self, index: int, changes: dict[str, Any]) -> dict[str, Any]:
@@ -336,7 +337,7 @@ class NoteMixin:
         with self._lock:
             valid = self._valid_indices([index])
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_selection")}
             i = valid[0]
             if not isinstance(changes, dict):
                 raise TypeError("changes must be an object")
@@ -363,20 +364,20 @@ class NoteMixin:
                 u = updated.normalized()
                 updated = Note(u.start, u.end, u.midi, v, u.kind, u.midi_end, u.ctrl1_midi, u.ctrl2_midi, u.interpolation, u.target_angle, u.layer).normalized()
             if updated == n:
-                self._status = "ノートのプロパティは変更されませんでした"
+                self._status = tr("msg.props_unchanged")
                 return {"notes": self._note_dicts(), "index": i, "changed": False, "dirty": self._dirty, "status": self._status}
             self._push_undo()
             self.notes[i] = updated
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = "ノートのプロパティを更新しました"
+            self._status = tr("msg.props_updated")
             return {"notes": self._note_dicts(), "index": i, "changed": True, "dirty": self._dirty, "status": self._status}
 
     def duplicate_notes(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": tr("msg.no_selection")}
             source = [self.notes[i].normalized() for i in valid]
             first = min(n.start for n in source)
             last = max(n.end for n in source)
@@ -384,7 +385,7 @@ class NoteMixin:
             if last + offset > self.duration:
                 offset = max(0.0, self.duration - last)
             if offset <= 1e-9:
-                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "右側に複製する空きがありません"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": tr("msg.no_room_duplicate")}
             # Prepare every copy before recording Undo or modifying notes.
             # A failed conversion must not leave a partial duplicate.
             copies = [n.with_time_offset(offset).normalized() for n in source]
@@ -394,14 +395,14 @@ class NoteMixin:
             new_indices = list(range(first_index, first_index + len(copies)))
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(new_indices)}個のノートを複製しました"
+            self._status = tr("msg.duplicated", count=len(new_indices))
             return {"notes": self._note_dicts(), "indices": new_indices, "status": self._status}
 
     def quantize_notes(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_selection")}
             step = 60.0 / max(1e-6, float(self.settings["bpm"])) / max(1, int(self.settings["snapDiv"]))
             offset = float(self.settings["offsetMs"]) / 1000.0
 
@@ -420,7 +421,7 @@ class NoteMixin:
                 updated.append(self._with_times(n, a, b))
             original = [self.notes[i].normalized() for i in valid]
             if updated == original:
-                self._status = "ノートは既にグリッドに揃っています"
+                self._status = tr("msg.already_on_grid")
                 return {
                     "notes": self._note_dicts(),
                     "changed": False,
@@ -432,87 +433,87 @@ class NoteMixin:
                 self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(valid)}個のノートをクオンタイズしました"
+            self._status = tr("msg.quantized", count=len(valid))
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def apply_interpolation(self, indices: list[int], interpolation: str | None = None) -> dict[str, Any]:
         with self._lock:
             valid = [i for i in self._valid_indices(indices) if self.notes[i].is_curve]
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "カーブノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_curve_selection")}
             mode = self._normalize_setting("curveInterpolation", interpolation) if interpolation is not None else str(self.settings["curveInterpolation"])
             updated = [(i, self.notes[i].with_interpolation(mode)) for i in valid]
             if all(self.notes[i] == note for i, note in updated):
-                self._status = "カーブの補間は変更されませんでした"
+                self._status = tr("msg.interp_unchanged")
                 return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
             self._push_undo()
             for i, note in updated:
                 self.notes[i] = note
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(valid)}個のカーブに補間を適用しました"
+            self._status = tr("msg.interp_applied", count=len(valid))
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def apply_target_angle(self, indices: list[int], target_angle: float | None = None) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_selection")}
             angle = float(self._normalize_setting("targetAngle", target_angle)) if target_angle is not None else float(self.settings["targetAngle"])
             updated = [(i, self.notes[i].with_target_angle(angle)) for i in valid]
             if all(self.notes[i] == note for i, note in updated):
-                self._status = "ノートの角度指定は変更されませんでした"
+                self._status = tr("msg.angle_unchanged")
                 return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
             self._push_undo()
             for i, note in updated:
                 self.notes[i] = note
             self._dirty = True
-            self._status = f"{len(valid)}個のノートに{angle:.6f}°を適用しました"
+            self._status = tr("msg.angle_applied", count=len(valid), angle=f"{angle:.6f}")
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def clear_target_angle(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"notes": self._note_dicts(), "changed": False, "status": "ノートが選択されていません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.no_selection")}
             updated = [(i, self.notes[i].with_target_angle(None)) for i in valid]
             if all(self.notes[i] == note for i, note in updated):
-                self._status = "ノートの角度指定は既に解除されています"
+                self._status = tr("msg.angle_already_clear")
                 return {"notes": self._note_dicts(), "changed": False, "dirty": self._dirty, "status": self._status}
             self._push_undo()
             for i, note in updated:
                 self.notes[i] = note
             self._dirty = True
-            self._status = f"{len(valid)}個のノートから角度指定を解除しました"
+            self._status = tr("msg.angle_cleared", count=len(valid))
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def undo(self) -> dict[str, Any]:
         with self._lock:
             if not self._undo_stack:
-                return {"notes": self._note_dicts(), "changed": False, "status": "元に戻せる操作がありません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.nothing_to_undo")}
             self._redo_stack.append(self._snapshot())
             self._restore_snapshot(self._undo_stack.pop())
-            self._status = "元に戻しました"
+            self._status = tr("msg.undone")
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def redo(self) -> dict[str, Any]:
         with self._lock:
             if not self._redo_stack:
-                return {"notes": self._note_dicts(), "changed": False, "status": "やり直せる操作がありません"}
+                return {"notes": self._note_dicts(), "changed": False, "status": tr("msg.nothing_to_redo")}
             self._undo_stack.append(self._snapshot())
             self._restore_snapshot(self._redo_stack.pop())
-            self._status = "やり直しました"
+            self._status = tr("msg.redone")
             return {"notes": self._note_dicts(), "changed": True, "dirty": self._dirty, "status": self._status}
 
     def copy_notes(self, indices: list[int]) -> dict[str, Any]:
         with self._lock:
             valid = self._valid_indices(indices)
             if not valid:
-                return {"status": "ノートが選択されていません"}
+                return {"status": tr("msg.no_selection")}
             selected = [self.notes[i].normalized() for i in valid]
             first = min(n.start for n in selected)
             self._clipboard = [n.with_time_offset(-first) for n in selected]
-            self._status = f"{len(selected)}個のノートをコピーしました"
+            self._status = tr("msg.copied", count=len(selected))
             return {"status": self._status}
 
     def cut_notes(self, indices: list[int]) -> dict[str, Any]:
@@ -526,7 +527,7 @@ class NoteMixin:
     def paste_notes(self, at_time: float) -> dict[str, Any]:
         with self._lock:
             if not self._clipboard:
-                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": "クリップボードは空です"}
+                return {"notes": self._note_dicts(), "indices": [], "changed": False, "status": tr("msg.clipboard_empty")}
             clipboard_end = max(item.normalized().end for item in self._clipboard)
             if clipboard_end > self.duration:
                 # A clipboard from a longer document cannot fit in this one.
@@ -558,5 +559,5 @@ class NoteMixin:
             self.duration = max(self.duration, base + clipboard_end)
             self._dirty = True
             self._sync_notes_to_player()
-            self._status = f"{len(new_indices)}個のノートを貼り付けました"
+            self._status = tr("msg.pasted", count=len(new_indices))
             return {"notes": self._note_dicts(), "indices": new_indices, "changed": True, "status": self._status}

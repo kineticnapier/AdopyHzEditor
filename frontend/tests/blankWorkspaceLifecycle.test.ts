@@ -9,7 +9,7 @@ const source = readFileSync(
 );
 const blank = source.slice(
   source.indexOf("export function BlankWorkspaceDialog("),
-  source.indexOf("export function HarmonicDiagramDialog("),
+  source.indexOf("export function MidiTrackDialog("),
 );
 
 test("blank workspace defaults belong to the exact API and retry", () => {
@@ -74,6 +74,6 @@ test("blank workspace prevents silent normalization of invalid MIDI bounds", () 
     assert.equal(blankWorkspaceMidiRangeIsValid(invalid), false);
   }
   assert.match(blank, /const midiRangeValid = blankWorkspaceMidiRangeIsValid\(value\)/);
-  assert.match(blank, /role="alert">\s*最低MIDIは最高MIDIより小さくしてください。/);
+  assert.match(blank, /role="alert">\s*\{t\("blank\.midi_order"\)\}/);
   assert.match(blank, /disabled=\{!value \|\| !defaultsCurrent \|\| applying \|\| !midiRangeValid\}/);
 });

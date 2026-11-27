@@ -43,9 +43,9 @@ test("timeline uses integer normalization only for step-one pitch fields", () =>
   const source = readFileSync(new URL("../src/editor/Timeline.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const component = source.slice(source.indexOf("function CommitNumber("));
   assert.match(component, /commitNumericEdit\(text, value, min, max, cancelledRef\.current, step === 1, editedRef\.current\)/);
-  assert.match(source, /label="時間の表示幅"[^\n]*step="any"/);
-  assert.match(source, /label="下端音高"[^\n]*step=\{1\}/);
-  assert.match(source, /label="上端音高"[^\n]*step=\{1\}/);
+  assert.match(source, /label=\{t\("timeline\.window_label"\)\}[^\n]*step="any"/);
+  assert.match(source, /label=\{t\("timeline\.pitch_bottom"\)\}[^\n]*step=\{1\}/);
+  assert.match(source, /label=\{t\("timeline\.pitch_top"\)\}[^\n]*step=\{1\}/);
 });
 
 test("an untouched timeline input keeps the latest external viewport value", () => {
@@ -87,7 +87,7 @@ test("timeline accepts fractional zoom widths returned by the view API", () => {
   // the old HTML step grid: min 0.2 + n * 0.1.
   assert.equal((1.25 - 0.2) / 0.1, 10.5);
   assert.equal(commitNumericEdit("1.25", 1, 0.2, 60, false, false), 1.25);
-  assert.match(source, /label="時間の表示幅"[^\n]*step="any"/);
+  assert.match(source, /label=\{t\("timeline\.window_label"\)\}[^\n]*step="any"/);
   assert.match(source, /step:number \| "any";onCommit\(value:number\):void/);
 });
 

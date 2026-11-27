@@ -9,7 +9,7 @@ const help = readFileSync(new URL("../src/dialogs/HelpDialog.tsx", import.meta.u
 test("help dialog retains a two-column navigation layout on wide windows", () => {
   assert.match(help, /className="modal-window help-window"/);
   assert.match(help, /className="help-layout"/);
-  assert.match(help, /<nav aria-label="ヘルプ項目">/);
+  assert.match(help, /<nav aria-label=\{t\("help\.sections"\)\}>/);
   assert.match(help, /<article\b/);
   assert.match(css, /\.help-layout\{[^}]*grid-template-columns:190px minmax\(0,1fr\)/);
 });
@@ -32,8 +32,8 @@ test("changing help sections resets the article scroll position", () => {
 });
 
 test("help loading and failure states are announced to assistive technology", () => {
-  assert.match(help, /<div className="dialog-loading" role="status">ヘルプを読み込んでいます…<\/div>/);
-  assert.match(help, /<div className="dialog-error" role="alert">ヘルプの読込に失敗しました:/);
+  assert.match(help, /<div className="dialog-loading" role="status">\{t\("help\.loading"\)\}<\/div>/);
+  assert.match(help, /<div className="dialog-error" role="alert">\{t\("help\.load_failed"/);
 });
 
 test("help content and loading errors cannot survive API replacement or retry", () => {

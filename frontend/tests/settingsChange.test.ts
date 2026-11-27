@@ -80,5 +80,5 @@ test("settings stay unsent until the backend has loaded its initial state", () =
 test("settings controls do not accept input before the backend API is ready", () => {
   const source = readFileSync(new URL("../src/settings/SettingsPanel.tsx", import.meta.url), "utf8");
   assert.match(source, /<div className="settings-body" inert=\{!api\} aria-busy=\{!api\}>/);
-  assert.match(source, /!api && <p className="inspector-help" role="status">バックエンド接続待ち…<\/p>/);
+  assert.match(source, /!api && <p className="inspector-help" role="status">\{t\("panel\.waiting"\)\}<\/p>/);
 });
